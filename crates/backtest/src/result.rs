@@ -115,6 +115,14 @@ pub struct BacktestResult {
 
 /// Versioned deterministic projection of observable backtest state.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.backtest", skip_from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.backtest")
+)]
 pub struct CanonicalBacktestResult {
     document: Value,
 }

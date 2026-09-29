@@ -116,41 +116,51 @@ workstream.
 **What already exists.** `CanonicalBacktestResult` in `crates/backtest/src/result.rs` produces a
 versioned canonical document (`nautilus-backtest-result/v1`) with identity normalization,
 `digest()`, `to_bytes()` and `from_slice()`, and `first_divergence()`.
-`python/tests/acceptance/test_backtest.py` asserts golden values by hand. `BacktestResult` bindings
-live in `crates/backtest/src/python/result.rs` and expose statistics but not canonical bytes or a
-digest.
+`python/tests/acceptance/test_backtest.py` asserts golden values by hand. `BacktestEngine` exposes
+the projection in Rust as `get_canonical_result()`, but the Python `BacktestResult` bindings in
+`crates/backtest/src/python/result.rs` expose statistics without canonical bytes or a digest.
 
 **Steps.**
 
-1. Expose the canonical artifact to Python: add `canonical_bytes()` and `digest()` to the
-   `BacktestResult` bindings in `crates/backtest/src/python/result.rs`, delegating to the existing
-   `CanonicalBacktestResult` writer and classifying the exact-encoding failure path under
-   `# Errors`.
+1. Expose the canonical artifact to Python: add `get_canonical_result()` to the `BacktestEngine`
+   bindings and a `CanonicalBacktestResult` class with `to_bytes()`, `digest()`, and
+   `first_divergence(expected)` in `crates/backtest/src/python/result.rs`, delegating to the existing
+   writer and classifying the decoding and exact-encoding failure paths under `# Errors`. The
+   projection is fallible while `get_result()` is infallible, so the canonical artifact is a typed
+   object rather than a field of `BacktestResult`; `first_divergence` gives the digest layer a named
+   divergence path.
 2. Add a scenario protocol under `python/tests/regression/` with three declared layers (D18):
-   - Level 1, the expected canonical digest.
+   - Level 1, the expected canonical digest, with the recorded canonical document kept for
+     divergence diagnostics.
    - Level 2, expected statistics such as orders, fills, positions, PnL, fees, slippage, maximum
-     drawdown, and final equity.
-   - Level 3, semantic checkpoints identified by event kind, instrument, and occurrence ordinal, for
-     example the first `ORDER_FILLED`, `POSITION_OPENED`, and `POSITION_CLOSED` for an instrument.
-     Checkpoints are semantic rather than positional so they survive unrelated event insertions.
-3. Add a registry module that enumerates scenarios, so discovery is an explicit list.
-4. Add a reset fixture that returns engines, caches, loggers, and clock state to a clean baseline
-   between scenarios, matching Lean's hard reset
+     drawdown, and final equity, addressed as canonical document paths.
+   - Level 3, semantic checkpoints addressed by record kind (`orders`, `fills`, `positions`,
+     `position_snapshots`), instrument, and occurrence ordinal, for example the first `ORDER_FILLED`,
+     `POSITION_OPENED`, and `POSITION_CLOSED` for an instrument. Checkpoints are semantic rather than
+     positional so they survive unrelated record insertions.
+3. Add a registry module (`python/tests/regression/registry.py`) that enumerates scenarios, so
+   discovery is an explicit list.
+4. Add a reset fixture that returns process state to a clean baseline between scenarios: scenarios
+   create and dispose their own engine, cache, and clock, the fixture collects unreachable cycles,
+   and the suite-wide bypassed logger baseline applies, matching Lean's hard reset
    ([AlgorithmRunner.cs](https://github.com/QuantConnect/Lean/blob/master/Tests/AlgorithmRunner.cs)).
 5. Add regeneration through a pytest option or environment variable that rewrites committed
-   expectations, all three layers in one command, producing a reviewable diff.
+   expectations, all three layers in one command, producing a reviewable diff
+   (`--regenerate-regression`, or `NAUTILUS_REGRESSION_REGENERATE=1`).
 6. On mismatch, report the failing layer with its expected and actual values, then
    `first_divergence().path`, so failures name the value and the divergence rather than only a digest
    mismatch.
 7. Define the scenario-per-feature requirement for later workstreams and record it in
-   `docs/developer_guide/testing.md`; add `pytest-regression` to the Makefile and to `pre-flight`.
+   `docs/developer_guide/testing.md`; add `pytest-regression` to the Makefile and to `pre-flight`,
+   and exclude `tests/regression` from the default `pytest` target so its test set is unchanged.
 
 **Boundary.** Research.
 
-**Acceptance.** The suite passes on a clean checkout; perturbing a fill model fails at the digest
-layer with a named divergence path; a scenario whose later checkpoint changes fails at the checkpoint
-layer with expected and actual values; regeneration rewrites all three layers and a subsequent run
-passes without regenerating; default `make pytest` behaviour is unchanged.
+**Acceptance.** The suite passes on a clean checkout without regeneration; perturbing a fill model
+fails at the digest layer with a named divergence path; a scenario whose later checkpoint changes
+fails at the checkpoint layer with expected and actual values; regeneration rewrites all three
+layers and a subsequent run passes without regenerating; the default `make pytest` target runs the
+same test set as before, and `pre-flight` runs the regression scenarios.
 
 **Risks.** Digest churn on intentional simulation changes, and three layers to update on intentional
 change. Mitigation: regeneration covers all layers in one command and is explicit and reviewed, and

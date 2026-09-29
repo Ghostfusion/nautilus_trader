@@ -17,9 +17,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use nautilus_core::UUID4;
+use nautilus_core::{UUID4, python::to_pyruntime_err};
+use pyo3::{Py, PyResult, Python, pybacked::PyBackedBytes, types::PyBytes};
 
-use crate::result::BacktestResult;
+use crate::result::{BacktestResult, CanonicalBacktestResult};
 
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 #[pyo3::pymethods]
@@ -167,5 +168,51 @@ impl BacktestResult {
             self.total_orders,
             self.total_positions,
         )
+    }
+}
+
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+#[pyo3::pymethods]
+impl CanonicalBacktestResult {
+    /// Returns the canonical compact UTF-8 JSON bytes without trailing data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the in-memory document cannot be serialized.
+    #[pyo3(name = "to_bytes")]
+    fn py_to_bytes(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
+        let bytes = self.to_bytes().map_err(to_pyruntime_err)?;
+        Ok(PyBytes::new(py, &bytes).into())
+    }
+
+    /// Returns `blake3:` followed by the 32-byte BLAKE3 digest as 64 lowercase hex digits.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the in-memory document cannot be serialized.
+    #[pyo3(name = "digest")]
+    fn py_digest(&self) -> PyResult<String> {
+        self.digest().map_err(to_pyruntime_err)
+    }
+
+    /// Returns the first field-level or record-level difference.
+    #[pyo3(name = "first_divergence")]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "PyBackedBytes is required for generated Python bytes stubs"
+    )]
+    #[expect(clippy::type_complexity)]
+    fn py_first_divergence(
+        &self,
+        expected: PyBackedBytes,
+    ) -> PyResult<Option<(String, Option<String>, Option<String>)>> {
+        let expected = Self::from_slice(expected.as_ref()).map_err(to_pyruntime_err)?;
+        Ok(expected.first_divergence(self).map(|divergence| {
+            (
+                divergence.path,
+                divergence.expected.map(|value| value.to_string()),
+                divergence.actual.map(|value| value.to_string()),
+            )
+        }))
     }
 }

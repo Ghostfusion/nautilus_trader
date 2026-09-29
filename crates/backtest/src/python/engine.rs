@@ -71,7 +71,7 @@ use super::{modules::pyobject_to_simulation_module_handle, node::create_importab
 use crate::{
     config::{BacktestEngineConfig, SimulatedVenueConfig},
     engine::BacktestEngine,
-    result::BacktestResult,
+    result::{BacktestResult, CanonicalBacktestResult},
 };
 
 /// PyO3 wrapper around [`BacktestEngine`].
@@ -518,6 +518,16 @@ impl PyBacktestEngine {
     #[pyo3(name = "get_result")]
     fn py_get_result(&self) -> BacktestResult {
         self.0.get_result()
+    }
+
+    /// Returns the versioned deterministic projection of observable state from the last run.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if observable state cannot be projected into the canonical schema.
+    #[pyo3(name = "get_canonical_result")]
+    fn py_get_canonical_result(&self) -> PyResult<CanonicalBacktestResult> {
+        self.0.get_canonical_result().map_err(to_pyruntime_err)
     }
 
     /// Clears all data from the engine.

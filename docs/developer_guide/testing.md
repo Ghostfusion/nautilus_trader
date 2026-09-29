@@ -9,6 +9,7 @@ The suite covers these categories:
 - Unit tests
 - Integration tests
 - Acceptance tests
+- Regression scenarios
 - Performance tests
 - Property-based tests
 - Fuzzing
@@ -156,6 +157,37 @@ make pytest
 
 The Makefile target isolates certain test modules in separate pytest processes to avoid
 global Rust state conflicts. Use `make pytest` rather than invoking pytest directly.
+
+#### Regression scenarios
+
+Declared regression scenarios live under `python/tests/regression/` and are the gate for
+deterministic backtest behaviour. Each scenario declares three layers, and all three are committed
+under `python/tests/regression/expected/`:
+
+| Layer       | What it pins                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| Digest      | The canonical digest of the projected backtest state, compared exactly.                     |
+| Statistics  | Declared statistics such as outcomes, counts, PnL, and equity, addressed as document paths. |
+| Checkpoints | Semantic checkpoints addressed by record kind, instrument, and occurrence ordinal.          |
+
+Checkpoints are semantic rather than positional, so they survive unrelated record insertions. A
+digest mismatch reports the first divergence of the canonical document, which names the differing
+value rather than only a digest.
+
+Run the scenarios, and regenerate their expectations, with:
+
+```bash
+make pytest-regression
+make pytest-regression NAUTILUS_REGRESSION_REGENERATE=1
+```
+
+Regeneration rewrites all three layers in one command and produces a reviewable diff. Review that
+diff: an expectation update is a behavioural change, not a formality.
+
+Add a scenario for every change that alters deterministic backtest behaviour, and register it in
+`python/tests/regression/registry.py`, which is an explicit list rather than reflection. A scenario
+builds its own engine from committed instruments and data, so it needs no adapter credentials and
+runs in a clean baseline.
 
 Local `make pytest` runs use the debug extension from `make build-debug`.
 CI tests a release wheel.

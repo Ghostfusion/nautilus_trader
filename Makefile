@@ -506,6 +506,7 @@ pre-flight-steps:
 		&& $(MAKE) --no-print-directory build-debug \
 		&& $(MAKE) --no-print-directory check-generated-drift \
 		&& $(MAKE) --no-print-directory pytest \
+		&& $(MAKE) --no-print-directory pytest-regression \
 		&& $(MAKE) --no-print-directory pytest-doctest ty \
 		&& $(MAKE) --no-print-directory pytest-isolated \
 		&& $(MAKE) --no-print-directory security-audit \
@@ -1392,8 +1393,13 @@ pytest-collect-fast:  #-- Collect Python tests against the existing extension
 .PHONY: pytest
 pytest: build-debug  #-- Run Python tests
 	$(info $(M) Running Python tests...)
-	$Q cd python && $(PYTHON_TEST_ENV) VIRTUAL_ENV= uv run --no-sync pytest -qq -rfE tests/ --ignore=tests/unit/test_live_node.py
+	$Q cd python && $(PYTHON_TEST_ENV) VIRTUAL_ENV= uv run --no-sync pytest -qq -rfE tests/ --ignore=tests/regression --ignore=tests/unit/test_live_node.py
 	$Q cd python && $(PYTHON_TEST_ENV) VIRTUAL_ENV= uv run --no-sync pytest -qq -rfE tests/unit/test_live_node.py
+
+.PHONY: pytest-regression
+pytest-regression: build-debug  #-- Run the declared regression scenarios (set NAUTILUS_REGRESSION_REGENERATE=1 to rewrite expectations)
+	$(info $(M) Running declared regression scenarios...)
+	$Q cd python && $(PYTHON_TEST_ENV) NAUTILUS_REGRESSION_REGENERATE="$(NAUTILUS_REGRESSION_REGENERATE)" VIRTUAL_ENV= uv run --no-sync pytest -qq -rfE tests/regression
 
 .PHONY: pytest-isolated
 pytest-isolated:  #-- Check the existing Python build outside the source checkout
