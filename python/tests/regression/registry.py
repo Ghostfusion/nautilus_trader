@@ -22,6 +22,7 @@ expectations are generated with `--regenerate-regression` and reviewed like any 
 from __future__ import annotations
 
 from tests.regression.cases.btcusdt_ema_cross import SCENARIO as BTCUSDT_EMA_CROSS
+from tests.regression.cases.equity_session_events import SCENARIO as EQUITY_SESSION_EVENTS
 from tests.regression.cases.multi_venue_parity import SCENARIO as MULTI_VENUE_PARITY
 from tests.regression.scenario import Scenario
 
@@ -29,4 +30,5 @@ from tests.regression.scenario import Scenario
 SCENARIOS: tuple[Scenario, ...] = (
     MULTI_VENUE_PARITY,
     BTCUSDT_EMA_CROSS,
+    EQUITY_SESSION_EVENTS,
 )

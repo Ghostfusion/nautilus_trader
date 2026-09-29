@@ -35,6 +35,10 @@ use std::{
     sync::LazyLock,
 };
 
+pub mod events;
+
+pub use events::{SessionEvent, SessionEventKind, SessionScheduleConfig};
+
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use jiff::{
     Span, Timestamp,

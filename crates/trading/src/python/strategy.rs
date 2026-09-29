@@ -58,6 +58,7 @@ use nautilus_core::{
     python::{to_pyruntime_err, to_pyvalue_err, upgrade_py_weakref},
 };
 use nautilus_model::{
+    calendars::{SessionEvent, SessionScheduleConfig, TradingCalendar},
     data::{
         Bar, BarType, CustomData, DataType, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus,
         MarkPriceUpdate, OrderBookDelta, OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
@@ -423,6 +424,15 @@ impl PyStrategyInner {
         if let Some(py_self) = self.python_instance()? {
             Python::attach(|py| {
                 py_self.call_method1(py, "on_time_event", (event.clone().into_py_any(py)?,))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn dispatch_on_session_event(&self, event: &SessionEvent) -> PyResult<()> {
+        if let Some(py_self) = self.python_instance()? {
+            Python::attach(|py| {
+                py_self.call_method1(py, "on_session_event", (event.clone().into_py_any(py)?,))
             })?;
         }
         Ok(())
@@ -1152,6 +1162,12 @@ impl DataActor for PyStrategyInner {
         route_time_event(self, event);
         self.dispatch_on_time_event(event)
             .map_err(|e| anyhow::anyhow!("Python on_time_event failed:\n{}", format_exception(&e)))
+    }
+
+    fn on_session_event(&mut self, event: &SessionEvent) -> anyhow::Result<()> {
+        self.dispatch_on_session_event(event).map_err(|e| {
+            anyhow::anyhow!("Python on_session_event failed:\n{}", format_exception(&e))
+        })
     }
 
     #[allow(unused_variables)]
@@ -1940,6 +1956,37 @@ impl PyStrategy {
         Ok(())
     }
 
+    /// Schedules this strategy's session events for `[now, to_ns)` from the given calendar.
+    ///
+    /// Events are dispatched to `on_session_event`. An event already pending is not rescheduled,
+    /// so a repeated call is idempotent. Returns the number of events newly scheduled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the strategy is not registered with a trader, or the clock rejects an
+    /// alert.
+    #[pyo3(name = "schedule_session_events")]
+    fn py_schedule_session_events(
+        &self,
+        calendar: &TradingCalendar,
+        config: &SessionScheduleConfig,
+        to_ns: u64,
+    ) -> PyResult<usize> {
+        if !self.inner().core.actor.is_registered() {
+            return Err(to_pyruntime_err(
+                "Strategy must be registered with a trader before scheduling session events",
+            ));
+        }
+
+        DataActor::schedule_session_events(
+            self.inner_mut(),
+            calendar,
+            config,
+            UnixNanos::from(to_ns).to_datetime_utc(),
+        )
+        .map_err(to_pyruntime_err)
+    }
+
     #[getter]
     #[pyo3(name = "registered_indicators")]
     fn py_registered_indicators(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
@@ -2308,6 +2355,10 @@ impl PyStrategy {
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_time_event")]
     fn py_on_time_event(_slf: &Bound<'_, Self>, event: TimeEvent) {}
+
+    #[allow(unused_variables, clippy::needless_pass_by_value)]
+    #[pyo3(name = "on_session_event")]
+    fn py_on_session_event(_slf: &Bound<'_, Self>, event: SessionEvent) {}
 
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_data")]

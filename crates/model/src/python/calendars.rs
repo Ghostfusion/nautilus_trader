@@ -15,16 +15,20 @@
 
 //! Python bindings for [`TradingCalendar`].
 
-use std::str::FromStr;
+use std::{str::FromStr, time::Duration};
 
 use jiff::{Timestamp, civil::Date};
 use nautilus_core::{UnixNanos, python::to_pyvalue_err};
-use pyo3::{PyResult, pymethods};
+use pyo3::{PyTypeInfo, prelude::*, types::PyType};
 
 use crate::{
-    calendars::{CalendarKey, TradingCalendar, bundled},
+    calendars::{
+        CalendarKey, SessionEvent, SessionEventKind, SessionScheduleConfig, TradingCalendar,
+        bundled,
+    },
     enums::AssetClass,
     identifiers::{Symbol, Venue},
+    python::common::EnumIterator,
 };
 
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -186,6 +190,28 @@ impl TradingCalendar {
         self.warn_if_coverage_ends_before(to_timestamp(ts_ns));
     }
 
+    /// Expands the calendar into the session events that occur in `[from, to)`.
+    ///
+    /// The window is half open, so a phase exactly at `to` belongs to the next expansion and
+    /// consecutive windows neither duplicate nor drop a phase. Events are ordered by instant, then
+    /// by kind.
+    ///
+    /// A date with no session, including a holiday and a weekend, derives no events. On a date the
+    /// calendar declares an early close, the shortened session reports `EarlyClose` instead of
+    /// `Close`, and every phase derived from the close moves with it.
+    ///
+    /// A derived instant that cannot be represented is omitted rather than saturating: a phase is a
+    /// derivation of calendar data, so an impossible instant is absent, not approximated.
+    #[pyo3(name = "session_events")]
+    fn py_session_events(
+        &self,
+        from_ns: u64,
+        to_ns: u64,
+        config: &SessionScheduleConfig,
+    ) -> Vec<SessionEvent> {
+        self.session_events(to_timestamp(from_ns), to_timestamp(to_ns), config)
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "TradingCalendar(key='{}', time_zone='{}', valid_from='{}', valid_until={})",
@@ -194,6 +220,197 @@ impl TradingCalendar {
             self.valid_from(),
             self.valid_until()
                 .map_or_else(|| "None".to_string(), |date| format!("'{date}'")),
+        )
+    }
+}
+
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+#[pymethods]
+impl SessionEventKind {
+    /// A phase of a trading session, or a calendar condition that replaces one.
+    ///
+    /// The kinds are the session phases an intraday strategy distinguishes. A clock timer is an
+    /// interval; a session event is a market-anchored instant.
+    #[new]
+    fn py_new(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let type_object = Self::type_object(py);
+        Self::py_from_str(&type_object, value)
+    }
+
+    const fn __hash__(&self) -> isize {
+        *self as isize
+    }
+
+    fn __str__(&self) -> String {
+        self.to_string()
+    }
+
+    /// Returns the canonical string representation.
+    #[getter]
+    #[must_use]
+    pub fn name(&self) -> String {
+        self.to_string()
+    }
+
+    #[classmethod]
+    fn variants(_: &Bound<'_, PyType>, py: Python<'_>) -> EnumIterator {
+        EnumIterator::new::<Self>(py)
+    }
+
+    /// Returns the session event kind for the given string.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `ValueError` if the value is not a session event kind.
+    #[classmethod]
+    #[pyo3(name = "from_str")]
+    fn py_from_str(_: &Bound<'_, PyType>, data: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let value: &str = data.extract()?;
+        Self::from_str(&value.to_uppercase()).map_err(to_pyvalue_err)
+    }
+}
+
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+#[pymethods]
+impl SessionEvent {
+    /// The session phase.
+    #[getter]
+    #[must_use]
+    pub fn kind(&self) -> SessionEventKind {
+        self.kind
+    }
+
+    /// The calendar the event was derived from.
+    #[getter]
+    #[must_use]
+    pub fn key(&self) -> String {
+        self.key.to_string()
+    }
+
+    /// The exchange-local session date.
+    #[getter]
+    #[must_use]
+    pub fn session_date(&self) -> String {
+        self.session_date.to_string()
+    }
+
+    /// The index of the session on that date.
+    #[getter]
+    #[must_use]
+    pub fn session_index(&self) -> usize {
+        self.session_index
+    }
+
+    /// The instant the phase occurs (UTC).
+    #[getter]
+    #[must_use]
+    pub fn ts_event(&self) -> u64 {
+        u64::try_from(self.ts_event.as_nanosecond()).unwrap_or_default()
+    }
+
+    /// The instant the event was initialized (UTC).
+    #[getter]
+    #[must_use]
+    pub fn ts_init(&self) -> u64 {
+        u64::try_from(self.ts_init.as_nanosecond()).unwrap_or_default()
+    }
+
+    /// Returns the deterministic timer name for this event.
+    ///
+    /// The name identifies the event and nothing else, so scheduling the same event twice replaces
+    /// the existing timer instead of duplicating it.
+    #[pyo3(name = "name")]
+    #[must_use]
+    fn py_name(&self) -> String {
+        Self::name(self)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SessionEvent(kind={}, key='{}', session_date='{}', session_index={}, ts_event={})",
+            self.kind, self.key, self.session_date, self.session_index, self.ts_event,
+        )
+    }
+}
+
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+#[pymethods]
+impl SessionScheduleConfig {
+    /// Configures which session phases are derived, and how far from a session boundary they fall.
+    ///
+    /// Offsets are absolute elapsed time, not civil clock time: a pre-close offset of 30 minutes is 30
+    /// minutes of real time before the close, which is what an intraday strategy needs when reacting to
+    /// the close. Nothing here reads a clock.
+    #[new]
+    #[pyo3(signature = (premarket_offset_ns, opening_range_ns, pre_close_offset_ns, kinds=None))]
+    fn py_new(
+        premarket_offset_ns: u64,
+        opening_range_ns: u64,
+        pre_close_offset_ns: u64,
+        kinds: Option<Vec<SessionEventKind>>,
+    ) -> PyResult<Self> {
+        let config = Self::new(
+            Duration::from_nanos(premarket_offset_ns),
+            Duration::from_nanos(opening_range_ns),
+            Duration::from_nanos(pre_close_offset_ns),
+        )
+        .map_err(to_pyvalue_err)?;
+
+        Ok(match kinds {
+            Some(kinds) => config.with_kinds(kinds),
+            None => config,
+        })
+    }
+
+    /// The interval before the session open reported as `Premarket`.
+    #[getter]
+    #[must_use]
+    pub fn premarket_offset_ns(&self) -> u64 {
+        self.premarket_offset.as_nanos() as u64
+    }
+
+    /// The interval after the session open reported as `OpeningRangeComplete`.
+    #[getter]
+    #[must_use]
+    pub fn opening_range_ns(&self) -> u64 {
+        self.opening_range.as_nanos() as u64
+    }
+
+    /// The interval before the session close reported as `PreClose`.
+    #[getter]
+    #[must_use]
+    pub fn pre_close_offset_ns(&self) -> u64 {
+        self.pre_close_offset.as_nanos() as u64
+    }
+
+    /// The phases to derive.
+    #[getter]
+    #[must_use]
+    pub fn kinds(&self) -> Vec<SessionEventKind> {
+        self.kinds.clone()
+    }
+
+    /// Returns a copy of this configuration deriving only the given phases.
+    #[pyo3(name = "with_kinds")]
+    #[must_use]
+    pub fn py_with_kinds(&self, kinds: Vec<SessionEventKind>) -> Self {
+        Self::with_kinds(self.clone(), kinds)
+    }
+
+    /// Returns whether the given phase is derived.
+    #[pyo3(name = "includes")]
+    #[must_use]
+    pub fn py_includes(&self, kind: SessionEventKind) -> bool {
+        Self::includes(self, kind)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SessionScheduleConfig(premarket_offset_ns={}, opening_range_ns={}, pre_close_offset_ns={}, kinds={:?})",
+            self.premarket_offset.as_nanos(),
+            self.opening_range.as_nanos(),
+            self.pre_close_offset.as_nanos(),
+            self.kinds,
         )
     }
 }

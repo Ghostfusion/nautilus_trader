@@ -95,6 +95,9 @@ pub fn model(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::types::balance::AccountBalance>()?;
     m.add_class::<crate::types::balance::MarginBalance>()?;
     m.add_class::<crate::calendars::TradingCalendar>()?;
+    m.add_class::<crate::calendars::SessionEventKind>()?;
+    m.add_class::<crate::calendars::SessionEvent>()?;
+    m.add_class::<crate::calendars::SessionScheduleConfig>()?;
     m.add_class::<crate::python::common::EnumIterator>()?;
     // Data
     m.add_class::<data::PyNautilusDataType>()?;

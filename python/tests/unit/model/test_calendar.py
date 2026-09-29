@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from nautilus_trader.model import SessionEventKind
+from nautilus_trader.model import SessionScheduleConfig
 from nautilus_trader.model import TradingCalendar
 
 
@@ -128,3 +130,95 @@ def test_unsupported_asset_class_raises_value_error() -> None:
     """
     with pytest.raises(ValueError, match="unsupported asset class"):
         TradingCalendar.bundled("FX", "NOT_A_CLASS")
+
+
+def test_session_events_derives_the_documented_phases() -> None:
+    """
+    Test a full trading day derives every session phase.
+    """
+    calendar = TradingCalendar.bundled("XNYS", "EQUITY")
+    config = SessionScheduleConfig(
+        premarket_offset_ns=3_600_000_000_000,
+        opening_range_ns=1_800_000_000_000,
+        pre_close_offset_ns=1_800_000_000_000,
+    )
+
+    events = calendar.session_events(
+        _nanos("2024-06-03T00:00:00"), _nanos("2024-06-04T00:00:00"), config
+    )
+
+    assert [event.kind for event in events] == [
+        SessionEventKind.PREMARKET,
+        SessionEventKind.OPEN,
+        SessionEventKind.OPENING_RANGE_COMPLETE,
+        SessionEventKind.MIDDAY,
+        SessionEventKind.PRE_CLOSE,
+        SessionEventKind.CLOSE,
+    ]
+    # 2024-06-03 is daylight time: 09:30-16:00 local is 13:30-20:00 UTC.
+    assert [event.ts_event for event in events] == [
+        _nanos("2024-06-03T12:30:00"),
+        _nanos("2024-06-03T13:30:00"),
+        _nanos("2024-06-03T14:00:00"),
+        _nanos("2024-06-03T16:45:00"),
+        _nanos("2024-06-03T19:30:00"),
+        _nanos("2024-06-03T20:00:00"),
+    ]
+    assert events[0].name() == "SESSION-PREMARKET:XNYS.EQUITY:2024-06-03:0"
+    assert events[0].key == "XNYS.EQUITY"
+    assert events[0].session_date == "2024-06-03"
+    assert events[0].ts_init == events[0].ts_event
+
+
+def test_session_events_skips_a_holiday() -> None:
+    """
+    Test a holiday derives no session events.
+    """
+    calendar = TradingCalendar.bundled("XNYS", "EQUITY")
+    config = SessionScheduleConfig(
+        premarket_offset_ns=3_600_000_000_000,
+        opening_range_ns=1_800_000_000_000,
+        pre_close_offset_ns=1_800_000_000_000,
+    )
+
+    events = calendar.session_events(
+        _nanos("2024-11-28T00:00:00"), _nanos("2024-11-29T00:00:00"), config
+    )
+
+    assert events == []
+
+
+def test_session_events_reports_an_early_close() -> None:
+    """
+    Test the early close replaces the close and shifts dependent phases.
+    """
+    calendar = TradingCalendar.bundled("XNYS", "EQUITY")
+    config = SessionScheduleConfig(
+        premarket_offset_ns=3_600_000_000_000,
+        opening_range_ns=1_800_000_000_000,
+        pre_close_offset_ns=1_800_000_000_000,
+        kinds=[
+            SessionEventKind.OPEN,
+            SessionEventKind.MIDDAY,
+            SessionEventKind.PRE_CLOSE,
+            SessionEventKind.EARLY_CLOSE,
+        ],
+    )
+
+    events = calendar.session_events(
+        _nanos("2024-11-29T00:00:00"), _nanos("2024-11-30T00:00:00"), config
+    )
+
+    assert [event.kind for event in events] == [
+        SessionEventKind.OPEN,
+        SessionEventKind.MIDDAY,
+        SessionEventKind.PRE_CLOSE,
+        SessionEventKind.EARLY_CLOSE,
+    ]
+    # Thanksgiving Friday 2024 closes at 13:00 local (18:00 UTC).
+    assert [event.ts_event for event in events] == [
+        _nanos("2024-11-29T14:30:00"),
+        _nanos("2024-11-29T16:15:00"),
+        _nanos("2024-11-29T17:30:00"),
+        _nanos("2024-11-29T18:00:00"),
+    ]

@@ -35,6 +35,7 @@ use nautilus_model::defi::{
     Block, Blockchain, Pool, PoolFeeCollect, PoolFlash, PoolLiquidityUpdate, PoolSwap,
 };
 use nautilus_model::{
+    calendars::{SessionEvent, SessionScheduleConfig, TradingCalendar},
     data::{
         Bar, BarType, CustomData, DataType, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus,
         MarkPriceUpdate, OrderBookDelta, OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
@@ -405,6 +406,15 @@ impl PyDataActorInner {
         if let Some(py_self) = self.python_instance()? {
             Python::attach(|py| {
                 py_self.call_method1(py, "on_time_event", (event.into_py_any(py)?,))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn dispatch_on_session_event(&mut self, event: SessionEvent) -> PyResult<()> {
+        if let Some(py_self) = self.python_instance()? {
+            Python::attach(|py| {
+                py_self.call_method1(py, "on_session_event", (event.into_py_any(py)?,))
             })?;
         }
         Ok(())
@@ -1069,6 +1079,12 @@ impl DataActor for PyDataActorInner {
             .map_err(|e| anyhow::anyhow!("Python on_time_event failed:\n{}", format_exception(&e)))
     }
 
+    fn on_session_event(&mut self, event: &SessionEvent) -> anyhow::Result<()> {
+        self.dispatch_on_session_event(event.clone()).map_err(|e| {
+            anyhow::anyhow!("Python on_session_event failed:\n{}", format_exception(&e))
+        })
+    }
+
     #[allow(unused_variables)]
     fn on_data(&mut self, data: &CustomData) -> anyhow::Result<()> {
         Python::attach(|py| {
@@ -1521,6 +1537,37 @@ impl PyDataActor {
         Ok(())
     }
 
+    /// Schedules this actor's session events for `[now, to_ns)` from the given calendar.
+    ///
+    /// Events are dispatched to `on_session_event`. An event already pending is not rescheduled,
+    /// so a repeated call is idempotent. Returns the number of events newly scheduled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the actor is not registered with a trader, or the clock rejects an
+    /// alert.
+    #[pyo3(name = "schedule_session_events")]
+    fn py_schedule_session_events(
+        &self,
+        calendar: &TradingCalendar,
+        config: &SessionScheduleConfig,
+        to_ns: u64,
+    ) -> PyResult<usize> {
+        if !self.inner().core.is_registered() {
+            return Err(to_pyruntime_err(
+                "Actor must be registered with a trader before scheduling session events",
+            ));
+        }
+
+        DataActor::schedule_session_events(
+            self.inner_mut(),
+            calendar,
+            config,
+            UnixNanos::from(to_ns).to_datetime_utc(),
+        )
+        .map_err(to_pyruntime_err)
+    }
+
     #[pyo3(name = "publish_data")]
     fn py_publish_data(&self, data_type: &DataType, data: &CustomData) -> PyResult<()> {
         self.ensure_registered_for_data()?;
@@ -1650,6 +1697,10 @@ impl PyDataActor {
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_time_event")]
     fn py_on_time_event(_slf: &Bound<'_, Self>, event: TimeEvent) {}
+
+    #[allow(unused_variables, clippy::needless_pass_by_value)]
+    #[pyo3(name = "on_session_event")]
+    fn py_on_session_event(_slf: &Bound<'_, Self>, event: SessionEvent) {}
 
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_data")]
@@ -3079,6 +3130,7 @@ mod tests {
     #[cfg(feature = "defi")]
     use alloy_primitives::{I256, U160, U256};
     use indexmap::IndexMap;
+    use jiff::{Timestamp, civil::Date};
     use nautilus_core::{UUID4, UnixNanos, python::IntoPyObjectNautilusExt};
     #[cfg(feature = "defi")]
     use nautilus_model::defi::{
@@ -3086,6 +3138,7 @@ mod tests {
         PoolIdentifier, PoolLiquidityUpdate, PoolLiquidityUpdateType, PoolSwap, Token,
     };
     use nautilus_model::{
+        calendars::{CalendarKey, SessionEvent, SessionEventKind},
         data::{
             Bar, BarType, CustomData, DataType, FundingRateUpdate, IndexPriceUpdate,
             InstrumentStatus, MarkPriceUpdate, OrderBookDelta, OrderBookDeltas, OrderBookDepth,
@@ -3096,7 +3149,8 @@ mod tests {
             stubs::{stub_custom_data, stub_deltas, stub_depth10},
         },
         enums::{
-            AggressorSide, BookType, GreeksConvention, InstrumentCloseType, MarketStatusAction,
+            AggressorSide, AssetClass, BookType, GreeksConvention, InstrumentCloseType,
+            MarketStatusAction,
         },
         identifiers::{ActorId, ClientId, ComponentId, OptionSeriesId, TradeId, TraderId, Venue},
         instruments::{CurrencyPair, InstrumentAny, stubs::audusd_sim},
@@ -4206,6 +4260,17 @@ class CapturingActor:
         )
     }
 
+    fn sample_session_event() -> SessionEvent {
+        SessionEvent::new(
+            SessionEventKind::Open,
+            CalendarKey::new(Venue::from("XNYS"), AssetClass::Equity, None),
+            Date::from_str("2024-06-03").unwrap(),
+            0,
+            Timestamp::from_str("2024-06-03T13:30:00Z").unwrap(),
+            Timestamp::from_str("2024-06-03T13:30:00Z").unwrap(),
+        )
+    }
+
     fn sample_signal() -> Signal {
         Signal::new(
             Ustr::from("test_signal"),
@@ -4585,6 +4650,7 @@ class TrackingActor:
         "on_save",
         "on_load",
         "on_time_event",
+        "on_session_event",
         "on_data",
         "on_signal",
         "on_queue_state",
@@ -5271,6 +5337,7 @@ class IndicatorEventActor:
 
     #[rstest]
     #[case("on_time_event")]
+    #[case("on_session_event")]
     #[case("on_data")]
     #[case("on_signal")]
     #[case("on_queue_state")]
@@ -5303,6 +5370,10 @@ class IndicatorEventActor:
                     "on_time_event" => {
                         let event = sample_time_event();
                         rust_actor.inner_mut().on_time_event(&event)
+                    }
+                    "on_session_event" => {
+                        let event = sample_session_event();
+                        rust_actor.inner_mut().on_session_event(&event)
                     }
                     "on_data" => {
                         let data = sample_data();
@@ -5780,6 +5851,7 @@ class IndicatorEventActor:
     #[case("on_save")]
     #[case("on_load")]
     #[case("on_time_event")]
+    #[case("on_session_event")]
     #[case("on_data")]
     #[case("on_signal")]
     #[case("on_queue_state")]
@@ -5815,6 +5887,7 @@ class IndicatorEventActor:
                 | "on_fault" | "on_save" => None,
                 "on_load" => Some(PyDict::new(py).into_any().unbind()),
                 "on_time_event" => Some(sample_time_event().into_py_any(py).unwrap()),
+                "on_session_event" => Some(sample_session_event().into_py_any(py).unwrap()),
                 "on_data" | "on_instrument" | "on_historical_data" => Some(py.None()),
                 "on_signal" => Some(sample_signal().into_py_any(py).unwrap()),
                 "on_queue_state" => Some(

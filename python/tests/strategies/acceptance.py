@@ -1079,3 +1079,78 @@ class MACDTradeTickStrategy(Strategy):
         """
         On stop.
         """
+
+
+class SessionEventConfig(StrategyConfig):
+    """
+    Submit a market order at every session event of a trading calendar.
+    """
+
+    def __init__(
+        self,
+        *,
+        instrument_id: str,
+        venue: str,
+        asset_class: str,
+        trade_size: str,
+        schedule_to_ns: int,
+        premarket_offset_ns: int = 3_600_000_000_000,
+        opening_range_ns: int = 1_800_000_000_000,
+        pre_close_offset_ns: int = 1_800_000_000_000,
+        **_kwargs: object,
+    ) -> None:
+        """
+        Initialize the instance.
+        """
+        super().__init__()
+        self.instrument_id = instrument_id
+        self.venue = venue
+        self.asset_class = asset_class
+        self.trade_size = trade_size
+        self.schedule_to_ns = schedule_to_ns
+        self.premarket_offset_ns = premarket_offset_ns
+        self.opening_range_ns = opening_range_ns
+        self.pre_close_offset_ns = pre_close_offset_ns
+
+
+class SessionEventStrategy(Strategy):
+    """
+    Schedule the session events of a bundled calendar and act on each of them.
+    """
+
+    def __init__(self, config: SessionEventConfig) -> None:
+        """
+        Initialize the instance.
+        """
+        super().__init__(config)
+        from nautilus_trader.model import SessionScheduleConfig
+        from nautilus_trader.model import TradingCalendar
+
+        self._instrument_id = InstrumentId.from_str(config.instrument_id)
+        self._qty = Quantity.from_str(config.trade_size)
+        self._calendar = TradingCalendar.bundled(config.venue, config.asset_class)
+        self._schedule = SessionScheduleConfig(
+            premarket_offset_ns=config.premarket_offset_ns,
+            opening_range_ns=config.opening_range_ns,
+            pre_close_offset_ns=config.pre_close_offset_ns,
+        )
+        self._schedule_to_ns = config.schedule_to_ns
+        self.events: list[str] = []
+
+    def on_start(self) -> None:
+        """
+        On start.
+        """
+        self.schedule_session_events(self._calendar, self._schedule, self._schedule_to_ns)
+
+    def on_session_event(self, event) -> None:
+        """
+        On session event.
+        """
+        self.events.append(event.name())
+        self.submit_order(_market_order(self, self._instrument_id, OrderSide.BUY, self._qty))
+
+    def on_stop(self) -> None:
+        """
+        On stop.
+        """

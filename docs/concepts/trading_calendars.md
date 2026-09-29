@@ -107,3 +107,102 @@ Calendar resolution is a pure function of the timestamp and the calendar data:
   the bundled time zone database.
 - No hidden mutation: loading produces a new value, and a run cannot change the calendar it
   was given.
+
+## Session events
+
+A session event is a phase of a trading session, resolved to an absolute UTC instant on the
+calendar. The kinds are `Premarket`, `Open`, `OpeningRangeComplete`, `Midday`, `PreClose`,
+`Close`, and `EarlyClose`. Each kind is a derivation of a session:
+
+| Kind                   | Derivation                                   |
+| ---------------------- | -------------------------------------------- |
+| `Premarket`            | The session open minus the premarket offset  |
+| `Open`                 | The session open                             |
+| `OpeningRangeComplete` | The session open plus the opening range      |
+| `Midday`               | The midpoint of the session open and close   |
+| `PreClose`             | The session close minus the pre-close offset |
+| `Close`                | The session close on a full trading day      |
+| `EarlyClose`           | The session close on an early-close day      |
+
+Offsets are absolute elapsed time, not civil clock time: a premarket offset of one hour is one
+hour of real time before the open. `SessionScheduleConfig` carries the three offsets
+(`premarket_offset`, `opening_range`, `pre_close_offset`) and the set of kinds to derive, and
+rejects an offset longer than one day. A derived instant that cannot be represented is omitted
+rather than saturated, and `OpeningRangeComplete` is omitted when it would land at or after the
+session close.
+
+`calendar.session_events(from_ns, to_ns, config)` expands the calendar into the events that
+occur in the half-open window `[from, to)`. A phase exactly at `to` belongs to the next
+expansion, so consecutive windows neither duplicate nor drop a phase. Events are ordered by
+instant, then by kind.
+
+A date with no session, whether a holiday or a weekend, derives no events. On a date the
+calendar declares an early close, the session close is reported as `EarlyClose` instead of
+`Close`, and every phase derived from the close (the pre-close and the midday) moves with it.
+
+`ts_event` and `ts_init` are equal: an event is a pure derivation of calendar data, so expanding
+a schedule never reads the current time. That is what keeps a backtest deterministic.
+
+Every event carries a deterministic name that identifies the phase, for example
+`SESSION-OPEN:XNYS.EQUITY:2024-06-03:0`. Because the name identifies the event and nothing else,
+scheduling the same window twice is idempotent: an event whose timer is already pending is not
+rescheduled.
+
+### Delivery
+
+Session events are delivered through the existing timer machinery, not a parallel path. An actor
+or strategy schedules them with `schedule_session_events(calendar, config, to_ns)`, which
+registers each event as a named time alert on the component clock. Ordering and firing are
+inherited from the timer machinery, and no wall clock is read to decide when a phase occurs.
+
+The callback is `on_session_event`, not `on_time_event`. The two are separate by design, and the
+distinction is the point: a clock timer is an interval, while a session event is anchored to a
+market calendar at a phase of a session.
+
+```python
+from nautilus_trader.model import SessionEventKind, SessionScheduleConfig, TradingCalendar
+
+calendar = TradingCalendar.bundled("XNYS", "EQUITY")
+config = SessionScheduleConfig(
+    premarket_offset_ns=60 * 60 * 1_000_000_000,  # One hour before the open
+    opening_range_ns=30 * 60 * 1_000_000_000,  # Thirty minutes after the open
+    pre_close_offset_ns=30 * 60 * 1_000_000_000,  # Thirty minutes before the close
+    kinds=[SessionEventKind.OPEN, SessionEventKind.PRE_CLOSE],
+)
+
+events = calendar.session_events(from_ns, to_ns, config)
+for event in events:
+    print(event.name(), event.kind, event.ts_event)
+```
+
+where the window is half open, for example `from_ns = 1_717_372_800_000_000_000`
+(2024-06-03T00:00:00Z) and `to_ns = 1_717_459_200_000_000_000` (2024-06-04T00:00:00Z).
+
+Scheduling from a component registers the events on its own clock and dispatches to
+`on_session_event`:
+
+```python
+class OpeningRangeStrategy(Strategy):
+    def on_start(self):
+        calendar = TradingCalendar.bundled("XNYS", "EQUITY")
+        config = SessionScheduleConfig(
+            premarket_offset_ns=0,
+            opening_range_ns=30 * 60 * 1_000_000_000,
+            pre_close_offset_ns=30 * 60 * 1_000_000_000,
+        )
+        now_ns = self.clock.timestamp_ns()
+        to_ns = now_ns + 30 * 24 * 60 * 60 * 1_000_000_000  # Thirty days ahead
+        self.schedule_session_events(calendar, config, to_ns=to_ns)
+
+    def on_session_event(self, event):
+        if event.kind == SessionEventKind.OPENING_RANGE_COMPLETE:
+            self.log.info(f"Opening range complete at {event.ts_event}")
+```
+
+### What is not a session event
+
+Session-aware scheduling duplicates nothing that already exists:
+
+- Instrument expiration is an engine timer named `INSTRUMENT-EXPIRATION`, and keeps that path.
+- A user timestamp, such as an economic release, is already a `Clock` time alert, so it is
+  scheduled through the existing timer API.

@@ -32,6 +32,7 @@ use nautilus_model::defi::{
     Block, Blockchain, Pool, PoolLiquidityUpdate, PoolSwap, data::PoolFeeCollect, data::PoolFlash,
 };
 use nautilus_model::{
+    calendars::{SessionEvent, SessionScheduleConfig, TradingCalendar},
     data::{
         Bar, BarType, CustomData, DataType, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus,
         MarkPriceUpdate, OrderBookDelta, OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
@@ -418,6 +419,41 @@ pub trait DataActor {
     #[allow(unused_variables)]
     fn on_time_event(&mut self, event: &TimeEvent) -> anyhow::Result<()> {
         Ok(())
+    }
+
+    /// Actions to be performed when receiving a calendar session event.
+    ///
+    /// Distinct from [`DataActor::on_time_event`]: a time event is a clock timer, while a session
+    /// event is anchored to a trading calendar at a phase of a session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if handling the session event fails.
+    #[allow(unused_variables)]
+    fn on_session_event(&mut self, event: &SessionEvent) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Schedules this actor's session events for `[now, to)` from the given calendar.
+    ///
+    /// Events are dispatched to [`DataActor::on_session_event`]. An event already pending is not
+    /// rescheduled, so a repeated call is idempotent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the actor is unregistered or the clock rejects an alert.
+    fn schedule_session_events(
+        &mut self,
+        calendar: &TradingCalendar,
+        config: &SessionScheduleConfig,
+        to: Timestamp,
+    ) -> anyhow::Result<usize>
+    where
+        Self: DataActorNative + Actor + Sized + 'static,
+    {
+        let actor_id = self.actor_id().inner();
+        let clock = self.clock();
+        super::session::schedule_session_events::<Self>(&clock, actor_id, calendar, config, to)
     }
 
     /// Actions to be performed when receiving custom data.

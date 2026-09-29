@@ -207,30 +207,51 @@ exposed surface; the W1 regression scenarios still pass with unchanged digests.
 
 ## 5. W3: session-aware scheduled events (L11)
 
-**Objective.** Distinguish clock timers from trading-session events and deliver both through the
-existing timer machinery.
+**Objective.** Make a trading-session phase a first-class, market-anchored event, distinct from a
+clock timer and delivered through the existing timer machinery.
 
 **Steps.**
 
-1. Add a scheduling layer over W2 that produces session events (premarket, open, opening-range
-   complete, midday, pre-close, close, early close) and calendar events (holidays, expirations, and
-   user timestamps such as economic releases).
-2. Deliver events through the existing `Clock` and timer callback path
-   (`crates/common/src/timer.rs`) so ordering and determinism are inherited, not reinvented.
-3. Convert exchange local time to UTC at schedule time so an event fires once per backtest and once
-   per live session, with no wall-clock dependence in backtest.
-4. Surface the events to actors and strategies alongside the existing `on_time_event` callback, and
-   document the distinction in `docs/concepts/`.
-5. Add a golden scenario for a holiday and an early close.
+1. Add `crates/model/src/calendars/events.rs` with `SessionEventKind` (`Premarket`, `Open`,
+   `OpeningRangeComplete`, `Midday`, `PreClose`, `Close`, `EarlyClose`), `SessionEvent` (kind,
+   calendar key, exchange-local session date, session index, `ts_event`, `ts_init`), and
+   `SessionScheduleConfig` (the three offsets plus the kinds to derive, each offset capped at one
+   day). Each kind is a derivation of a session: `Premarket` is the open minus the premarket offset,
+   `OpeningRangeComplete` the open plus the opening range, `Midday` the midpoint of the open and
+   close, and `PreClose` the close minus the pre-close offset; `Open` is the session open, `Close` the
+   close on a full day, and `EarlyClose` replaces `Close` on a day the calendar declares an early
+   close.
+2. Expand a calendar with `TradingCalendar::session_events(from, to, config)` over the half-open
+   window `[from, to)`, ordered by instant then kind. Offsets are absolute elapsed time, not civil
+   clock time. A derived instant that cannot be represented is omitted rather than saturated, and
+   `OpeningRangeComplete` is omitted when it would land at or after the close. `ts_event` equals
+   `ts_init`, so expanding a schedule reads no clock. The event name
+   (`SESSION-{KIND}:{KEY}:{DATE}:{INDEX}`) identifies the event, so scheduling the same window twice
+   is idempotent.
+3. Deliver through the existing timer path. `crates/common/src/actor/session.rs` registers each event
+   as a named time alert on the component clock, so ordering and firing are inherited from
+   `crates/common/src/timer.rs` rather than reinvented. `DataActor::on_session_event` in
+   `crates/common/src/actor/data_actor.rs` is the callback, separate from `on_time_event`; an event
+   whose timer is already pending is not rescheduled.
+4. Surface the expansion through `crates/model/src/python/calendars.rs` and `schedule_session_events`
+   on the actor and strategy surfaces.
+5. Document the kinds, their derivation, the half-open window, determinism, the event name, and the
+   timer distinction in `docs/concepts/trading_calendars.md`.
 
-**Boundary.** Engine and research.
+**Boundary.** Engine and research. Expiration is already an engine timer named
+`INSTRUMENT-EXPIRATION`, and a user timestamp is already a `Clock` time alert, so W3 duplicates
+neither.
 
-**Acceptance.** A strategy scheduled at market open fires at the session open in backtest and live
-sandbox; an early close shifts dependent events; a half-day produces the documented event set; no
-wall-clock read appears on the backtest path.
+**Acceptance.** A unit test derives all six phases of a full day in order with the expected UTC
+instants; a holiday derives no events; an early close reports `EarlyClose` and moves the midpoint and
+pre-close with it; a half-open window keeps a phase exactly at `to` for the next expansion; disabled
+kinds derive nothing; repeated expansion produces an identical result; and the event name identifies
+the phase. An offset longer than one day is rejected, and the kinds round-trip through their
+canonical strings.
 
-**Risks.** Correctness depends on W2 data quality and on time zone handling. Mitigation: property
-tests over session boundaries and a documented failure mode when a calendar is missing.
+**Risks.** Correctness depends on W2 data quality and on time zone handling. Mitigation: every phase
+is a pure derivation of calendar data, so an impossible instant is omitted rather than approximated,
+and expanding a schedule reads no clock.
 
 ## 6. W4: corporate actions, identity, and the data contract (L3, L9A)
 

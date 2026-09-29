@@ -30,6 +30,7 @@ pub mod binding;
 pub mod data_actor;
 pub mod indicators;
 pub mod registry;
+pub mod session;
 
 mod access;
 mod dispatch;
