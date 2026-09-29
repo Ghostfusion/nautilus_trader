@@ -4,21 +4,40 @@ This document is the implementation plan for the items selected in
 [lean_lessons_design.md](lean_lessons_design.md). Each workstream is independently shippable,
 independently revertible, and opt-in. Nothing here changes the kernel's execution model.
 
+Revision note: this revision adopts the design document's architectural invariants and feature
+boundaries as implementation gates, adds workstreams W6 (execution realism, L10) and W3
+(session-aware scheduling, L11), and reorders delivery into phases 0 to 8 so equity identity and
+market time precede optimization.
+
 ## 1. Ground rules
 
+The nine architectural invariants in
+[lean_lessons_design.md](lean_lessons_design.md) section 2 are acceptance criteria, not guidance. A
+workstream that delivers its feature while breaking an invariant is rejected, not merged with
+follow-up work. In implementation terms:
+
 1. The runtime model is fixed: single-threaded kernel, thread-local message bus, per-event
-   callbacks, `Rc<RefCell<_>>` components. No workstream may introduce a slice-style delivery
-   model into the hot path.
-2. New behaviour is opt-in. Default backtest and live behaviour after every workstream is
-   byte-identical to before, which the existing golden tests must continue to prove.
+   callbacks, `Rc<RefCell<_>>` components. No workstream may introduce a slice-style delivery model
+   into the hot path.
+2. New behaviour is opt-in and costs nothing when unused. Default backtest and live behaviour after
+   every workstream is byte-identical to before, which the existing golden tests and the declared
+   regression scenarios must continue to prove.
 3. New scheduling is driven by the `Clock`, never by wall time, so backtests stay deterministic.
-4. Reuse existing seams: message-bus endpoints in `crates/common/src/msgbus/switchboard.rs`,
-   the `DataClient` and `ExecutionClient` traits, client and config factories,
-   `CatalogReader` and `CatalogWriter`, and the `KernelEventStore` trait. Do not add a parallel
-   data or configuration path.
-5. Every workstream ships code, tests, documentation, and regenerated stubs in the same change.
-   In this repository that means `make py-stubs` and `make check-generated-drift` are part of the
+   Session-aware scheduling converts exchange local time to UTC at schedule time.
+4. Reuse existing seams: message-bus endpoints in `crates/common/src/msgbus/switchboard.rs`, the
+   `DataClient` and `ExecutionClient` traits, client and config factories, `CatalogReader` and
+   `CatalogWriter`, and the `KernelEventStore` trait. Do not add a parallel data or configuration
+   path.
+5. Respect the feature boundary. Research workstreams compose `BacktestNode` runs and must not be
+   imported by kernel crates. Tooling may depend on engine and research crates; nothing depends on
+   tooling. Research code must never change the deterministic semantics of an individual backtest.
+6. Raw data is immutable. Adjustment, normalization, and derived series are opt-in, recorded per
+   run, and never overwrite raw prices.
+7. Every workstream ships code, tests, documentation, and regenerated stubs in the same change. In
+   this repository that means `make py-stubs` and `make check-generated-drift` are part of the
    change, not a follow-up.
+8. Every workstream adds at least one golden regression scenario (W1). This is the mechanism that
+   proves invariants 2 and 8 for the following workstreams.
 
 ## 2. Repository mechanics
 
@@ -61,262 +80,392 @@ make pre-commit
 For changes in the backtest hot path, also run the relevant benchmarks
 (`make cargo-ci-benches`) and compare.
 
-## 3. Workstream W1: a declared, regenerable regression harness
+## 3. W1: declared, regenerable regression scenarios (L5)
 
-**Objective (design L5).** Turn the existing deterministic comparison machinery into a declared,
-auto-discovered, one-command-regenerable regression suite.
+**Objective.** Turn the existing deterministic comparison machinery into declared, auto-discovered,
+one-command-regenerable verification infrastructure, and make it the gate for every later
+workstream.
 
 **What already exists.** `CanonicalBacktestResult` in `crates/backtest/src/result.rs` produces a
 versioned canonical document (`nautilus-backtest-result/v1`) with identity normalization,
-`digest()`, `to_bytes()`/`from_slice()`, and `first_divergence()`. `python/tests/acceptance/test_backtest.py`
-asserts golden values by hand. `BacktestResult` Python bindings live in
-`crates/backtest/src/python/result.rs` and expose statistics but not canonical bytes or a digest.
+`digest()`, `to_bytes()` and `from_slice()`, and `first_divergence()`.
+`python/tests/acceptance/test_backtest.py` asserts golden values by hand. `BacktestResult` bindings
+live in `crates/backtest/src/python/result.rs` and expose statistics but not canonical bytes or a
+digest.
 
 **Steps.**
 
-1. Expose the canonical artifact to Python: add `canonical_bytes()` and `digest()` methods to the
+1. Expose the canonical artifact to Python: add `canonical_bytes()` and `digest()` to the
    `BacktestResult` bindings in `crates/backtest/src/python/result.rs`, delegating to the existing
-   `CanonicalBacktestResult` writer. Classify the exact-encoding failure path as `# Errors`.
-2. Add a scenario protocol in Python under `python/tests/regression/`: a scenario declares its
-   run configuration, strategy, expected statistics keys, and expected digest.
-3. Add a registry module that enumerates scenarios, so discovery is a list, not reflection over
-   the whole test tree.
+   `CanonicalBacktestResult` writer and classifying the exact-encoding failure path under
+   `# Errors`.
+2. Add a scenario protocol under `python/tests/regression/`: each scenario declares its run
+   configuration, strategy, expected statistics keys, and expected digest.
+3. Add a registry module that enumerates scenarios, so discovery is an explicit list.
 4. Add a reset fixture that returns engines, caches, loggers, and clock state to a clean baseline
-   between scenarios, matching Lean's hard-reset practice
+   between scenarios, matching Lean's hard reset
    ([AlgorithmRunner.cs](https://github.com/QuantConnect/Lean/blob/master/Tests/AlgorithmRunner.cs)).
-5. Add regeneration: a pytest option or environment variable that rewrites the committed
+5. Add regeneration through a pytest option or environment variable that rewrites committed
    expectations from an actual run, producing a reviewable diff.
 6. On mismatch, print `first_divergence().path` so failures name the differing field.
-7. Document the workflow in `docs/developer_guide/testing.md` and add the suite to the Makefile
-   as `pytest-regression`, wired into `pre-flight`.
+7. Define the scenario-per-feature requirement for later workstreams and record it in
+   `docs/developer_guide/testing.md`; add `pytest-regression` to the Makefile and to `pre-flight`.
 
-**Acceptance.** The suite passes on a clean checkout; perturbing a fill model produces a failure
-naming a divergence path; regeneration rewrites the expectation and a second run passes without
+**Boundary.** Research.
+
+**Acceptance.** The suite passes on a clean checkout; perturbing a fill model fails with a named
+divergence path; regeneration rewrites an expectation and a subsequent run passes without
 regenerating; default `make pytest` behaviour is unchanged.
 
-**Risks.** Digest churn on intentional simulation changes. Mitigation: regeneration is explicit
-and reviewed, and `first_divergence()` carries the diagnostic burden.
+**Risks.** Digest churn on intentional simulation changes. Mitigation: regeneration is explicit and
+reviewed, and `first_divergence()` carries the diagnostic burden.
 
-## 4. Workstream W2: trading calendars as data
+## 4. W2: trading calendars as data (L4)
 
-**Objective (design L4).** A venue calendar model loaded from data, used by scheduling and any
-session-aware logic.
-
-**Steps.**
-
-1. Add `crates/model/src/calendars/` with `TradingSession` (open and close times in exchange
-   local time), `TradingCalendar` (weekly sessions, holidays, early closes, time zone), and
-   `CalendarKey` (venue plus instrument class plus optional symbol).
-2. Define the data file as JSON under `crates/model/resources/calendars/` and load it with
-   `include_str!` for a bundled default, with an override path for user data.
-3. Integrate with existing instrument fields: `activation_ns` and `expiration_ns` stay the source
-   of instrument lifetime; the calendar answers whether a given instant is tradeable.
-4. Reimplement the FX helper in `crates/trading/src/sessions.rs` as a thin wrapper over the
-   calendar, keeping the existing function signatures so current behaviour is unchanged.
-5. Expose the calendar through the Python `nautilus_trader.model` facade and add a `make py-stubs`
-   regeneration.
-
-**Acceptance.** A unit test proves a known holiday and a half-day close resolve correctly; the FX
-session functions return identical results to the current implementation for a spread of dates;
-loading a user-supplied calendar overrides the bundled one.
-
-**Risks.** Stale holiday data. Mitigation: the file is versioned, overridable, and validated at
-load with a startup warning when a calendar's coverage ends before the run end.
-
-## 5. Workstream W3: dynamic universe selection
-
-**Objective (design L2).** A selection model that adds and removes instruments at runtime through
-the existing subscription machinery.
+**Objective.** A venue calendar model loaded from data and used by scheduling and session gating.
 
 **Steps.**
 
-1. Add a `Universe` component under `crates/trading/src/universe/`, modelled on the existing
-   actor lifecycle, with a selection function, membership set, and re-selection schedule.
-2. Subscriptions go through the existing data command path: `DataEngine` already handles
-   subscribe and unsubscribe commands and tracks subscription ownership in
-   `crates/data/src/subscription.rs`. Universe membership must release its own subscriptions when
-   an instrument leaves, without disturbing subscriptions owned by other components.
-3. Instrument metadata is requested through the existing `request_instruments` flow, not a new
-   provider interface.
-4. Publish membership changes on the bus with a new topic in
-   `crates/common/src/msgbus/switchboard.rs`, and surface an `on_universe_changed` callback on
-   actors alongside the existing `on_instrument` callbacks.
-5. Scheduling uses clock timers so backtest selection is deterministic.
-6. Expose `Universe` through `crates/trading/src/python/` and the `nautilus_trader.trading`
-   facade.
-7. Guard removals: refuse to remove an instrument with open orders or a non-flat position and
-   report the condition rather than silently dropping the subscription.
+1. Add `crates/model/src/calendars/` with `TradingSession` (open and close in exchange local time),
+   `TradingCalendar` (weekly sessions, holidays, early closes, time zone), and a calendar key of
+   venue plus instrument class plus optional symbol.
+2. Define the data file as JSON under `crates/model/resources/calendars/`, loaded with `include_str!`
+   for the bundled default and overridable by path. Treat the calendar as an immutable input to a
+   run.
+3. Keep `activation_ns` and `expiration_ns` as the source of instrument lifetime; the calendar
+   answers whether a given instant is tradeable.
+4. Reimplement the FX helpers in `crates/trading/src/sessions.rs` as a thin wrapper over the
+   calendar, keeping existing signatures and results.
+5. Validate at load and warn when calendar coverage ends before the run end.
+6. Expose the calendar through the Python `nautilus_trader.model` facade and regenerate stubs.
 
-**Acceptance.** A backtest where a universe selects instruments on a schedule runs deterministically
-and reproduces the same result across reruns; a live sandbox node can add and remove instruments
-without leaking subscriptions; a removal with an open position is refused with a clear log.
+**Boundary.** Engine and research.
 
-**Risks.** Subscription ownership bugs and live metadata gaps. Mitigation: explicit ownership
-tests in `crates/data/src/subscription.rs`, and a capability check that lets an adapter report it
-cannot supply metadata.
+**Acceptance.** A unit test resolves a known holiday and a half-day close; the FX session functions
+return identical results to the current implementation across a spread of dates; a user-supplied
+calendar overrides the bundled one; a golden scenario proves existing runs are unchanged.
 
-## 6. Workstream W4: parameter optimization
+**Risks.** Stale holiday data. Mitigation: versioned and overridable data, plus a coverage warning.
 
-**Objective (design L6).** A first-class optimizer front end over backtest runs.
+## 5. W3: session-aware scheduled events (L11)
+
+**Objective.** Distinguish clock timers from trading-session events and deliver both through the
+existing timer machinery.
 
 **Steps.**
 
-1. Define the objective as a function over the existing portfolio statistics in
-   `crates/analysis/src/statistics/`, with constraints expressed over the same values.
-2. Implement the search strategies separately from execution: a strategy enumerates parameter
-   sets; a runner executes them. Mirror Lean's split between
-   [GridSearchOptimizationStrategy.cs](https://github.com/QuantConnect/Lean/blob/master/Optimizer/Strategies/GridSearchOptimizationStrategy.cs)
-   and the optimizer host, without adopting its single-process queue semantics.
-3. Fan out runs at the process level: each parameter set runs in its own process using the built
-   extension or CLI, so the single-threaded kernel is unchanged and the Python GIL is not a
-   constraint.
-4. Emit results as canonical backtest results plus the parameter set, using the existing
-   `CanonicalBacktestResult` digest so runs are comparable.
-5. Expose the surface in `crates/cli/src/opt.rs` as an `optimize` subcommand, and a Python
-   helper in the backtest package for notebook use.
-6. Constrain concurrency by available memory, not by CPU alone, because each run loads its own
-   data.
+1. Add a scheduling layer over W2 that produces session events (premarket, open, opening-range
+   complete, midday, pre-close, close, early close) and calendar events (holidays, expirations, and
+   user timestamps such as economic releases).
+2. Deliver events through the existing `Clock` and timer callback path
+   (`crates/common/src/timer.rs`) so ordering and determinism are inherited, not reinvented.
+3. Convert exchange local time to UTC at schedule time so an event fires once per backtest and once
+   per live session, with no wall-clock dependence in backtest.
+4. Surface the events to actors and strategies alongside the existing `on_time_event` callback, and
+   document the distinction in `docs/concepts/`.
+5. Add a golden scenario for a holiday and an early close.
 
-**Acceptance.** A sweep over a small parameter grid returns the same best result as running the
-same grid by hand; an objective over Sharpe ratio and maximum drawdown behaves as specified; a
-failing run does not abort the sweep.
+**Boundary.** Engine and research.
 
-**Risks.** Memory blowup with concurrent catalog reads. Mitigation: a documented concurrency limit
-and a warmup-free path that reuses a loaded catalog where the run configuration allows it.
+**Acceptance.** A strategy scheduled at market open fires at the session open in backtest and live
+sandbox; an early close shifts dependent events; a half-day produces the documented event set; no
+wall-clock read appears on the backtest path.
 
-## 7. Workstream W5: research that reuses engine primitives
+**Risks.** Correctness depends on W2 data quality and on time zone handling. Mitigation: property
+tests over session boundaries and a documented failure mode when a calendar is missing.
 
-**Objective (design L7).** Notebook workflows over the same instrument and data types as backtests.
+## 6. W4: corporate actions, identity, and the data contract (L3, L9A)
 
-**Steps.**
-
-1. Add a Python-only helper in `python/nautilus_trader/analysis/research.py` that opens a
-   `ParquetDataCatalog`, loads instruments and data with the existing Python catalog bindings,
-   and exposes them as typed Nautilus objects plus a DataFrame conversion via
-   `python/nautilus_trader/persistence/catalog_to_df.py`.
-2. Compute indicators with the existing indicator API rather than a second implementation.
-3. Provide a small replay helper that yields data in `ts_init` order so notebook code can mirror
-   strategy logic without constructing an engine.
-4. Do not add a research mode to the kernel; this stays a Python convenience over existing
-   components.
-
-**Acceptance.** A notebook example under `examples/backtest/notebooks/` loads a catalog, computes
-an indicator, and reproduces the values a backtest of the same data produces.
-
-**Risks.** A divergent second data path. Mitigation: the helper must call the same catalog and
-wrangler code paths used by `BacktestNode`.
-
-## 8. Workstream W6: corporate actions, identity, and price normalization
-
-**Objective (design L3).** Represent and apply splits, dividends, delistings, and symbol changes.
+**Objective.** Represent and apply splits, dividends, delistings, and symbol changes, and define the
+on-disk contract for that auxiliary data.
 
 **Steps.**
 
 1. Define auxiliary data types in `crates/model/src/data/` and register them with the existing
-   data-type macro so catalog paths, Arrow schemas, and bus topics are generated consistently.
-2. Persist and query them through `CatalogReader` and `CatalogWriter`; the catalog layout gains
-   the new type directories automatically.
-3. Add an opt-in adjustment stage. The default keeps raw data untouched. Where enabled, the stage
-   converts adjusted data to raw by applying the action series, and emits the actions as events on
-   the bus so strategies can react.
-4. Model identity separately from price: a mapping from venue symbol to instrument id over time,
-   resolved before data reaches the engines, with a rename emitted as an event.
-5. Handle delisting as a terminal instrument status with an explicit position outcome, reusing the
-   existing `InstrumentClose` path rather than a new settlement mechanism.
-6. Add a documented canonical form for the auxiliary files and extend the catalog documentation in
+   data-type macro so catalog paths, Arrow schemas, and bus topics follow the generated convention.
+2. Persist and query them through `CatalogReader` and `CatalogWriter`; the catalog gains the new
+   type directories automatically.
+3. Keep three representations explicitly distinct and non-interchangeable: raw input (immutable),
+   derived series (adjusted prices, adjusted OHLC, total return, produced on demand), and trading
+   events (split, dividend, delisting, symbol change, delivered as data).
+4. Add an opt-in adjustment stage selected per data configuration. The default keeps raw data
+   untouched. Where enabled, the stage converts adjusted input to raw by applying the action series
+   and emits the actions as events.
+5. Model identity separately from price: a mapping from venue symbol to instrument id over time,
+   resolved before data reaches the engines, with renames emitted as events.
+6. Model delisting as a terminal instrument status whose position outcome reuses the existing
+   `InstrumentClose` path.
+7. Document the contract and the file formats, with a colocated readme, and extend
    `docs/concepts/data/catalog.md`.
+8. Record which representation a run consumed, so a result is interpretable later.
 
-**Acceptance.** A synthetic equity series with a 4:1 split and a dividend reproduces the expected
-raw and adjusted prices; a rename mid-series resolves to a single instrument identity; a delisting
-closes positions through the existing instrument-close path; the default path leaves all existing
-golden results unchanged.
+**Boundary.** Engine and research. File formats are the data contract (L9A).
 
-**Risks.** Adjusted-versus-raw ambiguity is the classic source of silent error. Mitigation: raw data
-is never mutated, adjustment is opt-in, and the run records which normalization was applied.
+**Acceptance.** A synthetic series with a 4:1 split and a dividend reproduces the expected raw and
+adjusted prices; a rename mid-series resolves to one identity; a delisting closes positions through
+the existing instrument-close path; the default path leaves existing golden digests unchanged; a
+golden scenario covers split and dividend handling.
 
-## 9. Workstream W7: file-based configuration
+**Risks.** Mixed adjusted and raw semantics inside one strategy is the classic silent error.
+Mitigation: raw data immutable, adjustment opt-in, representation recorded per run, and a golden
+scenario asserting the default path is unchanged.
 
-**Objective (design L8).** Optional file configuration that maps onto existing typed configs.
+## 7. W5: universe definition, selection, and membership (L2)
 
-**Steps.**
-
-1. Define a schema that mirrors `NautilusKernelConfig`, `BacktestEngineConfig`, and
-   `LiveNodeConfig` fields, with named environments layered over a base section.
-2. Implement loading and validation in Rust so errors are raised at construction with typed
-   messages, not at runtime.
-3. Expose it through `nautilus-cli` and the Python constructors as an alternative input, with the
-   typed constructors remaining authoritative.
-4. Document the precedence order explicitly and test it, including the failure mode for unknown
-   keys, consistent with the `deny_unknown_fields` convention used by adapter configs.
-
-**Acceptance.** A YAML file reproduces a config constructed by hand; an unknown key fails
-validation; environment layering resolves in the documented order.
-
-**Risks.** Two configuration surfaces drifting. Mitigation: the file schema is generated from or
-validated against the typed configs in a test.
-
-## 10. Workstream W8: signal and target layer
-
-**Objective (design L1).** A typed signal and target layer between decision-making and order
-submission. Do this last and behind a feature.
+**Objective.** A selection model and membership lifecycle that add and remove instruments at runtime
+through the existing subscription machinery.
 
 **Steps.**
 
-1. Define an `Insight`-style value type in `crates/model/` with direction, period or expiry,
-   magnitude, confidence, source, and score. Note that `crates/common/src/signal.rs` already
-   defines a generic `Signal` with name, value, and timestamps; the insight type is distinct and
-   must not overload it.
-2. Add an optional portfolio-construction component that converts insights into target positions,
-   and a reconciler that compares targets with `Portfolio` positions and emits the minimal order
-   set. Reuse `crates/risk/src/sizing.rs` for sizing and the `RiskEngine` for pre-trade checks.
-3. Keep direct order submission from strategies fully supported; the layer is opt-in per strategy.
-4. Expose the types in Python and document the composition in `docs/concepts/`.
+1. Add a `Universe` component under `crates/trading/src/universe/`, modelled on the existing actor
+   lifecycle, with a definition (rule and settings), a clock-driven selection step, and an explicit
+   membership state machine: `ADDED`, `ACTIVE`, `REMOVING`, `REMOVED`.
+2. Implement removal as a process, not an immediate unsubscribe: membership moves to `REMOVING`,
+   open orders are cancelled or reconciled, the position policy is evaluated, the data subscription
+   is released, then membership becomes `REMOVED`. Refuse removal while a position is non-flat and
+   report the condition.
+3. Route subscriptions through the existing data command path, respecting the ownership tracking in
+   `crates/data/src/subscription.rs`, so a departing instrument releases only its own claims.
+4. Request instrument metadata through the existing `request_instruments` flow, not a new provider
+   interface.
+5. Publish membership changes on a new bus topic in
+   `crates/common/src/msgbus/switchboard.rs` and surface an `on_universe_changed` callback alongside
+   the existing `on_instrument` callbacks.
+6. Expose the component through `crates/trading/src/python/` and `nautilus_trader.trading`.
+7. Add a golden scenario with deterministic scheduled membership.
 
-**Acceptance.** A strategy using the insight layer produces identical orders to an equivalent
-strategy submitting orders directly for a simple case; the layer is disabled by default; the
-backtest hot path shows no measurable regression with the layer unused.
+**Boundary.** Engine.
 
-**Risks.** A second source of position intent. Mitigation: targets are reconciled against the cache
-before any order is emitted, and the feature stays behind a flag until the semantics are proven.
+**Acceptance.** A scheduled universe backtest reproduces the same result across reruns; a live
+sandbox node can add and remove instruments without leaking subscriptions; removal with an open
+position is refused with a clear log; an unused universe adds no measurable per-event cost.
 
-## 11. Sequencing
+**Risks.** Subscription ownership bugs and live metadata gaps. Mitigation: explicit ownership tests
+in `crates/data/src/subscription.rs` and a capability check letting an adapter report that it cannot
+supply metadata.
 
-| Phase | Workstreams | Rationale                                                          |
-| ----- | ----------- | ------------------------------------------------------------------ |
-| 1     | W1          | Protects every later change; no core risk                          |
-| 2     | W2, W4, W5  | Independent; W2 unblocks scheduling, W4 and W5 are research-facing |
-| 3     | W3, W7      | W3 depends on W2; W7 is ergonomic and independent                  |
-| 4     | W6, W9      | Data-semantics project; W9 depends on W6                           |
-| 5     | W8          | Deepest change; only after the layer above is stable               |
+## 8. W6: execution realism (L10)
 
-## 12. Cross-cutting acceptance criteria
+**Objective.** Make the existing realism models explicit, composable, and inventoried, before any
+optimization depends on them.
+
+**What already exists.** `crates/execution/src/models/{fee,fill,latency}.rs`; eleven fill variants
+including `OneTickSlippageFillModel`, `LimitOrderPartialFillModel`, `SizeAwareFillModel`,
+`CompetitionAwareFillModel`, `VolumeSensitiveFillModel`, and `MarketHoursFillModel`; seeded
+probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `queue_position` in
+`OrderMatchingEngineConfig`; margin models in `crates/model/src/accounts/margin_model.rs`;
+`MarketStatusAction::Halt`.
+
+**Steps.**
+
+1. Inventory and document the matrix of fee, fill, latency, queue, and liquidity behaviour per venue
+   and instrument class, in `docs/concepts/backtesting/fill-models.md` and the matching engine
+   documentation.
+2. Decide and record whether realistic model selection must become per instrument rather than per
+   matching engine. Do not transplant Lean's per-security slot hierarchy; make the decision on
+   evidence from the inventory.
+3. If slippage can be separated from fill without changing existing golden digests, introduce it as
+   an explicit concern with a documented interface; otherwise document why it stays folded into the
+   fill variants.
+4. Evaluate each candidate addition independently and opt-in: market impact, spread, partial-fill
+   policy, borrow and locate availability for short selling, and auction and halt policy. Prefer
+   extending `OrderMatchingEngineConfig` and adding a `FillModel` implementation over a new
+   abstraction.
+5. Ensure every addition is deterministic, taking an explicit seed where randomness is involved.
+6. Add one golden scenario per added model.
+
+**Boundary.** Engine and research. Models are used by both backtest and sandbox execution.
+
+**Acceptance.** The inventory document matches the code; each new model is independently selectable
+and leaves the default path byte-identical; seeded models reproduce across runs; existing fill
+variants continue to pass their tests unchanged.
+
+**Risks.** Configuration surface growth and golden churn. Mitigation: one model per change, opt-in,
+and a golden scenario per model.
+
+## 9. W7: signal, target, and order layers (L1)
+
+**Objective.** A typed signal and target layer between decision-making and order submission, with
+the order layer unchanged.
+
+**Steps.**
+
+1. Define a signal value in `crates/model/` carrying direction, horizon, strength, source, expiry,
+   and provenance. Do not include fields named confidence or score. Note that
+   `crates/common/src/signal.rs` already defines a generic `Signal` with name, value, and
+   timestamps; the new type is distinct and must not overload it.
+2. Define a target value carrying an instrument plus a target quantity, weight, or notional.
+3. Add an optional portfolio-construction component that consumes portfolio context and risk
+   context and produces targets, reusing `crates/risk/src/sizing.rs` for sizing and the `RiskEngine`
+   for pre-trade checks.
+4. Add a reconciler that compares targets with cache and portfolio state and emits the minimal order
+   set. The cache and portfolio stay authoritative; targets never become a second position store.
+5. Keep direct order submission fully supported; the layer is opt-in per strategy.
+6. Document the three-layer separation in `docs/concepts/`, including that signal is not target and
+   target is not order.
+7. Add a target-to-order parity golden scenario.
+
+**Boundary.** Engine.
+
+**Acceptance.** A strategy using the layer produces identical orders to an equivalent strategy that
+submits orders directly for a simple case; the layer is disabled by default; the hot path shows no
+measurable regression when the layer is unused; the parity golden scenario passes.
+
+**Risks.** Competing ownership of position intent. Mitigation: reconciliation against the
+authoritative cache before any order is emitted, and the feature stays behind a flag until proven.
+
+## 10. W8: optimization as an external research subsystem (L6)
+
+**Objective.** A research optimizer over backtest runs with an explicit methodology boundary.
+
+**Steps.**
+
+1. Define the objective as a function over the existing portfolio statistics in
+   `crates/analysis/src/statistics/`, with constraints over the same values.
+2. Separate search from execution: a strategy enumerates parameter sets; a runner executes them.
+   Mirror the split between Lean's host and
+   [GridSearchOptimizationStrategy.cs](https://github.com/QuantConnect/Lean/blob/master/Optimizer/Strategies/GridSearchOptimizationStrategy.cs)
+   without adopting its single-process queue semantics.
+3. Fan out runs at the process level so the single-threaded kernel and the Python GIL are not
+   constraints, with a documented concurrency limit driven by memory rather than CPU.
+4. Emit results as canonical backtest results plus the parameter set, comparable by digest.
+5. Model the methodology stages explicitly: train, optimize, validate, out-of-sample, walk-forward.
+   These are distinct stages, not one loop over a grid.
+6. Expose an `optimize` subcommand in `crates/cli/src/opt.rs` and a Python helper for notebooks.
+
+**Boundary.** Research. The optimizer composes runs and must never reach into one; it may not alter
+the deterministic semantics of an individual backtest.
+
+**Acceptance.** A sweep over a small grid returns the same best result as running the grid by hand;
+an objective over Sharpe ratio and maximum drawdown behaves as specified; a failing run does not
+abort the sweep; a reproducible optimization golden scenario passes.
+
+**Risks.** Memory blowup under concurrent catalog reads; methodology being conflated with search.
+Mitigation: documented concurrency limit and explicit stage separation.
+
+## 11. W9: research API over shared primitives (L7)
+
+**Objective.** Notebook workflows over the same primitives as backtests, without a second runtime.
+
+**Steps.**
+
+1. Add a Python research module under `python/nautilus_trader/analysis/` that opens a
+   `ParquetDataCatalog`, loads instruments and data with the existing bindings, and exposes typed
+   Nautilus objects plus a DataFrame conversion via
+   `python/nautilus_trader/persistence/catalog_to_df.py`.
+2. Compute indicators with the existing indicator API rather than a second implementation.
+3. Provide a small replay helper that yields data in `ts_init` order so notebook code mirrors
+   strategy logic without constructing an engine.
+4. Do not add a research mode or a query-only engine to the kernel.
+5. Add a notebook example under `examples/backtest/notebooks/` and a test that reproduces the values
+   a backtest of the same data produces.
+
+**Boundary.** Research.
+
+**Acceptance.** The example loads a catalog, computes an indicator, and matches the backtest values
+for the same data; the module imports only catalog, wrangler, and indicator code also used by
+`BacktestNode`.
+
+**Risks.** A divergent second data path. Mitigation: reuse the catalog and wrangler code paths, and
+assert equality against a backtest in a test.
+
+## 12. W10: configuration with explicit precedence (L8)
+
+**Objective.** Optional file input mapping onto existing typed configs, with a tested precedence
+order.
+
+**Steps.**
+
+1. Define a schema mirroring `NautilusKernelConfig`, `BacktestEngineConfig`, and `LiveNodeConfig`
+   fields, with named environment profiles layered over a base section.
+2. Implement the precedence chain explicitly: built-in defaults, config file, environment profile,
+   environment variables, CLI overrides. Document it and test each layer.
+3. Validate in Rust so errors are raised at construction with typed messages, and reject unknown
+   keys consistent with the `deny_unknown_fields` convention in adapter configs.
+4. Expose it through `nautilus-cli` and the Python constructors; the typed constructors remain
+   authoritative.
+5. Add a test asserting the file schema stays in step with the typed configs.
+
+**Boundary.** Tooling.
+
+**Acceptance.** A YAML file reproduces a hand-built config; an unknown key fails validation; each
+precedence layer resolves in the documented order; the schema-drift test fails when a typed config
+field is added without updating the file schema.
+
+**Risks.** Two configuration surfaces drifting. Mitigation: the schema-drift test.
+
+## 13. W11: data CLI (L9B)
+
+**Objective.** A small data surface in `nautilus-cli` over the catalog and existing loaders.
+
+**Steps.**
+
+1. Add data subcommands in `crates/cli/src/opt.rs`: download, validate, convert, generate, inspect,
+   each delegating to `CatalogReader` and `CatalogWriter` and the existing loaders.
+2. Keep the surface explicit and licensing-aware; do not embed provider credentials or bundle data.
+3. Emit machine-readable output for CI use.
+4. Document the commands and the data contract from W4.
+
+**Boundary.** Tooling.
+
+**Acceptance.** `validate` reports a malformed catalog; `convert` produces a catalog that a backtest
+reads; `inspect` lists data types, instruments, and coverage; no credentials are written to disk.
+
+**Risks.** Scope growth into a data platform. Mitigation: the five documented subcommands are the
+whole surface.
+
+## 14. Sequencing
+
+| Phase | Workstreams | Contents                                                                                             | Rationale                                    |
+| ----- | ----------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 0     | Contract    | Invariants, boundaries, determinism rules, raw versus derived semantics, signal and target ownership | Makes the remaining phases enforceable       |
+| 1     | W1          | Regression scenarios and verification infrastructure                                                 | Gate for every later phase                   |
+| 2     | W2, W3      | Calendar, sessions, holidays, early closes, session scheduling                                       | Market-time foundation                       |
+| 3     | W4          | Corporate actions, identity, delisting, normalization, data contract                                 | Equity correctness before optimization       |
+| 4     | W5          | Universe definition, selection, membership                                                           | Depends on market time and identity          |
+| 5     | W6          | Execution realism inventory and additions                                                            | Must precede optimization                    |
+| 6     | W7          | Signal, target, reconciliation                                                                       | Deepest engine change                        |
+| 7     | W8, W9      | Optimizer, research API, walk-forward                                                                | Research over a correct and realistic engine |
+| 8     | W10, W11    | Configuration precedence, data CLI                                                                   | Ergonomics once semantics are settled        |
+
+Phase 0 is documentation and review, not code: it is the acceptance of section 2 of the design
+document. Each later phase depends only on the phases above it.
+
+## 15. Cross-cutting acceptance criteria
 
 - Default behaviour is unchanged: existing golden backtest results and their digests are identical
-  before and after each workstream.
+  before and after each workstream, which W1 makes checkable.
+- Each workstream adds at least one declared regression scenario covering its feature.
 - `make format`, `make pre-commit`, `make cargo-test`, and `make pytest` pass for the affected
   areas.
 - Regenerated stubs and docstrings are committed, and `make check-generated-drift` passes.
-- New public Rust items carry `# Errors` and `# Panics` sections where the conventions require
-  them, and new Python bindings follow the `Py*` wrapper and `py_*` method naming.
+- New public Rust items carry `# Errors` and `# Panics` sections where the conventions require them,
+  and new Python bindings follow the `Py*` wrapper and `py_*` method naming.
 - New hot-path code has a benchmark comparison recorded in the pull request.
 - Documentation is updated in the same change, including the concept page for the affected area.
+- No research or tooling crate is imported by a kernel crate.
 
-## 13. Risks
+## 16. Risks
 
-| Risk                                | Impact | Mitigation                                            |
-| ----------------------------------- | ------ | ----------------------------------------------------- |
-| Scope creep into the kernel runtime | High   | Ground rule 1; reject any slice-style delivery change |
-| Determinism regression              | High   | Clock-driven scheduling; golden digests in CI         |
-| Subscription ownership bugs         | High   | Explicit ownership tests before W3 lands              |
-| Two configuration surfaces          | Medium | Schema validated against typed configs in a test      |
-| Golden churn                        | Medium | Explicit regeneration; divergence paths in failures   |
-| Adjustment correctness              | High   | Raw data immutable; normalization recorded per run    |
-| Memory blowup in optimization       | Medium | Documented concurrency limit; process fan-out only    |
+| Risk                                   | Impact | Mitigation                                                             |
+| -------------------------------------- | ------ | ---------------------------------------------------------------------- |
+| Invariant erosion through feature work | High   | Section 1 gates; a golden scenario per feature                         |
+| Scope creep into the kernel runtime    | High   | Ground rule 1; reject any slice-style delivery change                  |
+| Determinism regression                 | High   | Clock-driven scheduling; digest checks in CI                           |
+| Adjusted and raw semantics mixed       | High   | Immutable raw data; opt-in adjustment; representation recorded per run |
+| Subscription ownership bugs            | High   | Ownership tests before W5 lands                                        |
+| Optimizing on unrealized execution     | High   | W6 precedes W8 by construction                                         |
+| Golden churn                           | Medium | Explicit regeneration; divergence paths in failures                    |
+| Two configuration surfaces             | Medium | Schema-drift test                                                      |
+| Memory blowup in optimization          | Medium | Documented concurrency limit; process fan-out only                     |
+| Research leaking into the kernel       | Medium | Feature boundary rules and a no-research-dependency check              |
 
-## 14. Out of scope
+## 17. Out of scope
 
 - A cloud platform, job queue, or multi-tenant scheduler.
 - Dynamic handler resolution by class-name string from configuration.
 - A slice or time-batch delivery model in the runtime.
+- A research engine mode or a query-only kernel mode.
+- Transplanting Lean's `Security` model-slot hierarchy.
 - AI or ML tooling.
 - Changes to `.github/workflows` and `.github/actions`, which are maintainer-owned.
