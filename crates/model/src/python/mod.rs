@@ -24,6 +24,7 @@ use nautilus_core::python::to_pyvalue_err;
 use pyo3::{PyErr, prelude::*};
 
 pub mod account;
+pub mod calendars;
 pub mod common;
 pub mod data;
 pub mod enums;
@@ -93,6 +94,7 @@ pub fn model(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::types::quantity::Quantity>()?;
     m.add_class::<crate::types::balance::AccountBalance>()?;
     m.add_class::<crate::types::balance::MarginBalance>()?;
+    m.add_class::<crate::calendars::TradingCalendar>()?;
     m.add_class::<crate::python::common::EnumIterator>()?;
     // Data
     m.add_class::<data::PyNautilusDataType>()?;

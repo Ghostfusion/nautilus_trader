@@ -120,6 +120,7 @@
 pub use serde as __serde;
 
 pub mod accounts;
+pub mod calendars;
 pub mod currencies;
 pub mod data;
 pub mod enums;

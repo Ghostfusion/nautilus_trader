@@ -13,9 +13,11 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-//! Provides utilities for determining Forex session times.
-//! Includes functions to convert UTC times to session local times
-//! and retrieve the next or previous session start/end.
+//! Provides utilities for determining foreign exchange session times.
+//!
+//! The session schedules come from the bundled trading calendars in
+//! [`nautilus_model::calendars`], so the session times, time zones, and weekday rules have a single
+//! definition which can be overridden by supplying a calendar rather than by editing this module.
 //!
 //! All FX sessions run Monday to Friday local time:
 //!
@@ -24,24 +26,13 @@
 //! - London Session    0800-1600 (Europe / London)
 //! - New York Session  0800-1700 (America / New York)
 
-use std::sync::LazyLock;
-
-use jiff::{
-    Span, Timestamp, Zoned,
-    civil::{Time, Weekday},
-    tz::TimeZone,
+use jiff::{Timestamp, Zoned};
+use nautilus_model::{
+    calendars::{CalendarKey, TradingCalendar, bundled},
+    enums::AssetClass,
+    identifiers::{Symbol, Venue},
 };
-use nautilus_core::datetime::get_timezone;
 use strum::{Display, EnumIter, EnumString, FromRepr};
-
-static SYDNEY_TIMEZONE: LazyLock<TimeZone> =
-    LazyLock::new(|| get_timezone("Australia/Sydney").expect("bundled Australia/Sydney timezone"));
-static TOKYO_TIMEZONE: LazyLock<TimeZone> =
-    LazyLock::new(|| get_timezone("Asia/Tokyo").expect("bundled Asia/Tokyo timezone"));
-static LONDON_TIMEZONE: LazyLock<TimeZone> =
-    LazyLock::new(|| get_timezone("Europe/London").expect("bundled Europe/London timezone"));
-static NEW_YORK_TIMEZONE: LazyLock<TimeZone> =
-    LazyLock::new(|| get_timezone("America/New_York").expect("bundled America/New_York timezone"));
 
 /// Represents a major Forex market session based on trading hours.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, FromRepr, EnumIter, EnumString, Display)]
@@ -69,122 +60,101 @@ pub enum ForexSession {
 }
 
 impl ForexSession {
-    /// Returns the timezone associated with the session.
-    fn timezone(self) -> &'static TimeZone {
-        match self {
-            Self::Sydney => &SYDNEY_TIMEZONE,
-            Self::Tokyo => &TOKYO_TIMEZONE,
-            Self::London => &LONDON_TIMEZONE,
-            Self::NewYork => &NEW_YORK_TIMEZONE,
-        }
+    /// Returns the bundled calendar for this session.
+    fn calendar(self) -> &'static TradingCalendar {
+        let key = CalendarKey::new(
+            Venue::from("FX"),
+            AssetClass::FX,
+            Some(Symbol::from(self.calendar_symbol())),
+        );
+
+        bundled(&key).expect("bundled FX session calendars must be present")
     }
 
-    /// Returns the start and end times for the session in local time.
-    const fn session_times(self) -> (Time, Time) {
+    /// Returns the session symbol used in the bundled calendar key.
+    const fn calendar_symbol(self) -> &'static str {
         match self {
-            Self::Sydney => (Time::constant(7, 0, 0, 0), Time::constant(16, 0, 0, 0)),
-            Self::Tokyo => (Time::constant(9, 0, 0, 0), Time::constant(18, 0, 0, 0)),
-            Self::London => (Time::constant(8, 0, 0, 0), Time::constant(16, 0, 0, 0)),
-            Self::NewYork => (Time::constant(8, 0, 0, 0), Time::constant(17, 0, 0, 0)),
+            Self::Sydney => "SYDNEY",
+            Self::Tokyo => "TOKYO",
+            Self::London => "LONDON",
+            Self::NewYork => "NEW_YORK",
         }
     }
 }
 
 /// Converts a UTC timestamp to the local time for the given Forex session.
+///
+/// # Panics
+///
+/// Panics if the bundled FX session calendars are unavailable.
 #[must_use]
 pub fn fx_local_from_utc(session: ForexSession, time_now: Timestamp) -> Zoned {
-    time_now.to_zoned(session.timezone().clone())
+    time_now.to_zoned(session.calendar().time_zone().clone())
 }
 
 /// Returns the next session start time in UTC.
+///
+/// # Panics
+///
+/// Panics if the bundled FX session calendars are unavailable, or the schedule resolves no
+/// boundary. Both indicate missing or invalid bundled calendar data rather than a caller error.
 #[must_use]
 pub fn fx_next_start(session: ForexSession, time_now: Timestamp) -> Timestamp {
-    let local_now = fx_local_from_utc(session, time_now);
-    let (start_time, _) = session.session_times();
-
-    fx_next_boundary(&local_now, start_time)
+    session
+        .calendar()
+        .next_open(time_now)
+        .expect("FX session must have a next open")
 }
 
 /// Returns the previous session start time in UTC.
+///
+/// # Panics
+///
+/// Panics if the bundled FX session calendars are unavailable, or the schedule resolves no
+/// boundary. Both indicate missing or invalid bundled calendar data rather than a caller error.
 #[must_use]
 pub fn fx_prev_start(session: ForexSession, time_now: Timestamp) -> Timestamp {
-    let local_now = fx_local_from_utc(session, time_now);
-    let (start_time, _) = session.session_times();
-
-    fx_prev_boundary(&local_now, start_time)
+    session
+        .calendar()
+        .prev_open(time_now)
+        .expect("FX session must have a previous open")
 }
 
 /// Returns the next session end time in UTC.
+///
+/// # Panics
+///
+/// Panics if the bundled FX session calendars are unavailable, or the schedule resolves no
+/// boundary. Both indicate missing or invalid bundled calendar data rather than a caller error.
 #[must_use]
 pub fn fx_next_end(session: ForexSession, time_now: Timestamp) -> Timestamp {
-    let local_now = fx_local_from_utc(session, time_now);
-    let (_, end_time) = session.session_times();
-
-    fx_next_boundary(&local_now, end_time)
+    session
+        .calendar()
+        .next_close(time_now)
+        .expect("FX session must have a next close")
 }
 
 /// Returns the previous session end time in UTC.
+///
+/// # Panics
+///
+/// Panics if the bundled FX session calendars are unavailable, or the schedule resolves no
+/// boundary. Both indicate missing or invalid bundled calendar data rather than a caller error.
 #[must_use]
 pub fn fx_prev_end(session: ForexSession, time_now: Timestamp) -> Timestamp {
-    let local_now = fx_local_from_utc(session, time_now);
-    let (_, end_time) = session.session_times();
-
-    fx_prev_boundary(&local_now, end_time)
-}
-
-fn fx_next_boundary(local_now: &Zoned, session_time: Time) -> Timestamp {
-    let timezone = local_now.time_zone().clone();
-    let mut date = local_now.date();
-
-    if local_now.time() > session_time {
-        date = date
-            .checked_add(Span::new().days(1))
-            .expect("FX session date must be representable");
-    }
-
-    let weekend_days = match date.weekday() {
-        Weekday::Saturday => 2,
-        Weekday::Sunday => 1,
-        _ => 0,
-    };
-    date = date
-        .checked_add(Span::new().days(weekend_days))
-        .expect("FX session date must be representable");
-
-    timezone
-        .to_ambiguous_timestamp(date.to_datetime(session_time))
-        .unambiguous()
-        .expect("FX session boundary must be a unique local time")
-}
-
-fn fx_prev_boundary(local_now: &Zoned, session_time: Time) -> Timestamp {
-    let timezone = local_now.time_zone().clone();
-    let mut date = local_now.date();
-
-    if local_now.time() < session_time {
-        date = date
-            .checked_sub(Span::new().days(1))
-            .expect("FX session date must be representable");
-    }
-
-    let weekend_days = match date.weekday() {
-        Weekday::Saturday => 1,
-        Weekday::Sunday => 2,
-        _ => 0,
-    };
-    date = date
-        .checked_sub(Span::new().days(weekend_days))
-        .expect("FX session date must be representable");
-
-    timezone
-        .to_ambiguous_timestamp(date.to_datetime(session_time))
-        .unambiguous()
-        .expect("FX session boundary must be a unique local time")
+    session
+        .calendar()
+        .prev_close(time_now)
+        .expect("FX session must have a previous close")
 }
 
 #[cfg(test)]
 mod tests {
-    use jiff::{civil::Date, tz::Offset};
+    use jiff::{
+        Span,
+        civil::{Date, Time, Weekday},
+        tz::Offset,
+    };
     use rstest::rstest;
 
     use super::*;
@@ -205,7 +175,8 @@ mod tests {
         let datetime = date.at(i8::try_from(hour).unwrap(), 0, 0, 0);
 
         session
-            .timezone()
+            .calendar()
+            .time_zone()
             .to_ambiguous_timestamp(datetime)
             .unambiguous()
             .unwrap()
@@ -218,6 +189,64 @@ mod tests {
                     .unwrap()
                     .at(hour, minute, 0, 0),
             )
+            .unwrap()
+    }
+
+    /// Returns the session local times of the pre-calendar implementation.
+    const fn legacy_session_times(session: ForexSession) -> (Time, Time) {
+        match session {
+            ForexSession::Sydney => (Time::constant(7, 0, 0, 0), Time::constant(16, 0, 0, 0)),
+            ForexSession::Tokyo => (Time::constant(9, 0, 0, 0), Time::constant(18, 0, 0, 0)),
+            ForexSession::London => (Time::constant(8, 0, 0, 0), Time::constant(16, 0, 0, 0)),
+            ForexSession::NewYork => (Time::constant(8, 0, 0, 0), Time::constant(17, 0, 0, 0)),
+        }
+    }
+
+    /// The forward weekday walk of the pre-calendar implementation.
+    ///
+    /// Retained as the migration oracle for `fx_next_start` and `fx_next_end`.
+    fn legacy_next_boundary(local_now: &Zoned, session_time: Time) -> Timestamp {
+        let timezone = local_now.time_zone().clone();
+        let mut date = local_now.date();
+
+        if local_now.time() > session_time {
+            date = date.checked_add(Span::new().days(1)).unwrap();
+        }
+
+        let weekend_days = match date.weekday() {
+            Weekday::Saturday => 2,
+            Weekday::Sunday => 1,
+            _ => 0,
+        };
+        date = date.checked_add(Span::new().days(weekend_days)).unwrap();
+
+        timezone
+            .to_ambiguous_timestamp(date.to_datetime(session_time))
+            .unambiguous()
+            .unwrap()
+    }
+
+    /// The backward weekday walk of the pre-calendar implementation.
+    ///
+    /// Retained as the migration oracle for `fx_prev_start` and `fx_prev_end`.
+    fn legacy_prev_boundary(local_now: &Zoned, session_time: Time) -> Timestamp {
+        let timezone = local_now.time_zone().clone();
+        let mut date = local_now.date();
+
+        if local_now.time() < session_time {
+            date = date.checked_sub(Span::new().days(1)).unwrap();
+        }
+
+        let weekend_days = match date.weekday() {
+            Weekday::Saturday => 1,
+            Weekday::Sunday => 2,
+            _ => 0,
+        };
+        date = date.checked_sub(Span::new().days(weekend_days)).unwrap();
+
+        timezone
+            .to_ambiguous_timestamp(date.to_datetime(session_time))
+            .unambiguous()
             .unwrap()
     }
 
@@ -434,5 +463,56 @@ mod tests {
         let expected = utc_timestamp(2020, 7, 10, 21, 0); // Previous NY session end
 
         assert_eq!(result, expected);
+    }
+
+    #[rstest]
+    fn test_fx_boundaries_match_the_pre_calendar_implementation() {
+        let sessions = [
+            ForexSession::Sydney,
+            ForexSession::Tokyo,
+            ForexSession::London,
+            ForexSession::NewYork,
+        ];
+        let start = utc_timestamp(2023, 1, 1, 0, 0);
+        let end = utc_timestamp(2026, 1, 1, 0, 0);
+        let mut checked = 0_u32;
+
+        for session in sessions {
+            let (start_time, end_time) = legacy_session_times(session);
+            let mut ts = start;
+
+            while ts < end {
+                let local = fx_local_from_utc(session, ts);
+
+                assert_eq!(
+                    fx_next_start(session, ts),
+                    legacy_next_boundary(&local, start_time),
+                    "next start at {ts} for {session:?}"
+                );
+                assert_eq!(
+                    fx_prev_start(session, ts),
+                    legacy_prev_boundary(&local, start_time),
+                    "previous start at {ts} for {session:?}"
+                );
+                assert_eq!(
+                    fx_next_end(session, ts),
+                    legacy_next_boundary(&local, end_time),
+                    "next end at {ts} for {session:?}"
+                );
+                assert_eq!(
+                    fx_prev_end(session, ts),
+                    legacy_prev_boundary(&local, end_time),
+                    "previous end at {ts} for {session:?}"
+                );
+
+                ts = ts.checked_add(Span::new().hours(12)).unwrap();
+                checked += 1;
+            }
+        }
+
+        assert!(
+            checked > 8_000,
+            "expected a wide spread of instants, checked {checked}"
+        );
     }
 }

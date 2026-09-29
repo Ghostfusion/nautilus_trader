@@ -23,6 +23,11 @@ How to implement trading strategies using the `Strategy` component.
 
 Instrument definitions for tradable assets and contracts.
 
+## Trading Calendars
+
+Session schedules, holidays, and early closes as immutable data, including the bundled
+foreign exchange and equity calendars and how they answer tradeability queries.
+
 ## Synthetics
 
 User-defined instruments whose prices are computed by evaluating a numeric expression over component instrument prices.

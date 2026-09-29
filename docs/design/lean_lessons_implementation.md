@@ -175,21 +175,33 @@ change. Mitigation: regeneration covers all layers in one command and is explici
 1. Add `crates/model/src/calendars/` with `TradingSession` (open and close in exchange local time),
    `TradingCalendar` (weekly sessions, holidays, early closes, time zone), and a calendar key of
    venue plus instrument class plus optional symbol.
-2. Define the data file as JSON under `crates/model/resources/calendars/`, loaded with `include_str!`
-   for the bundled default and overridable by path. Treat the calendar as an immutable input to a
-   run.
+2. Define the data file as JSON under `crates/model/resources/calendars/` with the schema identifier
+   `nautilus-trading-calendar/v1`, loaded with `include_str!` for the bundled default and overridable
+   by path. Bundle the four major FX sessions under the synthetic venue `FX` (keyed by session
+   symbol) and the `XNYS` equity calendar for 2024 and 2025. Treat the calendar as an immutable input
+   to a run. Sessions are declared per weekday, sorted, non-overlapping, and do not cross midnight: a
+   market that trades overnight is described as two sessions.
 3. Keep `activation_ns` and `expiration_ns` as the source of instrument lifetime; the calendar
    answers whether a given instant is tradeable.
 4. Reimplement the FX helpers in `crates/trading/src/sessions.rs` as a thin wrapper over the
-   calendar, keeping existing signatures and results.
+   calendar, keeping existing signatures and results. Retain the pre-migration weekday walk in the
+   test module as a differential oracle over a spread of dates. The wrapper no longer panics when a
+   candidate local time falls in a daylight saving gap, because the calendar resolves such a time
+   with compatible disambiguation; the FX session times never fall in a gap, so results are
+   unchanged.
 5. Validate at load and warn when calendar coverage ends before the run end.
-6. Expose the calendar through the Python `nautilus_trader.model` facade and regenerate stubs.
+6. Expose the calendar through the Python `nautilus_trader.model` facade and regenerate stubs, with
+   the surface limited to loading, key and coverage accessors, tradeability, session queries, and
+   boundary resolution.
+7. Document the calendars in `docs/concepts/trading_calendars.md` and link the page from
+   `docs/concepts/index.md`.
 
 **Boundary.** Engine and research.
 
 **Acceptance.** A unit test resolves a known holiday and a half-day close; the FX session functions
-return identical results to the current implementation across a spread of dates; a user-supplied
-calendar overrides the bundled one; a golden scenario proves existing runs are unchanged.
+return identical results to the pre-calendar implementation across a spread of dates; a user-supplied
+calendar resolves its own sessions for a key that is also bundled; a Python test exercises the
+exposed surface; the W1 regression scenarios still pass with unchanged digests.
 
 **Risks.** Stale holiday data. Mitigation: versioned and overridable data, plus a coverage warning.
 
