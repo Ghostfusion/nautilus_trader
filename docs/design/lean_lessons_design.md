@@ -6,10 +6,14 @@ not a commitment to implement anything, and it does not change the architecture 
 
 The companion implementation plan is [lean_lessons_implementation.md](lean_lessons_implementation.md).
 
-Revision note: this revision adds the architectural invariants, the anti-porting specification, the
-engine/research/tooling classification, and workstreams L10 (execution realism) and L11
-(session-aware scheduled events), and reorders the roadmap so equity identity and market time
-precede optimization.
+Revision note: the first revision added the architectural invariants, the anti-porting
+specification, the engine/research/tooling classification, and workstreams L10 (execution realism)
+and L11 (session-aware scheduled events), and reordered the roadmap so equity identity and market
+time precede optimization. The second revision converted the open questions into binding decisions
+D12 to D18 (section 12), reduced the remaining uncertainty to one open question, the compatibility
+target (section 13), strengthened the central contract, and recast L1 as an optional pipeline, L3 as
+an asset-class-scoped capability, L5 as a three-layer oracle, L6 as Python orchestration over Rust
+execution, L8 as optional convenience, and L10 as a two-stage migration.
 
 ## 1. Purpose and scope
 
@@ -27,13 +31,29 @@ Non-goals:
   feature.
 - Adding AI/ML tooling, which the project roadmap keeps out of scope.
 
-### The central thesis
+### The central contract
 
+> Extract selected, Lean-proven abstractions and research capabilities while preserving
+> NautilusTrader's event-driven runtime, typed domain model, deterministic simulation, and
+> backtest/live execution parity.
+>
 > Borrow semantics from Lean, not implementation mechanisms.
 >
 > A Lean mechanism may be adopted only when its semantics close a demonstrated NautilusTrader
 > capability gap without weakening NautilusTrader's event-driven, deterministic, typed, low-latency
 > architecture.
+
+Two consequences follow, and they are binding:
+
+1. **The compatibility target is architectural capability parity, not programming-model
+   compatibility.** The goal is dynamic universes, portfolio targets, corporate actions, calendars,
+   optimization, research APIs, and richer execution modeling, implemented the Nautilus way. It is
+   explicitly not an `Insight`/`AlphaModel`/`RiskModel`-shaped user-facing API that mirrors Lean.
+   Research-workflow parity (notebooks, optimization, walk-forward, regression, data tooling) is
+   pursued selectively. See open question 19.
+2. **Both execution paths are first-class.** Lean's framework abstraction and NautilusTrader's
+   existing direct-execution model are not in competition. The project supports both; it does not
+   choose.
 
 This is the guiding principle for every item below, and it is the reason some Lean capabilities are
 deliberately rejected in section 9. "Lean has X and we do not" is not by itself a reason to build X.
@@ -235,30 +255,40 @@ Verified in this repository:
 
 ## 8. Candidate learnings
 
-Each item states the Lean mechanism, the demonstrated gap, the proposed Nautilus-native design, the
-boundary (engine, research, or tooling), the tradeoffs, and the invariant it stresses.
+Each item states the Lean mechanism, the demonstrated gap, the Nautilus-native design, the boundary
+(engine, research, or tooling), the invariant it stresses, and where applicable the decision that
+settles it.
 
-### L1. Signal, target, and order as three distinct layers
+### L1. An optional Signal, Target, and Execution pipeline
 
 - **Lean mechanism.** `Insight` carries the alpha view; portfolio construction converts insights
   into `PortfolioTarget` values; execution consumes targets.
 - **Demonstrated gap.** Strategy code goes directly from a decision to `submit_order`. There is no
   typed representation of intent that one component can produce, another can modify, and a third can
-  reconcile against current positions.
-- **Proposed design.** Three distinct semantic layers, deliberately not Lean's object hierarchy:
-  - `Signal`: direction, horizon, strength, source, expiry, provenance. A statement of view.
+  reconcile against current positions, so multi-asset allocation and strategy composition must be
+  hand-rolled.
+- **Decision (D12).** Adopt an optional signal-to-target-to-execution pipeline. Direct order
+  submission through `ExecutionAlgorithm` remains a first-class path.
+- **Proposed design.** Two supported paths, not a mandatory hierarchy:
+  - Direct path: strategy, then `ExecutionAlgorithm`, then orders. Unchanged.
+  - Framework path: strategy or alpha, then `Signal`, then portfolio context and risk context, then
+    target construction, then target reconciliation, then `ExecutionAlgorithm`, then orders.
+  Three distinct semantic objects:
+  - `Signal`: direction, horizon, strength, source, expiry, provenance. A statement of view. It is
+    not a trading command, and it does not know an order quantity.
   - `Target`: instrument plus a target quantity, weight, or notional. A statement of desired
-    exposure, after portfolio context and risk constraints.
+    exposure, after portfolio and risk context.
   - `Order`: the existing order types. The only thing that reaches a venue.
-  Inputs and their provenance are kept separate from the derived target, and the target is separate
-  from the order. The pipeline is: data events, then strategy or alpha, then signal, then portfolio
-  and risk context, then target construction, then target reconciliation, then existing risk checks,
-  then orders.
+  Do not create a mandatory `AlphaModel`, `PortfolioConstructionModel`, `RiskManagementModel`, and
+  `ExecutionModel` hierarchy. Use optional Nautilus-native interfaces. Because both paths converge
+  on `ExecutionAlgorithm`, the layer is additive rather than invasive.
 - **Boundary.** Engine, opt-in per strategy.
 - **Invariants stressed.** 6 (single source of truth) and 8 (direct-order compatibility). The
   reconciler must treat the cache and portfolio as authoritative; targets never become a second
   position store. Fields named confidence or score are deliberately avoided in `Signal` so that the
   type does not imply a probability it cannot guarantee.
+- **Justification.** Multi-asset allocation, strategy composition, and research workflows. If those
+  are not goals, the layer is not needed.
 - **Tradeoffs.** A new abstraction near the hot path. It must be inert when unused, and the
   reconciler must not fight the order emulator or `RiskEngine`.
 - **Effort and impact.** High effort, high impact. Do this last and behind a feature.
@@ -286,7 +316,7 @@ boundary (engine, research, or tooling), the tradeoffs, and the invariant it str
   membership timing must match backtest membership timing for parity.
 - **Effort and impact.** High effort, high impact for equity workflows.
 
-### L3. Corporate actions, instrument identity, and normalization semantics
+### L3. Instrument identity, corporate actions, and historical normalization
 
 - **Lean mechanism.** Factor files scale prices; map files carry identity, renames, and delisting
   dates; `Split`, `Dividend`, `Delisting`, and `SymbolChangedEvent` are auxiliary data; normalization
@@ -295,6 +325,15 @@ boundary (engine, research, or tooling), the tradeoffs, and the invariant it str
   no symbol history, and delisting has no representation. A backtest over an adjusted-price provider
   can silently mix adjusted history, raw execution prices, adjusted indicators, and raw portfolio
   accounting inside one strategy.
+- **Decision (D13).** Implement L3 as an asset-class-scoped
+  identity, corporate-action, and normalization capability, not a universal engine concern.
+- **Scope.** The name matters, because the problem is larger than splits and dividends:
+  instrument identity, symbol mapping, corporate actions, historical normalization, and
+  delisting or survivorship handling. It is required for equity-capable research and trading and
+  must not impose equity-specific runtime behaviour on crypto, FX, or derivatives. Structure it as a
+  capability keyed by instrument class, where unsupported classes are an explicit no-op rather than
+  a silent default. Crypto and FX strategies must not pay for equity machinery, in configuration or
+  in the event path.
 - **Proposed design.** Keep three representations explicitly distinct and never interchangeable:
   - Raw input: raw prices, raw volumes, and raw corporate actions, immutable.
   - Derived series: adjusted prices, adjusted OHLC, and total-return series, produced on demand.
@@ -308,10 +347,10 @@ boundary (engine, research, or tooling), the tradeoffs, and the invariant it str
 - **Boundary.** Engine and research. Data contract for the files (L9A).
 - **Invariants stressed.** 5 (exact arithmetic, raw semantics preserved) and 7 (determinism). Raw
   data is never mutated; adjustment is opt-in and recorded.
-- **Tradeoffs.** Adjustment requires a licensing story for factor data and is not meaningful for
-  crypto and FX, so it must be opt-in and asset-class aware.
-- **Effort and impact.** High effort, high impact. This is a correctness item for equities, not a
-  convenience.
+- **Tradeoffs.** Adjustment requires a licensing story for factor data. The capability must be
+  class-scoped so it is inert for assets where it does not apply.
+- **Effort and impact.** High effort, high impact for equity-capable workflows. This is a
+  correctness item for equities, not a convenience.
 
 ### L4. Trading calendars as data
 
@@ -339,19 +378,44 @@ boundary (engine, research, or tooling), the tradeoffs, and the invariant it str
 - **Demonstrated gap.** The deterministic machinery already exists, but expectations are written by
   hand per test, scenarios are not enumerated, no single command regenerates expectations, and there
   is no documented reset between scenarios.
-- **Proposed design.** Adapt rather than copy: reuse `CanonicalBacktestResult` as the golden artifact.
-  Each scenario declares expected statistics plus an expected digest; a registry enumerates scenarios;
-  a regeneration mode rewrites expectations so updates are a reviewable diff; the harness resets
-  engine, cache, logger, and clock state between scenarios; failures report
-  `first_divergence().path`.
-  Additionally, make this the verification infrastructure for the whole programme: every later
-  workstream must add at least one golden scenario, for example a deterministic membership scenario
-  for L2, a split and dividend scenario for L3, a holiday and early-close scenario for L4, a
-  reproducible optimization scenario for L6, and a target-to-order parity scenario for L1.
+- **Decision (D18).** Regression validation uses three complementary layers: canonical digest,
+  declared statistics, and deterministic semantic checkpoints. A single digest is too opaque to
+  diagnose; a full event-stream snapshot is too brittle to maintain.
+- **Proposed design.** Adapt rather than copy: reuse `CanonicalBacktestResult` as the golden artifact
+  and add two layers around it.
+  - Layer 1, canonical digest: detects that something changed at all. Cheap enough for CI.
+  - Layer 2, declared statistics: orders, fills, positions, PnL, fees, slippage, maximum drawdown,
+    and final equity. Explains what changed in aggregate.
+  - Layer 3, semantic checkpoints: named events identified by kind, instrument, and occurrence
+    ordinal, for example the first `ORDER_FILLED` on an instrument, the first `POSITION_OPENED`, and
+    the first `POSITION_CLOSED`. Locates where behaviour changed without pinning the whole stream.
+  Checkpoints are semantic rather than positional, so they survive unrelated event insertions:
+
+  ```yaml
+  checkpoints:
+    - event: ORDER_FILLED
+      instrument: AAPL
+      occurrence: 1
+    - event: POSITION_OPENED
+      instrument: AAPL
+      occurrence: 1
+  ```
+
+  A failure reports the layer that failed, the expected and actual values, and then
+  `first_divergence().path`, so the output names the value and the divergence instead of only
+  "digest mismatch". A registry enumerates scenarios; a regeneration mode rewrites expectations so
+  updates are a reviewable diff; the harness resets engine, cache, logger, and clock state between
+  scenarios.
+  This is the safety harness around every other workstream: L5 validates L3, L4, L10, L1, and L2.
+  Every later workstream adds at least one scenario, for example a split and dividend scenario for
+  L3, a holiday and early-close scenario for L4, a model-parity scenario for L10, a deterministic
+  membership scenario for L2, a target-to-order parity scenario for L1, and a reproducible
+  optimization scenario for L6.
 - **Boundary.** Research.
 - **Invariants stressed.** 7 (determinism) and 9 (unused features cost nothing, which a golden
   scenario proves by remaining byte-identical).
-- **Tradeoffs.** Digests are brittle by design; regeneration must be explicit and reviewed.
+- **Tradeoffs.** Three layers mean three places to update on intentional change, so regeneration must
+  cover all of them in one command. Digests remain brittle by design.
 - **Effort and impact.** Low effort, high impact. Do this first.
 
 ### L6. Optimization as an external research subsystem
@@ -360,18 +424,28 @@ boundary (engine, research, or tooling), the tradeoffs, and the invariant it str
   objectives and constraints.
 - **Demonstrated gap.** Users write their own sweeps; there is no objective or constraint
   abstraction and no CLI surface.
-- **Proposed design.** An explicit pipeline of parameter space, search strategy, backtest, objective,
-  constraint, and result, with process-level fan-out so the single-threaded kernel and the Python GIL
-  are not constraints. Results are canonical backtest results plus the parameter set, comparable by
-  digest. The subsystem also exposes the methodology boundary around it: train, optimize, validate,
-  out-of-sample, and walk-forward are distinct stages, not one loop over a grid.
+- **Decision (D16).** Optimization is a research and orchestration capability implemented primarily
+  in Python, while backtest execution remains in the Rust engine. A CLI front end invokes the same
+  Python API; there is no second optimizer implementation and no second semantic model.
+- **Proposed design.** Split responsibilities by capability, which matches the project's existing
+  control-plane split:
+  - Rust owns backtest execution, simulation, event processing, deterministic calculations, and
+    result production.
+  - Python owns parameter spaces, experiment generation, search algorithms, result aggregation,
+    walk-forward experiments, and experiment persistence.
+  - The CLI is thin: `nautilus optimize config.yaml` calls the Python optimization API.
+  The pipeline is parameter space, search strategy, backtest, objective, constraint, and result, with
+  process-level fan-out so the single-threaded kernel and the Python GIL are not constraints.
+  Results are canonical backtest results plus the parameter set, comparable by digest. The
+  methodology boundary is explicit: train, optimize, validate, out-of-sample, and walk-forward are
+  distinct stages, not one loop over a grid.
 - **Boundary.** Research. Never the kernel.
 - **Invariants stressed.** 7 (determinism) and 8 (a strategy that does not use it is unaffected).
 - **Hard boundary statement.** Optimization must never alter the deterministic semantics of an
   individual backtest. It composes runs; it does not reach into them. Without this rule the project
   builds a brute-force parameter engine rather than a research subsystem.
 - **Tradeoffs.** Process fan-out multiplies memory and data-loading cost; document a concurrency
-  limit.
+  limit. A Python-only orchestration layer must not become a second execution path for backtests.
 - **Effort and impact.** Medium effort, high impact for research workflows.
 
 ### L7. Research API over shared primitives
@@ -389,22 +463,27 @@ boundary (engine, research, or tooling), the tradeoffs, and the invariant it str
   wrangler code as `BacktestNode`.
 - **Effort and impact.** Low to medium effort, medium impact.
 
-### L8. Configuration with explicit precedence
+### L8. Configuration serialization as optional convenience
 
 - **Lean mechanism.** One `lean.json` with an `environment` section layered over top-level keys,
   consumed identically by local CLI, backtest, live, and cloud.
-- **Demonstrated gap.** Configuration is typed and well validated, but there is no file-based input
-  with environment layering, and no documented precedence order.
-- **Proposed design.** Optional file input mapping onto existing typed configs, with an explicit and
-  tested precedence chain: built-in defaults, then config file, then environment profile, then
-  environment variables, then CLI overrides. The format is secondary; the precedence order is the
-  design. Unknown keys fail validation, consistent with the `deny_unknown_fields` convention in
-  adapter configs.
+- **Demonstrated gap.** Configuration is typed and well validated; there is no optional serialization
+  or file-loading path.
+- **Decision (D17).** Typed constructors remain the canonical configuration API. File-based
+  configuration is optional serialization and loading functionality, not part of the core
+  architecture. YAML or JSON must not become a new source of configuration semantics.
+- **Proposed design.** If implemented at all, the typed config object stays canonical and
+  serialization is a view of it: Python constructor first, then optional JSON or YAML serialization,
+  then optional CLI loading. Any layering belongs to the loader and is limited to defaults, file, and
+  explicit overrides, with unknown keys rejected. The deliverable is operator and CI convenience,
+  not a new configuration model.
 - **Boundary.** Tooling.
 - **Invariants stressed.** 4 (typed configs remain authoritative).
-- **Tradeoffs.** Two configuration surfaces can drift; validate the file schema against the typed
-  configs in a test.
-- **Effort and impact.** Low effort, medium impact.
+- **Downgrade.** This is developer and operator convenience rather than a Lean-inspired capability.
+  It stays at the end of the roadmap and is a prerequisite for nothing else.
+- **Tradeoffs.** A second input surface can drift from the typed configs. Validate the schema against
+  the typed configs in a test, or omit the feature.
+- **Effort and impact.** Low effort, low impact.
 
 ### L9A. Data contract
 
@@ -447,25 +526,39 @@ boundary (engine, research, or tooling), the tradeoffs, and the invariant it str
     locate availability for short selling is only `allow_borrowing` on cash accounts; auction and
     halt behaviour is represented by market status without an explicit execution policy; and the
     matrix of which model applies to which instrument and venue is not documented in one place.
+- **Decisions (D14, D15).** Execution configuration supports instrument-level overrides while
+  retaining global, venue, and matching-engine defaults. Fill, slippage, and fee become conceptually
+  separate interfaces, but existing composite fill behaviour is preserved in the first
+  implementation.
 - **Proposed design.** Treat realism as a model set with defined interfaces over the existing
-  execution simulator, not as a Lean port:
-  - Inventory and document the existing matrix of fee, fill, latency, queue, and liquidity
-    behaviour per venue and instrument class.
-  - Introduce an explicit slippage concern if it can be separated from fill without breaking the
-    eleven existing variants and their golden results.
-  - Decide whether model selection must become per instrument rather than per matching engine;
-    Lean's per-security slots are the pressure that exposes this, but the decision is ours.
-  - Additions considered, each independently optional: market impact, spread, partial-fill policy,
-    borrow and locate availability, auction and halt policy.
-- **Boundary.** Engine and research. Models are set per instrument or venue and used by both
-  backtest and sandbox execution.
+  execution simulator, not as a Lean port, and migrate in two stages:
+  - Stage A, abstraction without behaviour change: introduce a configuration layer around the
+    existing models and prove the default path is unchanged, digest for digest. The eleven existing
+    fill variants are wrapped, not rewritten, and migrate incrementally through a compatibility
+    adapter.
+  - Stage B, independent components: make fill, slippage, and fee independently configurable, with
+    semantics ordered as fill eligibility, then fill quantity, then base fill price, then slippage
+    adjustment, then final fill price, then fees.
+  Model selection follows an inheritance chain so the surface stays manageable: global defaults, then
+  venue defaults, then matching-engine defaults, then instrument overrides, then order-specific
+  overrides. Each level overrides only what it changes; configuration is not duplicated at every
+  level.
+  Also inventory and document the existing matrix of fee, fill, latency, queue, and liquidity
+  behaviour per venue and instrument class. Additions are considered one at a time and are
+  independently opt-in: market impact, spread, partial-fill policy, borrow and locate availability
+  for short selling, and auction and halt policy.
+- **Boundary.** Engine and research. Models are used by both backtest and sandbox execution.
 - **Invariants stressed.** 3 (parity, since sandbox and backtest share the matching engine), 5
   (exact arithmetic in fees and fills), 7 (determinism, already supported by seeded probabilistic
   fills), and 9 (unused models cost nothing).
-- **Why it precedes optimization.** Optimizing against an unrealistic fill model produces
-  precisely optimized nonsense. Realism must be defined before a search is meaningful.
-- **Tradeoffs.** More models mean more configuration surface and more golden scenarios; keep each
-  addition independent and opt-in.
+- **Workstream acceptance criterion.** Separating an abstraction must not automatically change
+  simulation semantics. Stage A is complete only when `old_digest == new_digest` for every existing
+  golden scenario, and Stage B is complete only when independently configured slippage reproduces
+  the composite behaviour it replaces.
+- **Why it precedes optimization.** Optimizing against an unrealistic fill model produces precisely
+  optimized nonsense. Realism must be defined before a search is meaningful.
+- **Tradeoffs.** More models mean more configuration surface and more golden scenarios. Keep each
+  addition independent and opt-in, and never migrate more than one concern at a time.
 - **Effort and impact.** Medium effort, high impact for day trading.
 
 ### L11. Session-aware scheduled events
@@ -662,16 +755,137 @@ Research side, deliberately outside the kernel:
 Corporate actions and identity (L3) sit underneath the data layer, not inside the strategy layer,
 because they determine what the market data means before any strategy sees it.
 
-## 12. Open questions
+### Layers
 
-- Does the project want a portfolio-construction layer at all, or is direct order submission with
-  `ExecutionAlgorithm` sufficient? This determines whether L1 is worth its risk.
-- Which asset classes justify L3? If the roadmap stays crypto, FX, and derivatives heavy, L3 is
-  lower value than it appears for equities.
-- Should execution models be selected per instrument rather than per matching engine (L10), and does
-  that change the eleven existing fill variants' configuration surface?
-- Can slippage be separated from fill without changing existing golden results (L10)?
-- Where should optimization live: a Rust CLI command, the Python layer, or both (L6)?
-- Is a file-based configuration format desired upstream, given the typed-constructor convention (L8)?
-- For L5, is a digest plus declared statistics stable enough given intentional simulation changes,
-  or should the golden also pin a small explicit event sample?
+The L1 pipeline is optional. Both paths converge on `ExecutionAlgorithm` and then orders, so the
+framework path adds a route rather than replacing the existing one.
+
+| Layer        | Content                              | Decision                                     |
+| ------------ | ------------------------------------ | -------------------------------------------- |
+| Runtime      | Existing event engine                | Preserve                                     |
+| Runtime      | L10 execution realism                | Add incrementally, Stage A then Stage B      |
+| Portfolio    | L1 signal to target                  | Optional, convergent on `ExecutionAlgorithm` |
+| Universe     | L2 universe lifecycle                | Add                                          |
+| Instrument   | L3 identity and corporate actions    | Add for supported instrument classes         |
+| Time         | L4 calendar and sessions, L11 events | Add                                          |
+| Verification | L5 regression                        | Add first; harness for every other layer     |
+| Research     | L6 optimization, L7 research API     | Python orchestration over Rust execution     |
+| Developer    | L8 configuration serialization       | Optional, low priority                       |
+| Data tooling | L9A contract, L9B CLI                | Contract with L3 and L4; CLI later           |
+
+### Dependencies
+
+```text
+                  +-----------------------+
+                  | Nautilus core runtime |
+                  +-----------+-----------+
+                              |
+           +------------------+------------------+
+           |                  |                  |
+           v                  v                  v
+       Calendar          Instrument          Execution
+        L4/L11            identity L3           L10
+           |                  |                  |
+           +--------+---------+------------------+
+                    |
+                    v
+              Universe L2
+                    |
+                    v
+        Signal -> Target L1 (optional)
+                    |
+                    v
+           ExecutionAlgorithm (direct path also enters here)
+                    |
+                    v
+                  Orders
+```
+
+```text
+L5 regression
+      |
+      +-- validates L4 and L11
+      +-- validates L3
+      +-- validates L10
+      +-- validates L2
+      +-- validates L1
+
+L6 optimization
+      |
+      +-- calls the entire deterministic stack
+```
+
+That dependency structure is the reason L5 is not merely another feature: it is the safety harness
+around every other feature, and it is why L5 is delivered first.
+
+## 12. Decisions
+
+These replace the open questions from the previous revision. Each is a decision, not a preference,
+and each is traceable to the L-item it governs.
+
+### D12. Portfolio construction
+
+Adopt an optional signal-to-target-to-execution pipeline. Direct order submission through
+`ExecutionAlgorithm` remains a first-class path. Portfolio construction must not become mandatory or
+introduce a second source of position truth. `Signal`, `Target`, and `Order` are distinct semantic
+objects. The feature is justified primarily for multi-asset allocation, strategy composition, and
+research workflows. Governs L1.
+
+### D13. Corporate-action scope
+
+Implement L3 as an asset-class-scoped instrument identity, corporate action, and historical
+normalization capability. It is required for equity-capable research and trading, but it must not
+impose equity-specific runtime behaviour on crypto, FX, or derivatives. Corporate-action semantics,
+symbol identity, and historical normalization remain separate from the core event engine. Governs
+L3 and L9A.
+
+### D14. Execution model scope
+
+Execution configuration supports instrument-level overrides while retaining matching-engine and venue
+defaults. Existing fill variants stay compatible through a configuration and adapter layer. The
+initial implementation must preserve existing golden results. Governs L10.
+
+### D15. Slippage separation
+
+Separate fill, slippage, and fee as conceptual interfaces, but initially preserve existing composite
+fill behaviour. Introduce the abstractions without changing default semantics; independently
+configurable slippage becomes a subsequent migration step validated against regression artifacts.
+Governs L10.
+
+### D16. Optimization boundary
+
+Optimization is a research and orchestration capability implemented primarily in Python, while
+backtest execution remains in the Rust engine. CLI interfaces may invoke the same optimization API
+but must not create a second optimizer implementation or a second semantic model. Governs L6.
+
+### D17. Configuration
+
+Typed constructors remain the canonical configuration API. File-based configuration is optional
+serialization and loading functionality and is not required for the core architecture. YAML or JSON
+must not become a new source of configuration semantics or precedence complexity. Governs L8.
+
+### D18. Regression oracle
+
+Regression validation uses three complementary layers: canonical digest, declared statistics, and
+deterministic semantic checkpoints. The digest detects any change, statistics explain aggregate
+differences, and explicit event checkpoints localize meaningful behavioural divergence. Full
+event-stream snapshots are avoided unless a specific scenario requires one. Governs L5.
+
+## 13. Open question
+
+### 19. Compatibility target
+
+What exactly is the compatibility target: Lean's user-facing programming model, Lean's architectural
+capabilities, or Lean's research workflows?
+
+- A, user-facing compatibility: Lean-shaped types such as `Insight`, `PortfolioTarget`, `Universe`,
+  `AlphaModel`, and `RiskModel`.
+- B, architectural capability parity: dynamic universes, portfolio targets, corporate actions,
+  calendars, optimization, research APIs, and reality modeling, implemented in the Nautilus way.
+- C, research-workflow parity: notebook research, parameter optimization, walk-forward, regression,
+  and data tooling.
+
+Recommendation: make B the target and implement C selectively. Do not pursue A, which would turn the
+project into "NautilusTrader with a Lean-compatible programming model" rather than "NautilusTrader
+enhanced with selected, proven Lean capabilities". This is recorded in the central contract in
+section 1 and is the one question that remains genuinely open for the project owner.

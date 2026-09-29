@@ -14,7 +14,8 @@ market time precede optimization.
 The nine architectural invariants in
 [lean_lessons_design.md](lean_lessons_design.md) section 2 are acceptance criteria, not guidance. A
 workstream that delivers its feature while breaking an invariant is rejected, not merged with
-follow-up work. In implementation terms:
+follow-up work. The decisions D12 to D18 in section 12 of the design document are binding inputs to
+the corresponding workstreams. In implementation terms:
 
 1. The runtime model is fixed: single-threaded kernel, thread-local message bus, per-event
    callbacks, `Rc<RefCell<_>>` components. No workstream may introduce a slice-style delivery model
@@ -99,26 +100,35 @@ digest.
    `BacktestResult` bindings in `crates/backtest/src/python/result.rs`, delegating to the existing
    `CanonicalBacktestResult` writer and classifying the exact-encoding failure path under
    `# Errors`.
-2. Add a scenario protocol under `python/tests/regression/`: each scenario declares its run
-   configuration, strategy, expected statistics keys, and expected digest.
+2. Add a scenario protocol under `python/tests/regression/` with three declared layers (D18):
+   - Level 1, the expected canonical digest.
+   - Level 2, expected statistics such as orders, fills, positions, PnL, fees, slippage, maximum
+     drawdown, and final equity.
+   - Level 3, semantic checkpoints identified by event kind, instrument, and occurrence ordinal, for
+     example the first `ORDER_FILLED`, `POSITION_OPENED`, and `POSITION_CLOSED` for an instrument.
+     Checkpoints are semantic rather than positional so they survive unrelated event insertions.
 3. Add a registry module that enumerates scenarios, so discovery is an explicit list.
 4. Add a reset fixture that returns engines, caches, loggers, and clock state to a clean baseline
    between scenarios, matching Lean's hard reset
    ([AlgorithmRunner.cs](https://github.com/QuantConnect/Lean/blob/master/Tests/AlgorithmRunner.cs)).
 5. Add regeneration through a pytest option or environment variable that rewrites committed
-   expectations from an actual run, producing a reviewable diff.
-6. On mismatch, print `first_divergence().path` so failures name the differing field.
+   expectations, all three layers in one command, producing a reviewable diff.
+6. On mismatch, report the failing layer with its expected and actual values, then
+   `first_divergence().path`, so failures name the value and the divergence rather than only a digest
+   mismatch.
 7. Define the scenario-per-feature requirement for later workstreams and record it in
    `docs/developer_guide/testing.md`; add `pytest-regression` to the Makefile and to `pre-flight`.
 
 **Boundary.** Research.
 
-**Acceptance.** The suite passes on a clean checkout; perturbing a fill model fails with a named
-divergence path; regeneration rewrites an expectation and a subsequent run passes without
-regenerating; default `make pytest` behaviour is unchanged.
+**Acceptance.** The suite passes on a clean checkout; perturbing a fill model fails at the digest
+layer with a named divergence path; a scenario whose later checkpoint changes fails at the checkpoint
+layer with expected and actual values; regeneration rewrites all three layers and a subsequent run
+passes without regenerating; default `make pytest` behaviour is unchanged.
 
-**Risks.** Digest churn on intentional simulation changes. Mitigation: regeneration is explicit and
-reviewed, and `first_divergence()` carries the diagnostic burden.
+**Risks.** Digest churn on intentional simulation changes, and three layers to update on intentional
+change. Mitigation: regeneration covers all layers in one command and is explicit and reviewed, and
+`first_divergence()` carries the diagnostic burden.
 
 ## 4. W2: trading calendars as data (L4)
 
@@ -261,87 +271,107 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
 1. Inventory and document the matrix of fee, fill, latency, queue, and liquidity behaviour per venue
    and instrument class, in `docs/concepts/backtesting/fill-models.md` and the matching engine
    documentation.
-2. Decide and record whether realistic model selection must become per instrument rather than per
-   matching engine. Do not transplant Lean's per-security slot hierarchy; make the decision on
-   evidence from the inventory.
-3. If slippage can be separated from fill without changing existing golden digests, introduce it as
-   an explicit concern with a documented interface; otherwise document why it stays folded into the
-   fill variants.
-4. Evaluate each candidate addition independently and opt-in: market impact, spread, partial-fill
+2. Stage A, abstraction without behaviour change (D14): introduce a configuration layer around the
+   existing models and prove the default path is unchanged. Wrap the eleven existing fill variants
+   rather than rewriting them, and migrate them incrementally through a compatibility adapter.
+3. Implement model selection as an inheritance chain: global defaults, then venue defaults, then
+   matching-engine defaults, then instrument overrides, then order-specific overrides. Each level
+   overrides only what it changes; do not duplicate configuration at every level.
+4. Stage B, independent components (D15): make fill, slippage, and fee independently configurable,
+   with semantics ordered as fill eligibility, then fill quantity, then base fill price, then
+   slippage adjustment, then final fill price, then fees. Stage B lands only after Stage A is proven.
+5. Evaluate each candidate addition independently and opt-in: market impact, spread, partial-fill
    policy, borrow and locate availability for short selling, and auction and halt policy. Prefer
    extending `OrderMatchingEngineConfig` and adding a `FillModel` implementation over a new
    abstraction.
-5. Ensure every addition is deterministic, taking an explicit seed where randomness is involved.
-6. Add one golden scenario per added model.
+6. Ensure every addition is deterministic, taking an explicit seed where randomness is involved.
+7. Add one golden scenario per added model.
 
 **Boundary.** Engine and research. Models are used by both backtest and sandbox execution.
 
-**Acceptance.** The inventory document matches the code; each new model is independently selectable
-and leaves the default path byte-identical; seeded models reproduce across runs; existing fill
-variants continue to pass their tests unchanged.
+**Acceptance.** The inventory document matches the code. Stage A is complete only when
+`old_digest == new_digest` for every existing golden scenario. Stage B is complete only when
+independently configured slippage reproduces the composite behaviour it replaces. Each new model is
+independently selectable and leaves the default path byte-identical, seeded models reproduce across
+runs, and existing fill variants continue to pass their tests unchanged.
+
+**Migration invariant.** Separating an abstraction must not automatically change simulation
+semantics. This is the acceptance criterion that makes the staged migration safe.
 
 **Risks.** Configuration surface growth and golden churn. Mitigation: one model per change, opt-in,
-and a golden scenario per model.
+never more than one concern migrated at a time, and a golden scenario per model.
 
-## 9. W7: signal, target, and order layers (L1)
+## 9. W7: optional Signal, Target, and Execution pipeline (L1)
 
-**Objective.** A typed signal and target layer between decision-making and order submission, with
-the order layer unchanged.
+**Objective.** An optional pipeline (D12) between decision-making and order submission. The direct
+path and the order layer are unchanged, and both paths converge on `ExecutionAlgorithm`.
 
 **Steps.**
 
 1. Define a signal value in `crates/model/` carrying direction, horizon, strength, source, expiry,
    and provenance. Do not include fields named confidence or score. Note that
    `crates/common/src/signal.rs` already defines a generic `Signal` with name, value, and
-   timestamps; the new type is distinct and must not overload it.
+   timestamps; the new type is distinct and must not overload it. A signal is not a trading command
+   and carries no order quantity.
 2. Define a target value carrying an instrument plus a target quantity, weight, or notional.
 3. Add an optional portfolio-construction component that consumes portfolio context and risk
    context and produces targets, reusing `crates/risk/src/sizing.rs` for sizing and the `RiskEngine`
-   for pre-trade checks.
+   for pre-trade checks. Do not introduce mandatory `AlphaModel`, `PortfolioConstructionModel`,
+   `RiskManagementModel`, or `ExecutionModel` interfaces.
 4. Add a reconciler that compares targets with cache and portfolio state and emits the minimal order
-   set. The cache and portfolio stay authoritative; targets never become a second position store.
-5. Keep direct order submission fully supported; the layer is opt-in per strategy.
+   set through `ExecutionAlgorithm`. The cache and portfolio stay authoritative; targets never
+   become a second position store.
+5. Keep direct order submission fully supported and unchanged; the pipeline is opt-in per strategy,
+   and both paths must produce equivalent orders for equivalent intent.
 6. Document the three-layer separation in `docs/concepts/`, including that signal is not target and
-   target is not order.
+   target is not order, and that neither is a trading command.
 7. Add a target-to-order parity golden scenario.
 
-**Boundary.** Engine.
+**Boundary.** Engine, optional per strategy.
 
-**Acceptance.** A strategy using the layer produces identical orders to an equivalent strategy that
-submits orders directly for a simple case; the layer is disabled by default; the hot path shows no
-measurable regression when the layer is unused; the parity golden scenario passes.
+**Acceptance.** A strategy using the pipeline produces identical orders to an equivalent strategy
+that submits orders directly for a simple case; the pipeline is disabled by default; the hot path
+shows no measurable regression when it is unused; the parity golden scenario passes.
 
 **Risks.** Competing ownership of position intent. Mitigation: reconciliation against the
 authoritative cache before any order is emitted, and the feature stays behind a flag until proven.
 
 ## 10. W8: optimization as an external research subsystem (L6)
 
-**Objective.** A research optimizer over backtest runs with an explicit methodology boundary.
+**Objective.** A research optimizer over backtest runs with an explicit methodology boundary, split
+between Python orchestration and Rust execution (D16).
 
 **Steps.**
 
 1. Define the objective as a function over the existing portfolio statistics in
    `crates/analysis/src/statistics/`, with constraints over the same values.
-2. Separate search from execution: a strategy enumerates parameter sets; a runner executes them.
+2. Split responsibilities: Rust owns backtest execution, simulation, and result production; Python
+   owns parameter spaces, experiment generation, search algorithms, result aggregation, walk-forward
+   experiments, and experiment persistence.
+3. Separate search from execution: a strategy enumerates parameter sets; a runner executes them.
    Mirror the split between Lean's host and
    [GridSearchOptimizationStrategy.cs](https://github.com/QuantConnect/Lean/blob/master/Optimizer/Strategies/GridSearchOptimizationStrategy.cs)
    without adopting its single-process queue semantics.
-3. Fan out runs at the process level so the single-threaded kernel and the Python GIL are not
+4. Fan out runs at the process level so the single-threaded kernel and the Python GIL are not
    constraints, with a documented concurrency limit driven by memory rather than CPU.
-4. Emit results as canonical backtest results plus the parameter set, comparable by digest.
-5. Model the methodology stages explicitly: train, optimize, validate, out-of-sample, walk-forward.
+5. Emit results as canonical backtest results plus the parameter set, comparable by digest.
+6. Model the methodology stages explicitly: train, optimize, validate, out-of-sample, walk-forward.
    These are distinct stages, not one loop over a grid.
-6. Expose an `optimize` subcommand in `crates/cli/src/opt.rs` and a Python helper for notebooks.
+7. Expose an `optimize` subcommand in `crates/cli/src/opt.rs` as a thin front end that invokes the
+   same Python optimization API, plus a Python helper for notebooks. There must be exactly one
+   optimization implementation and one semantic model.
 
 **Boundary.** Research. The optimizer composes runs and must never reach into one; it may not alter
 the deterministic semantics of an individual backtest.
 
 **Acceptance.** A sweep over a small grid returns the same best result as running the grid by hand;
 an objective over Sharpe ratio and maximum drawdown behaves as specified; a failing run does not
-abort the sweep; a reproducible optimization golden scenario passes.
+abort the sweep; the CLI and the Python API return identical results for the same configuration; a
+reproducible optimization golden scenario passes.
 
-**Risks.** Memory blowup under concurrent catalog reads; methodology being conflated with search.
-Mitigation: documented concurrency limit and explicit stage separation.
+**Risks.** Memory blowup under concurrent catalog reads; methodology being conflated with search; the
+Python orchestration layer becoming a second execution path for backtests. Mitigation: documented
+concurrency limit, explicit stage separation, and routing all execution through `BacktestNode`.
 
 ## 11. W9: research API over shared primitives (L7)
 
@@ -369,30 +399,33 @@ for the same data; the module imports only catalog, wrangler, and indicator code
 **Risks.** A divergent second data path. Mitigation: reuse the catalog and wrangler code paths, and
 assert equality against a backtest in a test.
 
-## 12. W10: configuration with explicit precedence (L8)
+## 12. W10: optional configuration serialization (L8)
 
-**Objective.** Optional file input mapping onto existing typed configs, with a tested precedence
-order.
+**Objective.** Optional serialization and file loading for existing typed configs. Typed constructors
+remain the canonical API (D17); this workstream is developer and operator convenience and is a
+prerequisite for nothing else.
 
 **Steps.**
 
 1. Define a schema mirroring `NautilusKernelConfig`, `BacktestEngineConfig`, and `LiveNodeConfig`
-   fields, with named environment profiles layered over a base section.
-2. Implement the precedence chain explicitly: built-in defaults, config file, environment profile,
-   environment variables, CLI overrides. Document it and test each layer.
+   fields, treated as a view of the typed configs rather than a second configuration model.
+2. If file loading is implemented, keep layering inside the loader and limited to built-in defaults,
+   the file, and explicit overrides. Do not add environment profiles or environment variables as a
+   configuration source.
 3. Validate in Rust so errors are raised at construction with typed messages, and reject unknown
    keys consistent with the `deny_unknown_fields` convention in adapter configs.
 4. Expose it through `nautilus-cli` and the Python constructors; the typed constructors remain
-   authoritative.
+   authoritative, and serialization must round-trip to an equal typed config.
 5. Add a test asserting the file schema stays in step with the typed configs.
 
 **Boundary.** Tooling.
 
-**Acceptance.** A YAML file reproduces a hand-built config; an unknown key fails validation; each
-precedence layer resolves in the documented order; the schema-drift test fails when a typed config
-field is added without updating the file schema.
+**Acceptance.** A serialized file round-trips to an equal typed config; an unknown key fails
+validation; the schema-drift test fails when a typed config field is added without updating the file
+schema; omitting the feature entirely leaves all other workstreams unaffected.
 
-**Risks.** Two configuration surfaces drifting. Mitigation: the schema-drift test.
+**Risks.** A second input surface drifting from the typed configs. Mitigation: the schema-drift test,
+or omit the feature.
 
 ## 13. W11: data CLI (L9B)
 
@@ -467,5 +500,9 @@ document. Each later phase depends only on the phases above it.
 - A slice or time-batch delivery model in the runtime.
 - A research engine mode or a query-only kernel mode.
 - Transplanting Lean's `Security` model-slot hierarchy.
+- A Lean-compatible user-facing programming model, that is, compatibility target A in the design
+  document.
+- A second optimizer implementation alongside the Python optimization API.
+- Environment profiles or environment variables as a configuration source.
 - AI or ML tooling.
 - Changes to `.github/workflows` and `.github/actions`, which are maintainer-owned.
