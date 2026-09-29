@@ -385,8 +385,9 @@ between Python orchestration and Rust execution (D16).
 5. Emit results as canonical backtest results plus the parameter set, comparable by digest.
 6. Model the methodology stages explicitly: train, optimize, validate, out-of-sample, walk-forward.
    These are distinct stages, not one loop over a grid.
-7. Expose an `optimize` subcommand in `crates/cli/src/opt.rs` as a thin front end that invokes the
-   same Python optimization API, plus a Python helper for notebooks. There must be exactly one
+7. Expose a new top-level `optimize` command in `crates/cli/src/opt.rs`, alongside the existing
+   `database`, `catalog`, and `blockchain` commands, as a thin front end that invokes the same
+   Python optimization API, plus a Python helper for notebooks. There must be exactly one
    optimization implementation and one semantic model.
 
 **Boundary.** Research. The optimizer composes runs and must never reach into one; it may not alter
@@ -457,12 +458,15 @@ or omit the feature.
 
 ## 13. W11: data CLI (L9B)
 
-**Objective.** A small data surface in `nautilus-cli` over the catalog and existing loaders.
+**Objective.** A small data surface in `nautilus-cli` that extends the existing `catalog` command
+over the catalog and existing loaders.
 
 **Steps.**
 
-1. Add data subcommands in `crates/cli/src/opt.rs`: download, validate, convert, generate, inspect,
-   each delegating to `CatalogReader` and `CatalogWriter` and the existing loaders.
+1. Extend the existing `catalog` command in `crates/cli/src/opt.rs` with data subcommands: download,
+   validate, convert, generate, inspect, each delegating to `CatalogReader` and `CatalogWriter` and
+   the existing loaders. The existing `migrate-parquet` subcommand and the `database` and
+   `blockchain` commands are unchanged.
 2. Keep the surface explicit and licensing-aware; do not embed provider credentials or bundle data.
 3. Emit machine-readable output for CI use.
 4. Document the commands and the data contract from W4.
@@ -473,7 +477,7 @@ or omit the feature.
 reads; `inspect` lists data types, instruments, and coverage; no credentials are written to disk.
 
 **Risks.** Scope growth into a data platform. Mitigation: the five documented subcommands are the
-whole surface.
+whole added surface, alongside the existing `migrate-parquet`.
 
 ## 14. Sequencing
 

@@ -277,8 +277,9 @@ Verified in this repository:
   ([../concepts/architecture.md](../concepts/architecture.md)).
 - Values are typed `Price`, `Quantity`, and `Money` with exact arithmetic; time is nanosecond
   `UnixNanos`.
-- Portfolio statistics are extensive: 35 implementations under `crates/analysis/src/statistics/`
-  plus `PortfolioAnalyzer` and snapshot types in `crates/analysis/src/`.
+- Portfolio statistics are extensive: 34 types implementing `PortfolioStatistic` in
+  `crates/analysis/src/statistics/`, plus `PortfolioAnalyzer` and snapshot types in
+  `crates/analysis/src/`.
 - Deterministic result comparison already exists: `crates/backtest/src/result.rs` defines
   `CanonicalBacktestResult` with a versioned schema (`nautilus-backtest-result/v1`), identity
   normalization, `digest()`, and `first_divergence()`, and acceptance tests assert golden values,
@@ -293,8 +294,9 @@ Verified in this repository:
   `random_seed` for determinism. `OrderMatchingEngineConfig` in
   `crates/execution/src/matching_engine/config.rs` exposes `liquidity_consumption`, `queue_position`,
   `bar_execution`, `trade_execution`, `price_protection_points`, and related flags. Margin models
-  live in `crates/model/src/accounts/margin_model.rs`, and `MarketStatusAction::Halt` already exists
-  in `crates/model/src/data/status.rs`.
+  live in `crates/model/src/accounts/margin_model.rs`, and `MarketStatusAction::Halt` is declared in
+  `crates/model/src/enums.rs` and consumed by `InstrumentStatus` in
+  `crates/model/src/data/status.rs`.
 - A generic user signal type exists (`Signal` in `crates/common/src/signal.rs`: name, value,
   timestamps), and option-chain aggregation exists (`crates/data/src/option_chains/`), but neither
   provides insight semantics or a portfolio-construction layer.
@@ -306,7 +308,9 @@ Verified in this repository:
   target-reconciliation layer, no corporate-action or price-normalization handling, no trading
   calendar, and no parameter optimization. A repository search for those concepts returns nothing
   outside adapter-specific parsing.
-- `crates/cli/src/opt.rs` exposes only `database` and `blockchain` subcommands.
+- `crates/cli/src/opt.rs` exposes three top-level subcommands: `database`, `catalog` (currently only
+  `migrate-parquet`), and a `defi`-feature-gated `blockchain`. There is no data acquisition,
+  validation, generation, or inspection surface.
 
 ## 7. Comparison
 
@@ -579,11 +583,13 @@ settles it.
 ### L9B. Data CLI
 
 - **Lean mechanism.** `lean init`, `lean data download`, and `lean data generate`.
-- **Demonstrated gap.** Scripts exist, but there is no CLI for data acquisition, validation,
-  conversion, or inspection.
-- **Proposed design.** Data subcommands in `nautilus-cli` over the catalog and existing loaders:
-  download, validate, convert, generate, and inspect. Keep the surface small and explicit because
-  data acquisition is licensing-sensitive.
+- **Demonstrated gap.** Scripts exist, and `nautilus-cli catalog` currently exposes only
+  `migrate-parquet`; there is no CLI for data acquisition, validation, bulk conversion, generation,
+  or inspection.
+- **Proposed design.** Data subcommands that extend the existing `catalog` command in `nautilus-cli`
+  over the catalog and existing loaders: download, validate, convert, generate, and inspect.
+  `migrate-parquet` stays. Keep the surface small and explicit because data acquisition is
+  licensing-sensitive.
 - **Boundary.** Tooling.
 - **Invariants stressed.** None directly; it must not become a data path inside a run.
 - **Effort and impact.** Low effort, medium impact. Depends on L9A.
