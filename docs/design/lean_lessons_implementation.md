@@ -40,6 +40,31 @@ target and Lean API compatibility out of scope. In implementation terms:
    change, not a follow-up.
 8. Every workstream adds at least one golden regression scenario (W1). This is the mechanism that
    proves invariants 2 and 8 for the following workstreams.
+9. Every workstream passes the capability test in section 4 of the design document before
+   implementation starts: it closes a demonstrated capability gap, NautilusTrader does not already
+   provide an equivalent, and it does not weaken an invariant. Each workstream is classified as B
+   (capability) or C (workflow); a class A (API compatibility) surface is never implemented, and no
+   Lean-shaped type (`Insight`, `AlphaModel`, `PortfolioTarget`, `RiskModel`) is introduced for
+   naming or API compatibility. This is D19.
+
+Workstream classification:
+
+| Workstream                        | Class | Note                                     |
+| --------------------------------- | ----- | ---------------------------------------- |
+| W1 regression scenarios           | B, C  | Capability and research workflow         |
+| W2 trading calendars              | B, C  | Capability and research workflow         |
+| W3 session-aware scheduled events | B, C  | Capability and research workflow         |
+| W4 corporate actions and identity | B, C  | Capability and research workflow         |
+| W5 universe and membership        | B, C  | Capability and research workflow         |
+| W6 execution realism              | B, C  | Capability and research workflow         |
+| W7 optional target construction   | B, C  | Capability and research workflow         |
+| W8 optimization                   | B, C  | Capability and research workflow         |
+| W9 research API                   | C     | Research workflow only                   |
+| W10 configuration serialization   | C     | Tooling convenience, no capability claim |
+| W11 data CLI                      | C     | Tooling convenience, no capability claim |
+
+No workstream is class A. If a proposal starts from "Lean has this API", it fails the gate at the
+first question.
 
 ## 2. Repository mechanics
 
@@ -480,6 +505,9 @@ document. Each later phase depends only on the phases above it.
 - New hot-path code has a benchmark comparison recorded in the pull request.
 - Documentation is updated in the same change, including the concept page for the affected area.
 - No research or tooling crate is imported by a kernel crate.
+- Each workstream passes the capability test (section 4 of the design document) and is classified B
+  or C in section 1; no class A surface is added, and no Lean-shaped type is introduced for naming or
+  API compatibility.
 
 ## 16. Risks
 
@@ -495,6 +523,7 @@ document. Each later phase depends only on the phases above it.
 | Two configuration surfaces             | Medium | Schema-drift test                                                      |
 | Memory blowup in optimization          | Medium | Documented concurrency limit; process fan-out only                     |
 | Research leaking into the kernel       | Medium | Feature boundary rules and a no-research-dependency check              |
+| Compatibility surface creep            | Medium | Capability test gate (rule 9); workstream classification table         |
 
 ## 17. Out of scope
 
@@ -503,8 +532,8 @@ document. Each later phase depends only on the phases above it.
 - A slice or time-batch delivery model in the runtime.
 - A research engine mode or a query-only kernel mode.
 - Transplanting Lean's `Security` model-slot hierarchy.
-- A Lean-compatible user-facing programming model, that is, compatibility target A in the design
-  document.
+- A Lean-compatible user-facing programming model and any Lean-shaped type introduced for naming or
+  API compatibility. This is compatibility target A, rejected by D19.
 - A second optimizer implementation alongside the Python optimization API.
 - Environment profiles or environment variables as a configuration source.
 - AI or ML tooling.
