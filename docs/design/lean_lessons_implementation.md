@@ -14,8 +14,9 @@ market time precede optimization.
 The nine architectural invariants in
 [lean_lessons_design.md](lean_lessons_design.md) section 2 are acceptance criteria, not guidance. A
 workstream that delivers its feature while breaking an invariant is rejected, not merged with
-follow-up work. The decisions D12 to D18 in section 12 of the design document are binding inputs to
-the corresponding workstreams. In implementation terms:
+follow-up work. The decisions D12 to D19 in section 12 of the design document are binding inputs to
+the corresponding workstreams, including D19, which makes capability parity the primary compatibility
+target and Lean API compatibility out of scope. In implementation terms:
 
 1. The runtime model is fixed: single-threaded kernel, thread-local message bus, per-event
    callbacks, `Rc<RefCell<_>>` components. No workstream may introduce a slice-style delivery model
@@ -301,10 +302,12 @@ semantics. This is the acceptance criterion that makes the staged migration safe
 **Risks.** Configuration surface growth and golden churn. Mitigation: one model per change, opt-in,
 never more than one concern migrated at a time, and a golden scenario per model.
 
-## 9. W7: optional Signal, Target, and Execution pipeline (L1)
+## 9. W7: optional target construction (L1)
 
-**Objective.** An optional pipeline (D12) between decision-making and order submission. The direct
-path and the order layer are unchanged, and both paths converge on `ExecutionAlgorithm`.
+**Objective.** Optional target construction (D12, D19) between decision-making and order submission.
+The direct path and the order layer are unchanged, and both paths converge on `ExecutionAlgorithm`.
+The deliverables use NautilusTrader-native names and lifecycles; no Lean-shaped type
+(`Insight`, `AlphaModel`, `PortfolioTarget`, `RiskModel`) is introduced for API compatibility.
 
 **Steps.**
 

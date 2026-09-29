@@ -10,10 +10,13 @@ Revision note: the first revision added the architectural invariants, the anti-p
 specification, the engine/research/tooling classification, and workstreams L10 (execution realism)
 and L11 (session-aware scheduled events), and reordered the roadmap so equity identity and market
 time precede optimization. The second revision converted the open questions into binding decisions
-D12 to D18 (section 12), reduced the remaining uncertainty to one open question, the compatibility
-target (section 13), strengthened the central contract, and recast L1 as an optional pipeline, L3 as
-an asset-class-scoped capability, L5 as a three-layer oracle, L6 as Python orchestration over Rust
-execution, L8 as optional convenience, and L10 as a two-stage migration.
+D12 to D18, reduced the remaining uncertainty to one open question, the compatibility target
+(section 13), strengthened the central contract, and recast L1 as an optional pipeline, L3 as an
+asset-class-scoped capability, L5 as a three-layer oracle, L6 as Python orchestration over Rust
+execution, L8 as optional convenience, and L10 as a two-stage migration. The third revision adds
+D19 (compatibility target: B primary, C secondary, A out of scope), the compatibility hierarchy and
+capability test in section 4, and L1 as optional target construction. There are no remaining open
+questions.
 
 ## 1. Purpose and scope
 
@@ -43,20 +46,25 @@ Non-goals:
 > capability gap without weakening NautilusTrader's event-driven, deterministic, typed, low-latency
 > architecture.
 
-Two consequences follow, and they are binding:
+Three consequences follow, and they are binding. They are formalised as D19 in section 12.
 
-1. **The compatibility target is architectural capability parity, not programming-model
-   compatibility.** The goal is dynamic universes, portfolio targets, corporate actions, calendars,
-   optimization, research APIs, and richer execution modeling, implemented the Nautilus way. It is
-   explicitly not an `Insight`/`AlphaModel`/`RiskModel`-shaped user-facing API that mirrors Lean.
-   Research-workflow parity (notebooks, optimization, walk-forward, regression, data tooling) is
-   pursued selectively. See open question 19.
-2. **Both execution paths are first-class.** Lean's framework abstraction and NautilusTrader's
+1. **Capability parity is the primary target, not programming-model compatibility.** The project
+   adopts capabilities Lean has demonstrated (dynamic universes, portfolio targets, corporate
+   actions, calendars, optimization, research APIs, regression, and reality modeling) and implements
+   them with NautilusTrader's event-driven, typed, deterministic architecture. It is explicitly not
+   an `Insight`/`AlphaModel`/`RiskModel`-shaped user-facing API that mirrors Lean.
+2. **Research-workflow parity is secondary and selective.** Notebook research, parameter
+   optimization, walk-forward analysis, regression testing, and data tooling are supported where they
+   materially improve the workflow, and they consume Nautilus-native APIs rather than reproducing
+   Lean's programming model.
+3. **Both execution paths are first-class.** Lean's framework abstraction and NautilusTrader's
    existing direct-execution model are not in competition. The project supports both; it does not
    choose.
 
-This is the guiding principle for every item below, and it is the reason some Lean capabilities are
-deliberately rejected in section 9. "Lean has X and we do not" is not by itself a reason to build X.
+The governing rule is: **adopt Lean semantics and proven capabilities, not Lean APIs or
+implementation mechanisms.** Nautilus is the architecture; Lean is the source of proven ideas. This
+is the reason some Lean capabilities are deliberately rejected in section 9, and it is why "Lean has
+X and we do not" is not by itself a reason to build X. Section 4 gives the decision procedure.
 
 ## 2. Architectural invariants
 
@@ -92,7 +100,7 @@ supports workflows without participating in a run.
 
 | Item                           | Engine | Research | Tooling |
 | ------------------------------ | ------ | -------- | ------- |
-| L1 Signal, Target, Order       | Yes    |          |         |
+| L1 Target construction         | Yes    |          |         |
 | L2 Universe and membership     | Yes    |          |         |
 | L3 Corporate actions, identity | Yes    | Yes      |         |
 | L4 Trading calendar            | Yes    | Yes      |         |
@@ -135,6 +143,70 @@ NautilusTrader.
 | Cloud platform and job queue       | Self-hosted tooling                                | Reject   |
 | Runtime type-name resolution       | Typed factories                                    | Reject   |
 | Mutable global metadata at runtime | Immutable inputs to a run                          | Reject   |
+
+### Compatibility hierarchy
+
+| Level                | Goal                                                      | Decision       |
+| -------------------- | --------------------------------------------------------- | -------------- |
+| A, API compatibility | Lean users can port code with minimal changes             | Not a goal     |
+| B, capability        | NautilusTrader provides comparable important capabilities | Primary goal   |
+| C, workflow          | Users can perform comparable research workflows           | Secondary goal |
+
+B is normative. C is supportive. A is incidental. This is decided by D19 in section 12.
+
+### Capability test
+
+A Lean-shaped abstraction is implemented only when all of the following hold:
+
+- It closes a demonstrated capability gap.
+- NautilusTrader does not already provide an equivalent.
+- It can be implemented without weakening the invariants in section 2.
+
+API resemblance is not a justification. "Adopt semantics, not APIs" is the working rule.
+
+```text
+Does Lean have it?
+        |
+        v
+Does it provide a useful capability?
+        |
+       no ----> do not implement
+       yes
+        v
+Does NautilusTrader already provide it?
+        |
+       yes ---> reuse or extend the NautilusTrader abstraction
+       no
+        v
+Can the capability fit NautilusTrader semantics?
+        |
+       no ----> do not implement
+       yes
+        v
+Implement a NautilusTrader-native equivalent
+```
+
+### Classification by item
+
+| Feature                                                             | B, capability | C, workflow | A, API |
+| ------------------------------------------------------------------- | ------------- | ----------- | ------ |
+| L1 Signal and target construction                                   | Yes           | Yes         | No     |
+| L2 Dynamic universe and membership                                  | Yes           | Yes         | No     |
+| L3 Corporate actions and instrument identity                        | Yes           | Yes         | No     |
+| L4 Trading calendar                                                 | Yes           | Yes         | No     |
+| L5 Regression                                                       | Yes           | Yes         | No     |
+| L6 Optimization                                                     | Yes           | Yes         | No     |
+| L10 Execution realism                                               | Yes           | Yes         | No     |
+| L11 Session-aware scheduling                                        | Yes           | Yes         | No     |
+| L7 Research API                                                     |               | Yes         | No     |
+| L8 Configuration serialization                                      |               | Yes         | No     |
+| L9B Data CLI                                                        |               | Yes         | No     |
+| Lean-named types (`Insight`, `AlphaModel`, `PortfolioTarget`, etc.) |               |             | No     |
+| Lean API compatibility                                              |               |             | No     |
+
+The last two rows carry the point. `Insight` is not a feature; a signal abstraction is.
+`AlphaModel` is not a feature; composable alpha sources are. `PortfolioTarget` semantics are
+valuable; the exact Lean class is not.
 
 ## 5. What Lean is
 
@@ -259,16 +331,21 @@ Each item states the Lean mechanism, the demonstrated gap, the Nautilus-native d
 (engine, research, or tooling), the invariant it stresses, and where applicable the decision that
 settles it.
 
-### L1. An optional Signal, Target, and Execution pipeline
+### L1. Optional target construction
 
 - **Lean mechanism.** `Insight` carries the alpha view; portfolio construction converts insights
-  into `PortfolioTarget` values; execution consumes targets.
+  into `PortfolioTarget` values; execution consumes targets. Portfolio construction is optional in
+  Lean itself: `NullPortfolioConstructionModel` is the default model, returns no targets, and exists
+  specifically to bypass the stage, for example to analyse an alpha model in isolation
+  ([supported models](https://www.quantconnect.com/docs/v2/writing-algorithms/algorithm-framework/portfolio-construction/supported-models)).
 - **Demonstrated gap.** Strategy code goes directly from a decision to `submit_order`. There is no
   typed representation of intent that one component can produce, another can modify, and a third can
   reconcile against current positions, so multi-asset allocation and strategy composition must be
   hand-rolled.
-- **Decision (D12).** Adopt an optional signal-to-target-to-execution pipeline. Direct order
-  submission through `ExecutionAlgorithm` remains a first-class path.
+- **Decision (D12, D19).** Adopt optional target construction. Direct order submission through
+  `ExecutionAlgorithm` remains a first-class path. This is the NautilusTrader-native semantic
+  equivalent of Lean's signal-to-target flow, not a reproduction of Lean's Algorithm Framework
+  under a compatibility requirement.
 - **Proposed design.** Two supported paths, not a mandatory hierarchy:
   - Direct path: strategy, then `ExecutionAlgorithm`, then orders. Unchanged.
   - Framework path: strategy or alpha, then `Signal`, then portfolio context and risk context, then
@@ -600,6 +677,11 @@ settles it.
 - **Porting Lean's object hierarchy.** Adopt the semantics of separation, not the class graph.
 - **Per-strategy bespoke expectations.** L5 replaces ad-hoc expectations with one harness rather
   than adding a second convention.
+- **A Lean compatibility layer.** Lean-shaped types and lifecycles (`Insight`, `AlphaModel`,
+  `IPortfolioConstructionModel`, `IExecutionModel`, `IRiskManagementModel`) are not adopted for
+  naming or API compatibility. Doing so would accumulate compatibility surface without adding
+  trading capability. Each of these is allowed only where its semantics pass the capability test in
+  section 4, and then under a NautilusTrader-native name and lifecycle.
 
 ## 10. Recommended order
 
@@ -871,21 +953,47 @@ deterministic semantic checkpoints. The digest detects any change, statistics ex
 differences, and explicit event checkpoints localize meaningful behavioural divergence. Full
 event-stream snapshots are avoided unless a specific scenario requires one. Governs L5.
 
-## 13. Open question
+### D19. Compatibility target
 
-### 19. Compatibility target
+Decision: B, architectural capability parity, is the primary compatibility target. C, selective
+research-workflow parity, is secondary. A, Lean user-facing programming-model compatibility, is
+explicitly not a project goal.
 
-What exactly is the compatibility target: Lean's user-facing programming model, Lean's architectural
-capabilities, or Lean's research workflows?
+The project selectively adopts capabilities demonstrated by Lean when they provide material value to
+the NautilusTrader architecture. Candidate capabilities include dynamic universe selection and
+membership, signal-to-target portfolio intent, corporate actions and instrument identity, trading
+calendars, execution and reality modeling, deterministic regression, optimization, research APIs,
+and data tooling.
 
-- A, user-facing compatibility: Lean-shaped types such as `Insight`, `PortfolioTarget`, `Universe`,
-  `AlphaModel`, and `RiskModel`.
-- B, architectural capability parity: dynamic universes, portfolio targets, corporate actions,
-  calendars, optimization, research APIs, and reality modeling, implemented in the Nautilus way.
-- C, research-workflow parity: notebook research, parameter optimization, walk-forward, regression,
-  and data tooling.
+These capabilities must be implemented using NautilusTrader's existing architectural principles:
+event-driven execution, typed domain models, deterministic simulation, backtest and live parity, and
+existing execution and risk semantics.
 
-Recommendation: make B the target and implement C selectively. Do not pursue A, which would turn the
-project into "NautilusTrader with a Lean-compatible programming model" rather than "NautilusTrader
-enhanced with selected, proven Lean capabilities". This is recorded in the central contract in
-section 1 and is the one question that remains genuinely open for the project owner.
+Lean-shaped types such as `Insight`, `AlphaModel`, `PortfolioTarget`, `Universe`, and `RiskModel`
+are not compatibility requirements. Equivalent NautilusTrader-native abstractions may use different
+names, lifecycles, interfaces, or internal implementations. A Lean abstraction is adopted only when
+its semantics provide a concrete capability, composability, testability, or research benefit.
+
+The rule that follows is: **adopt Lean semantics and proven capabilities, not Lean APIs or
+implementation mechanisms.**
+
+Compatibility hierarchy:
+
+1. B, capability parity: required target for selected features.
+2. C, workflow parity: selectively supported where valuable.
+3. A, API and programming-model compatibility: explicitly out of scope.
+
+Compatibility test: a Lean feature is implemented only when it closes a demonstrated capability gap,
+NautilusTrader does not already provide an equivalent, and the capability can be implemented without
+weakening the invariants in section 2. Section 4 holds the procedure and the per-item
+classification.
+
+Research-workflow parity is a secondary objective. The project supports useful equivalents for
+notebook research, parameter optimization, walk-forward analysis, regression testing, and data
+tooling where they materially improve the workflow, but these consume NautilusTrader-native APIs
+rather than reproducing Lean's programming model.
+
+## 13. Remaining open questions
+
+None at this time. D19 resolves the last question from the previous revision. New questions are
+recorded here as they arise.
