@@ -12401,4 +12401,280 @@ mod tests {
             self.closed.store(true, Ordering::Relaxed);
         }
     }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_live_node_universe_releases_member_subscriptions_on_stop() {
+        use std::any::Any;
+
+        use async_trait::async_trait;
+        use nautilus_common::{
+            cache::CacheView,
+            clients::DataClient,
+            factories::{ClientConfig, DataClientFactory},
+            messages::data::{
+                SubscribeInstrument, SubscribeQuotes, SubscribeTrades, UnsubscribeInstrument,
+                UnsubscribeQuotes, UnsubscribeTrades,
+            },
+        };
+        use nautilus_model::instruments::{
+            InstrumentAny,
+            stubs::{audusd_sim, gbpusd_sim},
+        };
+        use nautilus_trading::universe::{StaticUniverseRule, Universe, UniverseDefinition};
+
+        use super::config::RoutingConfig;
+
+        const VENUE: &str = "SIM";
+        const CLIENT_NAME: &str = "UNIVERSE-LEAK-TEST";
+
+        #[derive(Debug, Default)]
+        struct TestDataClientConfig;
+
+        impl ClientConfig for TestDataClientConfig {
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+
+        #[derive(Debug)]
+        struct RecordingDataClient {
+            client_id: ClientId,
+            venue: Venue,
+            commands: Arc<Mutex<Vec<String>>>,
+            disconnected: Arc<AtomicBool>,
+        }
+
+        impl RecordingDataClient {
+            fn record(&self, command: &str, instrument_id: InstrumentId) {
+                self.commands
+                    .lock()
+                    .push(format!("{command} {instrument_id}"));
+            }
+        }
+
+        #[async_trait(?Send)]
+        impl DataClient for RecordingDataClient {
+            fn client_id(&self) -> ClientId {
+                self.client_id
+            }
+
+            fn venue(&self) -> Option<Venue> {
+                Some(self.venue)
+            }
+
+            fn start(&mut self) -> anyhow::Result<()> {
+                Ok(())
+            }
+
+            fn stop(&mut self) -> anyhow::Result<()> {
+                self.disconnected.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+
+            fn reset(&mut self) -> anyhow::Result<()> {
+                Ok(())
+            }
+
+            fn dispose(&mut self) -> anyhow::Result<()> {
+                Ok(())
+            }
+
+            fn is_connected(&self) -> bool {
+                !self.disconnected.load(Ordering::Relaxed)
+            }
+
+            fn is_disconnected(&self) -> bool {
+                self.disconnected.load(Ordering::Relaxed)
+            }
+
+            async fn connect(&mut self) -> anyhow::Result<()> {
+                Ok(())
+            }
+
+            async fn disconnect(&mut self) -> anyhow::Result<()> {
+                self.disconnected.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+
+            fn subscribe_instrument(&mut self, cmd: SubscribeInstrument) -> anyhow::Result<()> {
+                self.record("subscribe_instrument", cmd.instrument_id);
+                Ok(())
+            }
+
+            fn unsubscribe_instrument(
+                &mut self,
+                cmd: &UnsubscribeInstrument,
+            ) -> anyhow::Result<()> {
+                self.record("unsubscribe_instrument", cmd.instrument_id);
+                Ok(())
+            }
+
+            fn subscribe_quotes(&mut self, cmd: SubscribeQuotes) -> anyhow::Result<()> {
+                self.record("subscribe_quotes", cmd.instrument_id);
+                Ok(())
+            }
+
+            fn unsubscribe_quotes(&mut self, cmd: &UnsubscribeQuotes) -> anyhow::Result<()> {
+                self.record("unsubscribe_quotes", cmd.instrument_id);
+                Ok(())
+            }
+
+            fn subscribe_trades(&mut self, cmd: SubscribeTrades) -> anyhow::Result<()> {
+                self.record("subscribe_trades", cmd.instrument_id);
+                Ok(())
+            }
+
+            fn unsubscribe_trades(&mut self, cmd: &UnsubscribeTrades) -> anyhow::Result<()> {
+                self.record("unsubscribe_trades", cmd.instrument_id);
+                Ok(())
+            }
+        }
+
+        #[derive(Debug)]
+        struct RecordingDataClientFactory {
+            commands: Arc<Mutex<Vec<String>>>,
+            disconnected: Arc<AtomicBool>,
+        }
+
+        impl DataClientFactory for RecordingDataClientFactory {
+            fn create(
+                &self,
+                name: &str,
+                _config: &dyn ClientConfig,
+                _cache: CacheView,
+                _clock: Rc<RefCell<dyn Clock>>,
+            ) -> anyhow::Result<Box<dyn DataClient>> {
+                Ok(Box::new(RecordingDataClient {
+                    client_id: ClientId::from(name),
+                    venue: Venue::from(VENUE),
+                    commands: Arc::clone(&self.commands),
+                    disconnected: Arc::clone(&self.disconnected),
+                }))
+            }
+
+            fn name(&self) -> &'static str {
+                CLIENT_NAME
+            }
+
+            fn config_type(&self) -> &'static str {
+                "TestDataClientConfig"
+            }
+        }
+
+        let aud_usd = InstrumentAny::CurrencyPair(audusd_sim());
+        let gbp_usd = InstrumentAny::CurrencyPair(gbpusd_sim());
+        let members = vec![aud_usd.id(), gbp_usd.id()];
+
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let disconnected = Arc::new(AtomicBool::new(false));
+        let mut node = LiveNode::builder(
+            TraderId::from("UNIVERSE-LEAK-001"),
+            nautilus_common::enums::Environment::Sandbox,
+        )
+        .unwrap()
+        .with_name("UniverseLeakNode")
+        .with_reconciliation(false)
+        .with_delay_post_stop_secs(0)
+        .with_timeout_connection(1)
+        .add_data_client_with_routing(
+            Some(CLIENT_NAME.to_string()),
+            Box::new(RecordingDataClientFactory {
+                commands: Arc::clone(&commands),
+                disconnected: Arc::clone(&disconnected),
+            }),
+            Box::new(TestDataClientConfig),
+            RoutingConfig {
+                default: false,
+                venues: Some(vec![VENUE.to_string()]),
+            },
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+        node.kernel
+            .cache
+            .borrow_mut()
+            .add_instrument(aud_usd)
+            .unwrap();
+        node.kernel
+            .cache
+            .borrow_mut()
+            .add_instrument(gbp_usd)
+            .unwrap();
+
+        let rule = Rc::new(RefCell::new(
+            StaticUniverseRule::new("static", members).unwrap(),
+        ));
+        let definition = UniverseDefinition::new("sim-members", Venue::from(VENUE), rule).unwrap();
+        node.add_actor(Universe::new(definition)).unwrap();
+
+        // The node starts inside the run loop, and data commands are drained by that loop, so the
+        // run is driven until the subscriptions are routed and then released.
+        let handle = node.handle();
+        {
+            let handle = handle.clone();
+            let commands = Arc::clone(&commands);
+
+            tokio::spawn(async move {
+                wait_until_async(
+                    || async { commands.lock().len() >= 6 },
+                    Duration::from_secs(10),
+                )
+                .await;
+
+                handle.stop();
+            });
+        }
+
+        node.run().await.expect("node should run cleanly");
+
+        wait_until_async(
+            || async {
+                let commands = commands.lock();
+                let subscribes = commands
+                    .iter()
+                    .filter(|command| command.starts_with("subscribe"))
+                    .count();
+                let unsubscribes = commands
+                    .iter()
+                    .filter(|command| command.starts_with("unsubscribe"))
+                    .count();
+                subscribes > 0 && subscribes == unsubscribes
+            },
+            Duration::from_secs(10),
+        )
+        .await;
+
+        let recorded = commands.lock().clone();
+        let mut subscribes: Vec<String> = recorded
+            .iter()
+            .filter(|command| command.starts_with("subscribe"))
+            .cloned()
+            .collect();
+        let mut unsubscribes: Vec<String> = recorded
+            .iter()
+            .filter(|command| command.starts_with("unsubscribe"))
+            .cloned()
+            .collect();
+        subscribes.sort();
+        unsubscribes.sort();
+        assert_eq!(
+            subscribes.len(),
+            6,
+            "expected quotes, trades, and the instrument definition for each member: {subscribes:?}",
+        );
+
+        let expected: Vec<String> = subscribes
+            .iter()
+            .map(|command| command.replacen("subscribe", "unsubscribe", 1))
+            .collect();
+        assert_eq!(
+            unsubscribes, expected,
+            "a stopped node leaked universe member subscriptions: {recorded:?}",
+        );
+
+        node.dispose();
+    }
 }

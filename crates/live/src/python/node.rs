@@ -73,9 +73,7 @@ use nautilus_trading::examples::{
 };
 use nautilus_trading::{
     ImportableControllerConfig, ImportableExecutionAlgorithmConfig, ImportableStrategyConfig,
-    python::{
-        algorithm::PyExecutionAlgorithm, strategy::PyStrategy, universe::PyUniverse,
-    },
+    python::{algorithm::PyExecutionAlgorithm, strategy::PyStrategy, universe::PyUniverse},
 };
 use parking_lot::{Condvar, Mutex};
 use pyo3::{
