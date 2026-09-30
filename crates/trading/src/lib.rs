@@ -110,6 +110,7 @@ pub mod algorithm;
 pub mod controller;
 pub mod sessions;
 pub mod strategy;
+pub mod universe;
 
 #[cfg(feature = "examples")]
 pub mod examples;
@@ -121,6 +122,11 @@ pub use algorithm::{
 pub use controller::ImportableControllerConfig;
 pub use strategy::{
     ImportableStrategyConfig, Strategy, StrategyConfig, StrategyCore, StrategyNative,
+};
+pub use universe::{
+    ScheduledUniverseRule, ScheduledUniverseSet, SharedUniverseRule, StaticUniverseRule, Universe,
+    UniverseBarSpec, UniverseChange, UniverseChangeReason, UniverseDefinition, UniverseMember,
+    UniverseMembershipState, UniverseRemovalPolicy, UniverseRule, UniverseSubscription,
 };
 
 #[cfg(feature = "python")]

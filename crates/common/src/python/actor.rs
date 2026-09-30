@@ -53,6 +53,7 @@ use nautilus_model::{
         data::option_chain::PyStrikeRange, instruments::instrument_any_to_pyobject,
         orders::order_any_to_pyobject,
     },
+    universe::UniverseChange,
 };
 use pyo3::{
     IntoPyObjectExt,
@@ -415,6 +416,15 @@ impl PyDataActorInner {
         if let Some(py_self) = self.python_instance()? {
             Python::attach(|py| {
                 py_self.call_method1(py, "on_session_event", (event.into_py_any(py)?,))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn dispatch_on_universe_changed(&mut self, change: UniverseChange) -> PyResult<()> {
+        if let Some(py_self) = self.python_instance()? {
+            Python::attach(|py| {
+                py_self.call_method1(py, "on_universe_changed", (change.into_py_any(py)?,))
             })?;
         }
         Ok(())
@@ -1085,6 +1095,16 @@ impl DataActor for PyDataActorInner {
         })
     }
 
+    fn on_universe_changed(&mut self, change: &UniverseChange) -> anyhow::Result<()> {
+        self.dispatch_on_universe_changed(change.clone())
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Python on_universe_changed failed:\n{}",
+                    format_exception(&e)
+                )
+            })
+    }
+
     #[allow(unused_variables)]
     fn on_data(&mut self, data: &CustomData) -> anyhow::Result<()> {
         Python::attach(|py| {
@@ -1568,6 +1588,32 @@ impl PyDataActor {
         .map_err(to_pyruntime_err)
     }
 
+    /// Subscribes this actor to the membership changes of `universe`.
+    ///
+    /// Changes are dispatched to `on_universe_changed`. The subscription is released with the
+    /// actor's other subscriptions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the actor is not registered with a trader.
+    #[pyo3(name = "subscribe_universe_changes")]
+    fn py_subscribe_universe_changes(&self, universe: &str) -> PyResult<()> {
+        if !self.inner().core.is_registered() {
+            return Err(to_pyruntime_err(
+                "Actor must be registered with a trader before subscribing to a universe",
+            ));
+        }
+
+        DataActor::subscribe_universe_changes(self.inner_mut(), Ustr::from(universe));
+        Ok(())
+    }
+
+    /// Unsubscribes this actor from the membership changes of `universe`.
+    #[pyo3(name = "unsubscribe_universe_changes")]
+    fn py_unsubscribe_universe_changes(&self, universe: &str) {
+        DataActor::unsubscribe_universe_changes(self.inner_mut(), Ustr::from(universe));
+    }
+
     #[pyo3(name = "publish_data")]
     fn py_publish_data(&self, data_type: &DataType, data: &CustomData) -> PyResult<()> {
         self.ensure_registered_for_data()?;
@@ -1701,6 +1747,10 @@ impl PyDataActor {
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_session_event")]
     fn py_on_session_event(_slf: &Bound<'_, Self>, event: SessionEvent) {}
+
+    #[allow(unused_variables, clippy::needless_pass_by_value)]
+    #[pyo3(name = "on_universe_changed")]
+    fn py_on_universe_changed(_slf: &Bound<'_, Self>, change: UniverseChange) {}
 
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_data")]
@@ -3152,10 +3202,13 @@ mod tests {
             AggressorSide, AssetClass, BookType, GreeksConvention, InstrumentCloseType,
             MarketStatusAction,
         },
-        identifiers::{ActorId, ClientId, ComponentId, OptionSeriesId, TradeId, TraderId, Venue},
+        identifiers::{
+            ActorId, ClientId, ComponentId, InstrumentId, OptionSeriesId, TradeId, TraderId, Venue,
+        },
         instruments::{CurrencyPair, InstrumentAny, stubs::audusd_sim},
         orderbook::OrderBook,
         types::{Price, Quantity},
+        universe::{UniverseChange, UniverseChangeReason, UniverseMembershipState},
     };
     use pyo3::{
         Bound, IntoPyObjectExt, Py, PyAny, PyRef, PyResult, Python,
@@ -4251,6 +4304,17 @@ class CapturingActor:
         stub_custom_data(1, 42, None, None)
     }
 
+    fn sample_universe_change() -> UniverseChange {
+        UniverseChange::new(
+            Ustr::from("test_universe"),
+            InstrumentId::from("AAPL.XNYS"),
+            UniverseMembershipState::Added,
+            UniverseChangeReason::Selected,
+            UnixNanos::default(),
+            UnixNanos::default(),
+        )
+    }
+
     fn sample_time_event() -> TimeEvent {
         TimeEvent::new(
             Ustr::from("test_timer"),
@@ -4651,6 +4715,7 @@ class TrackingActor:
         "on_load",
         "on_time_event",
         "on_session_event",
+        "on_universe_changed",
         "on_data",
         "on_signal",
         "on_queue_state",
@@ -5338,6 +5403,7 @@ class IndicatorEventActor:
     #[rstest]
     #[case("on_time_event")]
     #[case("on_session_event")]
+    #[case("on_universe_changed")]
     #[case("on_data")]
     #[case("on_signal")]
     #[case("on_queue_state")]
@@ -5374,6 +5440,10 @@ class IndicatorEventActor:
                     "on_session_event" => {
                         let event = sample_session_event();
                         rust_actor.inner_mut().on_session_event(&event)
+                    }
+                    "on_universe_changed" => {
+                        let change = sample_universe_change();
+                        rust_actor.inner_mut().on_universe_changed(&change)
                     }
                     "on_data" => {
                         let data = sample_data();
@@ -5852,6 +5922,7 @@ class IndicatorEventActor:
     #[case("on_load")]
     #[case("on_time_event")]
     #[case("on_session_event")]
+    #[case("on_universe_changed")]
     #[case("on_data")]
     #[case("on_signal")]
     #[case("on_queue_state")]
@@ -5888,6 +5959,7 @@ class IndicatorEventActor:
                 "on_load" => Some(PyDict::new(py).into_any().unbind()),
                 "on_time_event" => Some(sample_time_event().into_py_any(py).unwrap()),
                 "on_session_event" => Some(sample_session_event().into_py_any(py).unwrap()),
+                "on_universe_changed" => Some(sample_universe_change().into_py_any(py).unwrap()),
                 "on_data" | "on_instrument" | "on_historical_data" => Some(py.None()),
                 "on_signal" => Some(sample_signal().into_py_any(py).unwrap()),
                 "on_queue_state" => Some(

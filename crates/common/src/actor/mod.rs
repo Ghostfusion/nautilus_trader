@@ -31,6 +31,7 @@ pub mod data_actor;
 pub mod indicators;
 pub mod registry;
 pub mod session;
+pub mod universe;
 
 mod access;
 mod dispatch;

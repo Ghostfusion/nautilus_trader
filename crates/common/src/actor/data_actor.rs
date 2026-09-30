@@ -43,6 +43,7 @@ use nautilus_model::{
     identifiers::{ActorId, ClientId, ComponentId, InstrumentId, OptionSeriesId, TraderId, Venue},
     instruments::{InstrumentAny, SyntheticInstrument},
     orderbook::OrderBook,
+    universe::UniverseChange,
 };
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
@@ -454,6 +455,40 @@ pub trait DataActor {
         let actor_id = self.actor_id().inner();
         let clock = self.clock();
         super::session::schedule_session_events::<Self>(&clock, actor_id, calendar, config, to)
+    }
+
+    /// Actions to be performed when receiving a universe membership change.
+    ///
+    /// Delivered to actors subscribed to the universe with
+    /// [`DataActor::subscribe_universe_changes`]. A membership change is not data: it reports an
+    /// instrument entering or leaving a universe, not a market event.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if handling the change fails.
+    #[allow(unused_variables)]
+    fn on_universe_changed(&mut self, change: &UniverseChange) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Subscribes this actor to the membership changes of `universe`.
+    ///
+    /// The subscription is released with the actor's other subscriptions, and an explicit
+    /// unsubscribe is available through [`DataActor::unsubscribe_universe_changes`].
+    fn subscribe_universe_changes(&mut self, universe: Ustr)
+    where
+        Self: DataActorNative + Actor + Sized + 'static,
+    {
+        let actor_id = self.core().actor_id().inner();
+        super::universe::subscribe_universe_changes::<Self>(self.core_mut(), actor_id, universe);
+    }
+
+    /// Unsubscribes this actor from the membership changes of `universe`.
+    fn unsubscribe_universe_changes(&mut self, universe: Ustr)
+    where
+        Self: DataActorNative,
+    {
+        super::universe::unsubscribe_universe_changes(self.core_mut(), universe);
     }
 
     /// Actions to be performed when receiving custom data.

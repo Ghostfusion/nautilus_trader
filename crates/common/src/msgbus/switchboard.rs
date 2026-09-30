@@ -36,6 +36,7 @@ use nautilus_model::{
         ClientId, ClientOrderId, InstrumentId, OptionSeriesId, PositionId, StrategyId, Venue,
     },
 };
+use ustr::Ustr;
 
 use super::mstr::{Endpoint, MStr, Pattern, Topic};
 use crate::{msgbus::get_message_bus, runner::SystemChannel};
@@ -520,6 +521,10 @@ define_switchboard! {
     get_event_position_topic(strategy_id: StrategyId) -> strategy_id,
     "events.position.{}", strategy_id;
 
+    universe_membership_topics: Ustr,
+    get_universe_membership_topic(universe: Ustr) -> universe,
+    "events.universe.{}", universe;
+
     snapshot_order_topics: ClientOrderId,
     get_snapshot_order_topic(client_order_id: ClientOrderId) -> client_order_id,
     "snapshots.order.{}", client_order_id;
@@ -743,6 +748,7 @@ define_wrappers! {
     get_snapshot_position_topic(position_id: PositionId) -> MStr<Topic>,
     get_event_order_topic(strategy_id: StrategyId) -> MStr<Topic>,
     get_event_position_topic(strategy_id: StrategyId) -> MStr<Topic>,
+    get_universe_membership_topic(universe: Ustr) -> MStr<Topic>,
 }
 
 /// Returns a wildcard subscription pattern that matches all instrument topics

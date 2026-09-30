@@ -86,6 +86,7 @@ use nautilus_model::{
         instruments::instrument_any_to_pyobject, orders::pyobject_to_order_any,
     },
     types::{Price, Quantity},
+    universe::UniverseChange,
 };
 use nautilus_portfolio::{portfolio::Portfolio, python::PyPortfolio};
 use pyo3::{
@@ -433,6 +434,19 @@ impl PyStrategyInner {
         if let Some(py_self) = self.python_instance()? {
             Python::attach(|py| {
                 py_self.call_method1(py, "on_session_event", (event.clone().into_py_any(py)?,))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn dispatch_on_universe_changed(&self, change: &UniverseChange) -> PyResult<()> {
+        if let Some(py_self) = self.python_instance()? {
+            Python::attach(|py| {
+                py_self.call_method1(
+                    py,
+                    "on_universe_changed",
+                    (change.clone().into_py_any(py)?,),
+                )
             })?;
         }
         Ok(())
@@ -1167,6 +1181,15 @@ impl DataActor for PyStrategyInner {
     fn on_session_event(&mut self, event: &SessionEvent) -> anyhow::Result<()> {
         self.dispatch_on_session_event(event).map_err(|e| {
             anyhow::anyhow!("Python on_session_event failed:\n{}", format_exception(&e))
+        })
+    }
+
+    fn on_universe_changed(&mut self, change: &UniverseChange) -> anyhow::Result<()> {
+        self.dispatch_on_universe_changed(change).map_err(|e| {
+            anyhow::anyhow!(
+                "Python on_universe_changed failed:\n{}",
+                format_exception(&e)
+            )
         })
     }
 
@@ -1987,6 +2010,32 @@ impl PyStrategy {
         .map_err(to_pyruntime_err)
     }
 
+    /// Subscribes this strategy to the membership changes of `universe`.
+    ///
+    /// Changes are dispatched to `on_universe_changed`. The subscription is released with the
+    /// strategy's other subscriptions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the strategy is not registered with a trader.
+    #[pyo3(name = "subscribe_universe_changes")]
+    fn py_subscribe_universe_changes(&self, universe: &str) -> PyResult<()> {
+        if !self.inner().core.actor.is_registered() {
+            return Err(to_pyruntime_err(
+                "Strategy must be registered with a trader before subscribing to a universe",
+            ));
+        }
+
+        DataActor::subscribe_universe_changes(self.inner_mut(), Ustr::from(universe));
+        Ok(())
+    }
+
+    /// Unsubscribes this strategy from the membership changes of `universe`.
+    #[pyo3(name = "unsubscribe_universe_changes")]
+    fn py_unsubscribe_universe_changes(&self, universe: &str) {
+        DataActor::unsubscribe_universe_changes(self.inner_mut(), Ustr::from(universe));
+    }
+
     #[getter]
     #[pyo3(name = "registered_indicators")]
     fn py_registered_indicators(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
@@ -2359,6 +2408,10 @@ impl PyStrategy {
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_session_event")]
     fn py_on_session_event(_slf: &Bound<'_, Self>, event: SessionEvent) {}
+
+    #[allow(unused_variables, clippy::needless_pass_by_value)]
+    #[pyo3(name = "on_universe_changed")]
+    fn py_on_universe_changed(_slf: &Bound<'_, Self>, change: UniverseChange) {}
 
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_data")]
