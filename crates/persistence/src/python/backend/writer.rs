@@ -23,8 +23,8 @@ use std::{
 
 use nautilus_common::{clock::Clock, python::clock::PyClock};
 use nautilus_model::data::{
-    Bar, CustomData, Data, IndexPriceUpdate, InstrumentClose, MarkPriceUpdate, OrderBookDelta,
-    OrderBookDepth, QuoteTick, TradeTick,
+    Bar, CorporateAction, CustomData, Data, IndexPriceUpdate, InstrumentClose, MarkPriceUpdate,
+    OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick,
 };
 use pyo3::{exceptions::PyIOError, prelude::*};
 
@@ -171,6 +171,10 @@ pub(crate) fn pyobject_to_data(py: Python, data: Py<PyAny>) -> PyResult<Data> {
 
     if data.is_instance_of::<InstrumentClose>() {
         return Ok(Data::InstrumentClose(data.extract::<InstrumentClose>()?));
+    }
+
+    if data.is_instance_of::<CorporateAction>() {
+        return Ok(Data::CorporateAction(data.extract::<CorporateAction>()?));
     }
 
     if data.is_instance_of::<CustomData>() {

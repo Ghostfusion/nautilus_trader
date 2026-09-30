@@ -101,9 +101,9 @@ use nautilus_core::{
 use nautilus_model::defi::DefiData;
 use nautilus_model::{
     data::{
-        Bar, BarType, CustomData, Data, DataRef, DataType, FundingRateUpdate, HasTsInit,
-        IndexPriceUpdate, InstrumentClose, InstrumentStatus, MarkPriceUpdate, OrderBookDelta,
-        OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
+        Bar, BarType, CorporateAction, CustomData, Data, DataRef, DataType, FundingRateUpdate,
+        HasTsInit, IndexPriceUpdate, InstrumentClose, InstrumentStatus, MarkPriceUpdate,
+        OrderBookDelta, OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
         option_chain::{OptionGreeks, StrikeRange},
     },
     enums::{
@@ -1895,6 +1895,7 @@ impl DataEngine {
                 self.drain_deferred_commands();
             }
             DataRef::InstrumentClose(close) => self.handle_instrument_close(*close),
+            DataRef::CorporateAction(action) => self.handle_corporate_action(*action),
             DataRef::Custom(custom) => self.handle_custom_data(custom),
             #[cfg(feature = "defi")]
             DataRef::Defi(_) => unreachable!("handled before market data dispatch"),
@@ -1965,6 +1966,7 @@ impl DataEngine {
             Data::OptionGreeks(greeks) => self.handle_option_greeks_pipeline(greeks),
             Data::InstrumentStatus(status) => self.handle_instrument_status_pipeline(status),
             Data::InstrumentClose(close) => self.handle_instrument_close_pipeline(close),
+            Data::CorporateAction(action) => self.handle_corporate_action_pipeline(action),
             Data::Custom(custom) => self.handle_custom_data_pipeline(&custom),
             #[cfg(feature = "defi")]
             Data::Defi(_) => unreachable!("handled before market data dispatch"),
@@ -2909,6 +2911,11 @@ impl DataEngine {
         msgbus::publish_any(topic, &close);
     }
 
+    fn handle_corporate_action(&self, action: CorporateAction) {
+        let topic = switchboard::get_corporate_action_topic(action.instrument_id);
+        msgbus::publish_any(topic, &action);
+    }
+
     fn handle_custom_data(&self, custom: &CustomData) {
         log::debug!("Processing custom data: {}", custom.data.type_name());
         let topic = switchboard::get_custom_topic(&custom.data_type);
@@ -3067,6 +3074,11 @@ impl DataEngine {
     fn handle_instrument_close_pipeline(&self, close: InstrumentClose) {
         let topic = switchboard::get_pipeline_instrument_close_topic(close.instrument_id);
         msgbus::publish_any(topic, &close);
+    }
+
+    fn handle_corporate_action_pipeline(&self, action: CorporateAction) {
+        let topic = switchboard::get_pipeline_corporate_action_topic(action.instrument_id);
+        msgbus::publish_any(topic, &action);
     }
 
     fn handle_custom_data_pipeline(&self, custom: &CustomData) {

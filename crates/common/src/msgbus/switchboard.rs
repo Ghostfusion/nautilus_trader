@@ -460,6 +460,10 @@ define_switchboard! {
     get_instrument_close_topic(instrument_id: InstrumentId) -> instrument_id,
     "data.close.{}.{}", instrument_id.venue, instrument_id.symbol;
 
+    corporate_action_topics: InstrumentId,
+    get_corporate_action_topic(instrument_id: InstrumentId) -> instrument_id,
+    "data.corporate_actions.{}.{}", instrument_id.venue, instrument_id.symbol;
+
     option_greeks_topics: InstrumentId,
     get_option_greeks_topic(instrument_id: InstrumentId) -> instrument_id,
     "data.option_greeks.{}.{}", instrument_id.venue, instrument_id.symbol;
@@ -616,6 +620,15 @@ impl MessagingSwitchboard {
         self.pipeline_topic(live)
     }
 
+    #[must_use]
+    pub fn get_pipeline_corporate_action_topic(
+        &mut self,
+        instrument_id: InstrumentId,
+    ) -> MStr<Topic> {
+        let live = self.get_corporate_action_topic(instrument_id);
+        self.pipeline_topic(live)
+    }
+
     /// Returns the subscription pattern for order book deltas on `instrument_id`.
     #[must_use]
     pub fn get_book_deltas_pattern(&mut self, instrument_id: InstrumentId) -> MStr<Pattern> {
@@ -700,6 +713,7 @@ define_wrappers! {
     get_funding_settlement_topic(instrument_id: InstrumentId) -> MStr<Topic>,
     get_instrument_status_topic(instrument_id: InstrumentId) -> MStr<Topic>,
     get_instrument_close_topic(instrument_id: InstrumentId) -> MStr<Topic>,
+    get_corporate_action_topic(instrument_id: InstrumentId) -> MStr<Topic>,
     get_option_greeks_topic(instrument_id: InstrumentId) -> MStr<Topic>,
     get_option_chain_topic(series_id: OptionSeriesId) -> MStr<Topic>,
     get_pipeline_custom_topic(data_type: &DataType) -> MStr<Topic>,
@@ -714,6 +728,7 @@ define_wrappers! {
     get_pipeline_instrument_status_topic(instrument_id: InstrumentId) -> MStr<Topic>,
     get_pipeline_option_greeks_topic(instrument_id: InstrumentId) -> MStr<Topic>,
     get_pipeline_instrument_close_topic(instrument_id: InstrumentId) -> MStr<Topic>,
+    get_pipeline_corporate_action_topic(instrument_id: InstrumentId) -> MStr<Topic>,
     get_order_submitted_topic(instrument_id: InstrumentId) -> MStr<Topic>,
     get_order_rejected_topic(instrument_id: InstrumentId) -> MStr<Topic>,
     get_order_pending_update_topic(instrument_id: InstrumentId) -> MStr<Topic>,
@@ -1005,6 +1020,10 @@ mod tests {
     #[case::close(
         MessagingSwitchboard::get_pipeline_instrument_close_topic as PipelineInstrumentIdTopicFn,
         "data.pipeline.close.XCME.ESZ24",
+    )]
+    #[case::corporate_actions(
+        MessagingSwitchboard::get_pipeline_corporate_action_topic as PipelineInstrumentIdTopicFn,
+        "data.pipeline.corporate_actions.XCME.ESZ24",
     )]
     fn test_get_pipeline_instrument_id_topic(
         mut switchboard: MessagingSwitchboard,

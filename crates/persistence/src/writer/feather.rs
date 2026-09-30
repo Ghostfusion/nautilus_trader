@@ -52,10 +52,10 @@ use nautilus_common::{clock::Clock, live::LiveClock};
 use nautilus_core::{DurationNanos, UnixNanos, time::nanos_since_unix_epoch};
 use nautilus_model::{
     data::{
-        Bar, CustomData, CustomDataTrait, Data, DataBatch, FundingRateUpdate, IndexPriceUpdate,
-        InstrumentStatus, MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta,
-        OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick, close::InstrumentClose,
-        encode_custom_to_arrow, get_arrow_schema,
+        Bar, CorporateAction, CustomData, CustomDataTrait, Data, DataBatch, FundingRateUpdate,
+        IndexPriceUpdate, InstrumentStatus, MarkPriceUpdate, NautilusDataType, OptionGreeks,
+        OrderBookDelta, OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
+        close::InstrumentClose, encode_custom_to_arrow, get_arrow_schema,
     },
     events::{
         AccountState, OrderAccepted, OrderCancelRejected, OrderCanceled, OrderDenied,
@@ -1213,6 +1213,7 @@ impl FeatherWriter {
             Data::InstrumentStatus(status) => self.write(status),
             Data::OptionGreeks(greeks) => self.write(greeks),
             Data::InstrumentClose(close) => self.write(close),
+            Data::CorporateAction(action) => self.write(action),
             Data::Custom(custom) => self.write_custom_data(&custom),
             Data::BookDeltas(deltas_api) => {
                 // Batch write so chunk_metadata can skip a leading BookAction::Clear sentinel
@@ -1296,6 +1297,7 @@ impl FeatherWriter {
         try_write!(message, InstrumentStatus);
         try_write!(message, OptionGreeks);
         try_write!(message, InstrumentClose);
+        try_write!(message, CorporateAction);
         try_write!(message, InstrumentAny);
         try_write!(message, AccountState);
         try_write!(message, OrderInitialized);
@@ -1676,8 +1678,10 @@ mod tests {
     use std::sync::{Arc, Mutex, atomic::Ordering};
 
     use nautilus_common::{clock::VirtualClock, live::LiveClock};
+    #[cfg(target_os = "linux")]
+    use nautilus_model::data::HasTsInit;
     use nautilus_model::{
-        data::{Data, HasTsInit, NautilusRecordType, QuoteTick, TradeTick},
+        data::{Data, NautilusRecordType, QuoteTick, TradeTick},
         enums::AggressorSide,
         identifiers::{InstrumentId, TradeId},
         types::{ERROR_PRICE, Price, Quantity},

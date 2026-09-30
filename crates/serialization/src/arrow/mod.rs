@@ -19,6 +19,7 @@ pub mod account_state;
 pub mod bar;
 pub mod catalog_display;
 pub mod close;
+pub mod corporate_action;
 pub mod custom;
 pub mod delta;
 pub mod depth;
@@ -71,7 +72,7 @@ use arrow::{
 use nautilus_core::UnixNanos;
 use nautilus_model::{
     data::{
-        Data, IndexPriceUpdate, InstrumentStatus, MarkPriceUpdate, bar::Bar,
+        CorporateAction, Data, IndexPriceUpdate, InstrumentStatus, MarkPriceUpdate, bar::Bar,
         close::InstrumentClose, delta::OrderBookDelta, depth::OrderBookDepth,
         option_chain::OptionGreeks, quote::QuoteTick, trade::TradeTick,
     },
@@ -1712,6 +1713,20 @@ pub fn instrument_closes_to_arrow_record_batch_bytes(
     encode_batch_with_metadata(data)
 }
 
+/// Converts a vector of `CorporateAction` into an Arrow `RecordBatch`.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - `data` is empty: `EncodingError::EmptyData`.
+/// - Metadata differs between rows: `EncodingError::MixedMetadata`.
+/// - Encoding fails: `EncodingError::ArrowError`.
+pub fn corporate_action_to_arrow_record_batch_bytes(
+    data: &[CorporateAction],
+) -> Result<RecordBatch, EncodingError> {
+    encode_batch_with_metadata(data)
+}
+
 fn encode_batch_with_metadata<T>(data: &[T]) -> Result<RecordBatch, EncodingError>
 where
     T: EncodeToRecordBatch,
@@ -2210,8 +2225,8 @@ mod schema_invariant_tests {
     };
     use nautilus_model::{
         data::{
-            BookOrder, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus, MarkPriceUpdate,
-            OptionGreeks,
+            BookOrder, CorporateAction, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus,
+            MarkPriceUpdate, OptionGreeks,
             bar::Bar,
             close::InstrumentClose,
             delta::OrderBookDelta,
@@ -2367,6 +2382,8 @@ mod schema_invariant_tests {
                 &["close_price", KEY_IDENTIFIER],
             );
         };
+        // CorporateAction has no model get_fields implementation.
+        (CorporateAction) => {};
     }
 
     macro_rules! assert_registered_model_field_maps {

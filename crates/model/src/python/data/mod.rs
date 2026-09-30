@@ -23,6 +23,7 @@ use std::{
 pub mod bar;
 pub mod bet;
 pub mod close;
+pub mod corporate_action;
 pub mod data_type;
 pub mod delta;
 pub mod deltas;
@@ -262,6 +263,7 @@ pub fn data_to_pyobject(py: Python<'_>, data: Data) -> PyResult<Py<PyAny>> {
         Data::OptionGreeks(greeks) => Py::new(py, greeks).map(Py::into_any),
         Data::InstrumentStatus(status) => Py::new(py, status).map(Py::into_any),
         Data::InstrumentClose(close) => Py::new(py, close).map(Py::into_any),
+        Data::CorporateAction(action) => Py::new(py, action).map(Py::into_any),
         #[cfg(feature = "defi")]
         Data::Defi(_) => Err(to_pytype_err("Unsupported DeFi data variant")),
     }

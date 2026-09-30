@@ -23,8 +23,8 @@
 
 use nautilus_core::UnixNanos;
 use nautilus_model::data::{
-    Bar, CustomData, Data, HasTsInit, IndexPriceUpdate, MarkPriceUpdate, NautilusDataType,
-    OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick, close::InstrumentClose,
+    Bar, CorporateAction, CustomData, Data, HasTsInit, IndexPriceUpdate, MarkPriceUpdate,
+    NautilusDataType, OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick, close::InstrumentClose,
 };
 use nautilus_serialization::arrow::{DecodeTypedFromRecordBatch, EncodeToRecordBatch};
 use object_store::path::Path as ObjectPath;
@@ -743,6 +743,15 @@ impl ParquetDataCatalog {
             }
             "instrument_closes" => {
                 self.consolidate_data_by_period_generic::<InstrumentClose>(
+                    identifier,
+                    period_nanos,
+                    start,
+                    end,
+                    ensure_contiguous_files,
+                )?;
+            }
+            "corporate_actions" => {
+                self.consolidate_data_by_period_generic::<CorporateAction>(
                     identifier,
                     period_nanos,
                     start,

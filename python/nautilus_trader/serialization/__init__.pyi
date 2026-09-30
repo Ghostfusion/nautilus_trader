@@ -9,6 +9,7 @@ __all__ = [
     "bars_to_arrow_record_batch_bytes",
     "book_deltas_to_arrow_record_batch_bytes",
     "book_depths_to_arrow_record_batch_bytes",
+    "corporate_action_to_arrow_record_batch_bytes",
     "get_arrow_schema_bytes",
     "get_arrow_schema_map",
     "index_prices_to_arrow_record_batch_bytes",
@@ -31,6 +32,9 @@ def book_deltas_to_arrow_record_batch_bytes(
 ) -> bytes: ...
 def book_depths_to_arrow_record_batch_bytes(
     data: typing.Sequence[model.OrderBookDepth],
+) -> bytes: ...
+def corporate_action_to_arrow_record_batch_bytes(
+    data: typing.Sequence[model.CorporateAction],
 ) -> bytes: ...
 def index_prices_to_arrow_record_batch_bytes(
     data: typing.Sequence[model.IndexPriceUpdate],

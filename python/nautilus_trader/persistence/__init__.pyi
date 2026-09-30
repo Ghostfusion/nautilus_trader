@@ -239,6 +239,13 @@ class ParquetDataCatalog:
         end: int | None = None,
         skip_disjoint_check: bool = False,
     ) -> str: ...
+    def write_corporate_actions(
+        self,
+        data: typing.Sequence[model.CorporateAction],
+        start: int | None = None,
+        end: int | None = None,
+        skip_disjoint_check: bool = False,
+    ) -> str: ...
     def write_instruments(self, instruments: typing.Any) -> list[str]: ...
     def instruments(
         self,

@@ -27,7 +27,7 @@ use nautilus_serialization::arrow::{
 };
 
 use super::{
-    ArrowSchemaProvider, Bar, CustomDataDecoder, Data, DecodeDataFromRecordBatch,
+    ArrowSchemaProvider, Bar, CorporateAction, CustomDataDecoder, Data, DecodeDataFromRecordBatch,
     DecodeTypedFromRecordBatch, FundingRateUpdate, HasCatalogDataType, HasTsInit, HashMap,
     INSTRUMENT_PATH_PREFIXES, InstrumentAny, InstrumentClose, NautilusDataType, OptionGreeks,
     OrderBookDelta, OrderBookDepth, ParquetDataCatalog, Path, QuoteTick, RecordBatch, TradeTick,
@@ -1073,6 +1073,16 @@ impl ParquetDataCatalog {
         end: Option<UnixNanos>,
     ) -> anyhow::Result<Vec<InstrumentClose>> {
         self.query_typed_data::<InstrumentClose>(instrument_ids, start, end, None, None, true)
+    }
+
+    /// Queries corporate action data for the specified instrument(s) and time range.
+    pub fn corporate_actions(
+        &mut self,
+        instrument_ids: Option<Vec<String>>,
+        start: Option<UnixNanos>,
+        end: Option<UnixNanos>,
+    ) -> anyhow::Result<Vec<CorporateAction>> {
+        self.query_typed_data::<CorporateAction>(instrument_ids, start, end, None, None, true)
     }
 
     /// Queries option greeks data for the specified instrument(s) and time range.

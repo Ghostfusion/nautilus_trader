@@ -34,9 +34,9 @@ use arrow::{
 };
 use nautilus_model::{
     data::{
-        Bar, BarType, FundingRateUpdate, IndexPriceUpdate, InstrumentClose, InstrumentStatus,
-        MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick,
-        TradeTick, get_arrow_schema,
+        Bar, BarType, CorporateAction, FundingRateUpdate, IndexPriceUpdate, InstrumentClose,
+        InstrumentStatus, MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta,
+        OrderBookDepth, QuoteTick, TradeTick, get_arrow_schema,
     },
     enums::{AggressorSide, BookAction, InstrumentCloseType, OrderSide},
     instruments::InstrumentAny,
@@ -144,6 +144,13 @@ impl CatalogDisplay for InstrumentClose {
     const FUNCTIONS: Option<CatalogDisplayFns> = Some(CatalogDisplayFns {
         schema: instrument_closes_schema,
         convert: convert_instrument_closes,
+    });
+}
+
+impl CatalogDisplay for CorporateAction {
+    const FUNCTIONS: Option<CatalogDisplayFns> = Some(CatalogDisplayFns {
+        schema: corporate_actions_schema,
+        convert: convert_corporate_actions,
     });
 }
 
@@ -1388,6 +1395,75 @@ fn convert_instrument_closes(
             constant_string_column(instrument_id, len),
             Arc::new(close_price_builder.finish()),
             Arc::new(close_type_builder.finish()),
+            Arc::new(ts_event_builder.finish()),
+            Arc::new(ts_init_builder.finish()),
+        ],
+    )
+    .map_err(EncodingError::from)
+}
+
+fn corporate_actions_schema() -> Schema {
+    Schema::new(vec![
+        utf8_field("instrument_id", false),
+        utf8_field("action", false),
+        float64_field("value", false),
+        utf8_field("new_symbol", true),
+        timestamp_field("effective_ns", false),
+        timestamp_field("ts_event", false),
+        timestamp_field("ts_init", false),
+    ])
+}
+
+fn convert_corporate_actions(
+    metadata: &HashMap<String, String>,
+    batch: &RecordBatch,
+) -> Result<RecordBatch, EncodingError> {
+    let instrument_id = instrument_id(metadata)?;
+    let action_index = batch.schema().index_of("action")?;
+    let action = extract_column_string(batch.columns(), "action", action_index)?;
+    let value_index = batch.schema().index_of("value")?;
+    let value = extract_column_string(batch.columns(), "value", value_index)?;
+    let new_symbol_index = batch.schema().index_of("new_symbol")?;
+    let new_symbol = extract_column_string(batch.columns(), "new_symbol", new_symbol_index)?;
+    let effective_ns = nanos_col(batch, "effective_ns")?;
+    let ts_event = nanos_col(batch, "ts_event")?;
+    let ts_init = nanos_col(batch, "ts_init")?;
+    let len = batch.num_rows();
+
+    let mut action_builder = StringBuilder::new();
+    let mut value_builder = Float64Builder::with_capacity(len);
+    let mut new_symbol_builder = StringBuilder::new();
+    let mut effective_ns_builder =
+        TimestampNanosecondBuilder::with_capacity(len).with_data_type(timestamp_data_type());
+    let mut ts_event_builder =
+        TimestampNanosecondBuilder::with_capacity(len).with_data_type(timestamp_data_type());
+    let mut ts_init_builder =
+        TimestampNanosecondBuilder::with_capacity(len).with_data_type(timestamp_data_type());
+
+    for row in 0..len {
+        action_builder.append_value(action.value(row));
+        let action_value = Decimal::from_str(value.value(row))
+            .map_err(|e| EncodingError::ParseError("value", e.to_string()))?;
+        value_builder.append_value(action_value.to_f64().unwrap_or(f64::NAN));
+        append_optional_string(
+            &mut new_symbol_builder,
+            &new_symbol,
+            row,
+            batch.column(new_symbol_index).as_ref(),
+        );
+        append_timestamp(&mut effective_ns_builder, &effective_ns, row);
+        append_timestamp(&mut ts_event_builder, &ts_event, row);
+        append_timestamp(&mut ts_init_builder, &ts_init, row);
+    }
+
+    RecordBatch::try_new(
+        Arc::new(corporate_actions_schema()),
+        vec![
+            constant_string_column(instrument_id, len),
+            Arc::new(action_builder.finish()),
+            Arc::new(value_builder.finish()),
+            Arc::new(new_symbol_builder.finish()),
+            Arc::new(effective_ns_builder.finish()),
             Arc::new(ts_event_builder.finish()),
             Arc::new(ts_init_builder.finish()),
         ],

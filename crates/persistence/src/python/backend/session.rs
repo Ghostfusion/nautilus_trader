@@ -18,9 +18,9 @@ use std::collections::HashMap;
 use nautilus_core::python::{to_pyruntime_err, to_pyvalue_err};
 use nautilus_model::{
     data::{
-        Bar, FundingRateUpdate, IndexPriceUpdate, InstrumentClose, InstrumentStatus,
-        MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick,
-        TradeTick,
+        Bar, CorporateAction, FundingRateUpdate, IndexPriceUpdate, InstrumentClose,
+        InstrumentStatus, MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta,
+        OrderBookDepth, QuoteTick, TradeTick,
     },
     python::data::data_to_pyobject,
 };
@@ -184,6 +184,9 @@ impl DataBackendSession {
                 .map_err(to_pyruntime_err),
             NautilusDataType::InstrumentClose => self
                 .add_file::<InstrumentClose>(table_name, file_path, sql_query, None)
+                .map_err(to_pyruntime_err),
+            NautilusDataType::CorporateAction => self
+                .add_file::<CorporateAction>(table_name, file_path, sql_query, None)
                 .map_err(to_pyruntime_err),
             NautilusDataType::Custom { type_name } => {
                 let mut metadata = HashMap::new();

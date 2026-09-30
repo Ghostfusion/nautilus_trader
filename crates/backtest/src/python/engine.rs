@@ -40,9 +40,9 @@ use nautilus_model::defi::DefiData;
 use nautilus_model::{
     accounts::margin_model::{LeveragedMarginModel, MarginModelAny, StandardMarginModel},
     data::{
-        Bar, CustomData, Data, FundingRateUpdate, IndexPriceUpdate, InstrumentClose,
-        InstrumentStatus, MarkPriceUpdate, OptionGreeks, OrderBookDelta, OrderBookDeltas,
-        OrderBookDepth, QuoteTick, TradeTick,
+        Bar, CorporateAction, CustomData, Data, FundingRateUpdate, IndexPriceUpdate,
+        InstrumentClose, InstrumentStatus, MarkPriceUpdate, OptionGreeks, OrderBookDelta,
+        OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
     },
     enums::{AccountType, BookType, OmsType, OtoTriggerMode},
     identifiers::{AccountId, ActorId, ClientId, ExecAlgorithmId, InstrumentId, TraderId, Venue},
@@ -1649,6 +1649,10 @@ fn pyobject_to_data(_py: Python, obj: &Bound<'_, PyAny>) -> PyResult<Data> {
 
     if let Ok(close) = obj.extract::<InstrumentClose>() {
         return Ok(Data::InstrumentClose(close));
+    }
+
+    if let Ok(action) = obj.extract::<CorporateAction>() {
+        return Ok(Data::CorporateAction(action));
     }
 
     if let Ok(custom) = obj.extract::<CustomData>() {

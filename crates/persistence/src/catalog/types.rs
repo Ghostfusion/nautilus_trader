@@ -24,9 +24,9 @@ use std::{
 use nautilus_core::{Params, UnixNanos};
 use nautilus_model::{
     data::{
-        Bar, FundingRateUpdate, HasTsInit, IndexPriceUpdate, InstrumentClose, InstrumentStatus,
-        MarkPriceUpdate, NautilusDataType, NautilusRecordType, OptionGreeks, OrderBookDelta,
-        OrderBookDepth, QuoteTick, TradeTick,
+        Bar, CorporateAction, FundingRateUpdate, HasTsInit, IndexPriceUpdate, InstrumentClose,
+        InstrumentStatus, MarkPriceUpdate, NautilusDataType, NautilusRecordType, OptionGreeks,
+        OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick,
     },
     events::{
         AccountState, OrderAccepted, OrderCancelRejected, OrderCanceled, OrderDenied,

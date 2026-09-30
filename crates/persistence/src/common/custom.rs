@@ -32,9 +32,10 @@ use datafusion::arrow::{
 };
 use nautilus_core::UnixNanos;
 use nautilus_model::data::{
-    Bar, CustomData, CustomDataTrait, Data, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus,
-    MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick,
-    TradeTick, close::InstrumentClose, encode_custom_to_arrow, get_arrow_schema,
+    Bar, CorporateAction, CustomData, CustomDataTrait, Data, FundingRateUpdate, IndexPriceUpdate,
+    InstrumentStatus, MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta,
+    OrderBookDepth, QuoteTick, TradeTick, close::InstrumentClose, encode_custom_to_arrow,
+    get_arrow_schema,
 };
 use nautilus_serialization::arrow::{
     DecodeDataFromRecordBatch, custom::CustomDataDecoder, record_batch_with_identifier_column,

@@ -55,6 +55,7 @@ fn replay_key(data: DataRef<'_>) -> ReplayKey {
         | DataRef::OptionGreeks(_)
         | DataRef::InstrumentStatus(_)
         | DataRef::InstrumentClose(_)
+        | DataRef::CorporateAction(_)
         | DataRef::Custom(_) => (0, 0, 0, 0),
         #[cfg(feature = "defi")]
         DataRef::Defi(defi) => replay_position(defi),
@@ -110,6 +111,9 @@ fn sort_by_replay_key(batch: &mut DataBatch) {
         }
         DataBatch::InstrumentClose(data) => {
             sort_view_by_replay_key(data, |item| DataRef::InstrumentClose(item));
+        }
+        DataBatch::CorporateAction(data) => {
+            sort_view_by_replay_key(data, |item| DataRef::CorporateAction(item));
         }
         #[cfg(feature = "defi")]
         DataBatch::Defi(data) => sort_view_by_replay_key(data, |item| DataRef::Defi(item)),
@@ -391,9 +395,9 @@ mod tests {
 
     use nautilus_model::{
         data::{
-            Bar, FundingRateUpdate, IndexPriceUpdate, InstrumentClose, InstrumentStatus,
-            MarkPriceUpdate, OptionGreeks, OrderBookDelta, OrderBookDeltas, OrderBookDepth,
-            QuoteTick, TradeTick,
+            Bar, CorporateAction, CorporateActionType, FundingRateUpdate, IndexPriceUpdate,
+            InstrumentClose, InstrumentStatus, MarkPriceUpdate, OptionGreeks, OrderBookDelta,
+            OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
             stubs::{
                 stub_bar, stub_delta, stub_deltas, stub_depth10, stub_instrument_close,
                 stub_instrument_status, stub_trade_ethusdt_buy,
@@ -909,6 +913,17 @@ mod tests {
             ts_init: ts,
             ..OptionGreeks::default()
         };
+        let action = |ts| {
+            CorporateAction::new(
+                instrument_id,
+                CorporateActionType::Split,
+                "2".parse().unwrap(),
+                None,
+                ts,
+                ts,
+                ts,
+            )
+        };
         let batches = vec![
             DataBatch::from(vec![
                 OrderBookDelta {
@@ -985,10 +1000,11 @@ mod tests {
                     ..stub_instrument_close()
                 },
             ]),
+            DataBatch::from(vec![action(late), action(early)]),
         ];
         assert_eq!(
             batches.len(),
-            12,
+            13,
             "every static DataBatch variant needs a case"
         );
 

@@ -23,9 +23,9 @@
 use ahash::AHashSet;
 use nautilus_core::UnixNanos;
 use nautilus_model::data::{
-    Bar, CustomData, Data, FundingRateUpdate, HasTsInit, IndexPriceUpdate, InstrumentStatus,
-    MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick,
-    TradeTick, close::InstrumentClose,
+    Bar, CorporateAction, CustomData, Data, FundingRateUpdate, HasTsInit, IndexPriceUpdate,
+    InstrumentStatus, MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta,
+    OrderBookDepth, QuoteTick, TradeTick, close::InstrumentClose,
 };
 use nautilus_serialization::arrow::{DecodeTypedFromRecordBatch, EncodeToRecordBatch};
 use object_store::ObjectStoreExt;
@@ -244,6 +244,9 @@ impl ParquetDataCatalog {
             }
             NautilusDataType::InstrumentClose => {
                 self.delete_data_range_generic::<InstrumentClose>(identifier, start, end)
+            }
+            NautilusDataType::CorporateAction => {
+                self.delete_data_range_generic::<CorporateAction>(identifier, start, end)
             }
             NautilusDataType::FundingRateUpdate => {
                 self.delete_data_range_generic::<FundingRateUpdate>(identifier, start, end)

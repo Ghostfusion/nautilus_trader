@@ -24,8 +24,9 @@ use arrow::{
 use nautilus_core::python::{to_pyruntime_err, to_pytype_err, to_pyvalue_err};
 use nautilus_model::{
     data::{
-        Bar, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus, MarkPriceUpdate, OptionGreeks,
-        OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick, close::InstrumentClose,
+        Bar, CorporateAction, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus,
+        MarkPriceUpdate, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick,
+        close::InstrumentClose,
     },
     python::data::{
         pyobjects_to_bars, pyobjects_to_book_deltas, pyobjects_to_index_prices,
@@ -42,10 +43,11 @@ use pyo3::{
 use crate::arrow::{
     ArrowSchemaProvider, DecodeFromRecordBatch, DecodeTypedFromRecordBatch,
     bars_to_arrow_record_batch_bytes, book_deltas_to_arrow_record_batch_bytes,
-    book_depths_to_arrow_record_batch_bytes, index_prices_to_arrow_record_batch_bytes,
-    instrument_closes_to_arrow_record_batch_bytes, instrument_status_to_arrow_record_batch_bytes,
-    mark_prices_to_arrow_record_batch_bytes, option_greeks_to_arrow_record_batch_bytes,
-    quotes_to_arrow_record_batch_bytes, trades_to_arrow_record_batch_bytes,
+    book_depths_to_arrow_record_batch_bytes, corporate_action_to_arrow_record_batch_bytes,
+    index_prices_to_arrow_record_batch_bytes, instrument_closes_to_arrow_record_batch_bytes,
+    instrument_status_to_arrow_record_batch_bytes, mark_prices_to_arrow_record_batch_bytes,
+    option_greeks_to_arrow_record_batch_bytes, quotes_to_arrow_record_batch_bytes,
+    trades_to_arrow_record_batch_bytes,
 };
 
 /// Transforms the given record `batch` into Python `bytes`.
@@ -123,6 +125,7 @@ pub fn get_arrow_schema_map(py: Python<'_>, cls: &Bound<'_, PyType>) -> PyResult
         stringify!(InstrumentStatus) => InstrumentStatus::get_schema_map(),
         stringify!(OptionGreeks) => OptionGreeks::get_schema_map(),
         stringify!(InstrumentClose) => InstrumentClose::get_schema_map(),
+        stringify!(CorporateAction) => CorporateAction::get_schema_map(),
         _ => {
             return Err(to_pytype_err(format!(
                 "Arrow schema for `{cls_str}` is not currently implemented in Rust."
@@ -489,6 +492,27 @@ pub fn py_instrument_closes_to_arrow_record_batch_bytes(
     data: Vec<InstrumentClose>,
 ) -> PyResult<Py<PyBytes>> {
     match instrument_closes_to_arrow_record_batch_bytes(&data) {
+        Ok(batch) => arrow_record_batch_to_pybytes(py, &batch),
+        Err(e) => Err(to_pyvalue_err(e)),
+    }
+}
+
+/// Converts a vector of `CorporateAction` into an Arrow `RecordBatch`.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - `data` is empty: `EncodingError::EmptyData`.
+/// - Metadata differs between rows: `EncodingError::MixedMetadata`.
+/// - Encoding fails: `EncodingError::ArrowError`.
+#[pyfunction(name = "corporate_action_to_arrow_record_batch_bytes")]
+#[pyo3_stub_gen::derive::gen_stub_pyfunction(module = "nautilus_trader.serialization")]
+#[expect(clippy::needless_pass_by_value)]
+pub fn py_corporate_action_to_arrow_record_batch_bytes(
+    py: Python,
+    data: Vec<CorporateAction>,
+) -> PyResult<Py<PyBytes>> {
+    match corporate_action_to_arrow_record_batch_bytes(&data) {
         Ok(batch) => arrow_record_batch_to_pybytes(py, &batch),
         Err(e) => Err(to_pyvalue_err(e)),
     }

@@ -982,6 +982,54 @@ mod tests {
     }
 
     #[rstest]
+    fn parquet_streaming_corporate_action_round_trip() {
+        use nautilus_model::data::{CorporateAction, CorporateActionType};
+
+        let directory = TempDir::new().unwrap();
+
+        let config = WriterConnectConfig::new(
+            directory
+                .path()
+                .join("backtest/run-corporate-action")
+                .to_string_lossy(),
+            Some(local_catalog(&directory)),
+        );
+        let mut sink =
+            parquet_writer_factory(&config, WriterClock::Test(Arc::new(AtomicU64::new(0))))
+                .unwrap();
+
+        let action = CorporateAction::new(
+            InstrumentId::from("AAPL.XNYS"),
+            CorporateActionType::Split,
+            "4".parse().unwrap(),
+            None,
+            UnixNanos::from(1_000_000_000),
+            UnixNanos::from(2_000_000_000),
+            UnixNanos::from(3_000_000_000),
+        );
+        assert!(sink.write_any(&action).unwrap());
+        sink.close().unwrap();
+
+        let mut catalog = ParquetDataCatalog::from_uri(
+            directory.path().to_str().unwrap(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let rows = catalog
+            .query_batch(&CatalogQuery::new(NautilusDataType::CorporateAction))
+            .unwrap();
+
+        let DataBatch::CorporateAction(rows) = rows else {
+            panic!("expected corporate actions")
+        };
+
+        assert_eq!(rows.as_ref(), &[action]);
+    }
+
+    #[rstest]
     fn parquet_streaming_write_error_reaches_flush() {
         let directory = TempDir::new().unwrap();
 

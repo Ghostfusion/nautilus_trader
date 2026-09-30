@@ -42,9 +42,9 @@ use nautilus_core::UnixNanos;
 #[cfg(feature = "defi")]
 use nautilus_model::data::NautilusRecordType;
 use nautilus_model::data::{
-    Bar, Data, FundingRateUpdate, HasTsInit, IndexPriceUpdate, InstrumentStatus, MarkPriceUpdate,
-    NautilusDataType, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick,
-    close::InstrumentClose, to_variant,
+    Bar, CorporateAction, Data, FundingRateUpdate, HasTsInit, IndexPriceUpdate, InstrumentStatus,
+    MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick,
+    TradeTick, close::InstrumentClose, to_variant,
 };
 use nautilus_serialization::arrow::{
     DecodeDataFromRecordBatch, DecodeTypedFromRecordBatch, KEY_TYPE_NAME, U64ColumnRef,
@@ -327,6 +327,11 @@ impl ParquetDataCatalog {
                 .collect(),
             CatalogDataType::Data(NautilusDataType::InstrumentClose) => self
                 .convert_record_batches_to_data::<InstrumentClose>(batches, false)?
+                .into_iter()
+                .map(Data::from)
+                .collect(),
+            CatalogDataType::Data(NautilusDataType::CorporateAction) => self
+                .convert_record_batches_to_data::<CorporateAction>(batches, false)?
                 .into_iter()
                 .map(Data::from)
                 .collect(),

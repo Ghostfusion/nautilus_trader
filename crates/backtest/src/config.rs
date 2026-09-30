@@ -887,6 +887,7 @@ impl BacktestDataConfig {
                     | NautilusDataType::OptionGreeks
                     | NautilusDataType::InstrumentStatus
                     | NautilusDataType::InstrumentClose
+                    | NautilusDataType::CorporateAction
                     | NautilusDataType::Instrument
             ),
             ConfigError::unsupported_value(
@@ -1243,6 +1244,7 @@ mod tests {
     #[case(NautilusDataType::OptionGreeks)]
     #[case(NautilusDataType::InstrumentStatus)]
     #[case(NautilusDataType::InstrumentClose)]
+    #[case(NautilusDataType::CorporateAction)]
     fn test_data_config_accepts_supported_family(#[case] data_type: NautilusDataType) {
         let config = BacktestDataConfig::builder()
             .data_type(data_type.clone())

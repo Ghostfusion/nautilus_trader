@@ -35,9 +35,9 @@ use arrow::{
 use futures::{StreamExt, TryStreamExt};
 use nautilus_model::{
     data::{
-        Bar, FundingRateUpdate, IndexPriceUpdate, InstrumentClose, InstrumentStatus,
-        MarkPriceUpdate, NautilusDataType, NautilusRecordType, OptionGreeks, OrderBookDelta,
-        OrderBookDepth, QuoteTick, TradeTick, depth::DEPTH10_LEN,
+        Bar, CorporateAction, FundingRateUpdate, IndexPriceUpdate, InstrumentClose,
+        InstrumentStatus, MarkPriceUpdate, NautilusDataType, NautilusRecordType, OptionGreeks,
+        OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick, depth::DEPTH10_LEN,
     },
     instruments::InstrumentAny,
 };

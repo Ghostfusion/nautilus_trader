@@ -22,9 +22,9 @@ use std::sync::Arc;
 use arrow::{datatypes::Schema, record_batch::RecordBatch};
 #[cfg(feature = "python")]
 use nautilus_model::data::{
-    Bar, Data, FundingRateUpdate, IndexPriceUpdate, InstrumentClose, InstrumentStatus,
-    MarkPriceUpdate, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick,
-    to_variant,
+    Bar, CorporateAction, Data, FundingRateUpdate, IndexPriceUpdate, InstrumentClose,
+    InstrumentStatus, MarkPriceUpdate, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick,
+    TradeTick, to_variant,
 };
 use nautilus_model::{
     data::{NautilusDataType, NautilusRecordType},
@@ -237,6 +237,13 @@ impl_batch_identity!(
     |value: &OptionGreeks| value.instrument_id,
     |_value: &OptionGreeks| None,
     |_value: &OptionGreeks| None
+);
+#[cfg(feature = "python")]
+impl_batch_identity!(
+    CorporateAction,
+    |value: &CorporateAction| value.instrument_id,
+    |_value: &CorporateAction| None,
+    |_value: &CorporateAction| None
 );
 
 // Groups order lexically and retain input order within each group. Precision is part of the key,

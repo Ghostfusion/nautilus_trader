@@ -28,9 +28,9 @@ use nautilus_core::{
 };
 use nautilus_model::{
     data::{
-        Bar, Data, FundingRateUpdate, HasTsInit, IndexPriceUpdate, InstrumentStatus,
-        MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick,
-        TradeTick, close::InstrumentClose,
+        Bar, CorporateAction, Data, FundingRateUpdate, HasTsInit, IndexPriceUpdate,
+        InstrumentStatus, MarkPriceUpdate, NautilusDataType, OptionGreeks, OrderBookDelta,
+        OrderBookDepth, QuoteTick, TradeTick, close::InstrumentClose,
     },
     python::{
         data::data_to_pyobject,
@@ -483,6 +483,25 @@ impl PyParquetDataCatalog {
             end,
             skip_disjoint_check,
             "instrument closes",
+        )
+    }
+
+    /// Write corporate action data to Parquet files.
+    #[pyo3(signature = (data, start=None, end=None, skip_disjoint_check=false))]
+    pub fn write_corporate_actions(
+        &self,
+        data: Vec<CorporateAction>,
+        start: Option<u64>,
+        end: Option<u64>,
+        skip_disjoint_check: bool,
+    ) -> PyResult<String> {
+        write_parquet_data(
+            &self.inner,
+            data,
+            start,
+            end,
+            skip_disjoint_check,
+            "corporate actions",
         )
     }
 
@@ -1428,6 +1447,7 @@ impl PyParquetDataCatalog {
             NautilusDataType::OptionGreeks => typed!(OptionGreeks),
             NautilusDataType::InstrumentStatus => typed!(InstrumentStatus),
             NautilusDataType::InstrumentClose => typed!(InstrumentClose),
+            NautilusDataType::CorporateAction => typed!(CorporateAction),
             NautilusDataType::Custom { type_name } => py
                 .detach(|| {
                     self.inner.query_custom_data_dynamic(

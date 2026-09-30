@@ -982,9 +982,9 @@ impl BacktestEngine {
             DataRef::MarkPrice(_) | DataRef::IndexPrice(_) => SettlementScope::Data(None),
             DataRef::FundingRate(_) => SettlementScope::Data(Some(data.instrument_id())),
             DataRef::OptionGreeks(_) => SettlementScope::Data(None),
-            DataRef::InstrumentStatus(_) | DataRef::InstrumentClose(_) => {
-                SettlementScope::Data(Some(data.instrument_id()))
-            }
+            DataRef::InstrumentStatus(_)
+            | DataRef::InstrumentClose(_)
+            | DataRef::CorporateAction(_) => SettlementScope::Data(Some(data.instrument_id())),
             DataRef::Instrument(_) | DataRef::Custom(_) => SettlementScope::Data(None),
             #[cfg(feature = "defi")]
             DataRef::Defi(_) => SettlementScope::Data(None),
@@ -1586,6 +1586,7 @@ impl BacktestEngine {
                 | DataRef::MarkPrice(_)
                 | DataRef::IndexPrice(_)
                 | DataRef::OptionGreeks(_)
+                | DataRef::CorporateAction(_)
                 | DataRef::Custom(_)
         ) {
             return Ok(());
@@ -1631,7 +1632,7 @@ impl BacktestEngine {
                 DataRef::InstrumentClose(close) => {
                     exchange_ref.process_instrument_close(*close)?;
                 }
-                DataRef::Instrument(_) | DataRef::Custom(_) => {
+                DataRef::Instrument(_) | DataRef::Custom(_) | DataRef::CorporateAction(_) => {
                     unreachable!("filtered before exchange routing")
                 }
                 #[cfg(feature = "defi")]
@@ -2445,6 +2446,7 @@ fn is_defi(data: DataRef<'_>) -> bool {
         | DataRef::OptionGreeks(_)
         | DataRef::InstrumentStatus(_)
         | DataRef::InstrumentClose(_)
+        | DataRef::CorporateAction(_)
         | DataRef::Custom(_) => false,
         #[cfg(feature = "defi")]
         DataRef::Defi(_) => true,

@@ -32,6 +32,7 @@ enum DataKind {
     OptionGreeks,
     InstrumentStatus,
     InstrumentClose,
+    CorporateAction,
     Custom,
     #[cfg(feature = "defi")]
     Defi,
@@ -53,6 +54,7 @@ impl From<&Data> for DataKind {
             Data::OptionGreeks(_) => Self::OptionGreeks,
             Data::InstrumentStatus(_) => Self::InstrumentStatus,
             Data::InstrumentClose(_) => Self::InstrumentClose,
+            Data::CorporateAction(_) => Self::CorporateAction,
             Data::Custom(_) => Self::Custom,
             #[cfg(feature = "defi")]
             Data::Defi(_) => Self::Defi,
@@ -128,6 +130,9 @@ impl ReplayBatch {
             DataKind::InstrumentClose => {
                 collect_batch!(data, InstrumentClose, InstrumentClose)
             }
+            DataKind::CorporateAction => {
+                collect_batch!(data, CorporateAction, CorporateAction)
+            }
             DataKind::Custom => Self::Compatibility(BatchView::from(data)),
             #[cfg(feature = "defi")]
             DataKind::Defi => collect_batch!(data, Defi, Defi, boxed),
@@ -160,8 +165,8 @@ mod tests {
     use nautilus_core::UnixNanos;
     use nautilus_model::{
         data::{
-            Data, DataRef, FundingRateUpdate, IndexPriceUpdate, MarkPriceUpdate, OptionGreeks,
-            QuoteTick,
+            CorporateAction, CorporateActionType, Data, DataRef, FundingRateUpdate,
+            IndexPriceUpdate, MarkPriceUpdate, OptionGreeks, QuoteTick,
             stubs::{
                 stub_bar, stub_custom_data, stub_delta, stub_deltas, stub_depth10,
                 stub_instrument_close, stub_instrument_status, stub_trade_ethusdt_buy,
@@ -221,8 +226,17 @@ mod tests {
             }),
             Data::InstrumentStatus(stub_instrument_status()),
             Data::InstrumentClose(stub_instrument_close()),
+            Data::CorporateAction(CorporateAction::new(
+                instrument_id,
+                CorporateActionType::Split,
+                "2".parse().unwrap(),
+                None,
+                UnixNanos::from(15),
+                UnixNanos::from(16),
+                UnixNanos::from(17),
+            )),
         ];
-        assert_eq!(data.len(), 12, "every static Data variant needs a case");
+        assert_eq!(data.len(), 13, "every static Data variant needs a case");
 
         for item in data {
             let batch = ReplayBatch::from_data(vec![item]);
@@ -250,6 +264,10 @@ mod tests {
                 | (
                     ReplayBatch::Typed(DataBatch::InstrumentClose(_)),
                     Some(DataRef::InstrumentClose(_)),
+                )
+                | (
+                    ReplayBatch::Typed(DataBatch::CorporateAction(_)),
+                    Some(DataRef::CorporateAction(_)),
                 ) => {}
                 _ => panic!("data did not use its typed batch: {batch:?}"),
             }

@@ -24,6 +24,7 @@ pub mod batch;
 pub mod bet;
 pub mod black_scholes;
 pub mod close;
+pub mod corporate_action;
 pub mod custom;
 pub mod data_type;
 pub mod delta;
@@ -65,6 +66,7 @@ use crate::{
 pub use bar::{Bar, BarSpecification, BarType};
 pub use black_scholes::Greeks;
 pub use close::InstrumentClose;
+pub use corporate_action::{CorporateAction, CorporateActionType};
 #[cfg(feature = "python")]
 pub use custom::PythonCustomDataWrapper;
 pub use custom::{
@@ -129,6 +131,7 @@ pub enum Data {
     OptionGreeks(OptionGreeks),
     InstrumentStatus(InstrumentStatus),
     InstrumentClose(InstrumentClose),
+    CorporateAction(CorporateAction),
     #[cfg(feature = "defi")]
     Defi(Box<DefiData>), // This variant is significantly larger
 }
@@ -165,6 +168,8 @@ pub enum NautilusDataType {
     InstrumentStatus,
     /// Instrument closes.
     InstrumentClose,
+    /// Corporate actions.
+    CorporateAction,
     /// Decentralized finance data.
     #[cfg(feature = "defi")]
     Defi,
@@ -186,6 +191,7 @@ impl Display for NautilusDataType {
             Self::OptionGreeks => f.write_str("OptionGreeks"),
             Self::InstrumentStatus => f.write_str("InstrumentStatus"),
             Self::InstrumentClose => f.write_str("InstrumentClose"),
+            Self::CorporateAction => f.write_str("CorporateAction"),
             #[cfg(feature = "defi")]
             Self::Defi => f.write_str("Defi"),
         }
@@ -222,6 +228,9 @@ impl FromStr for NautilusDataType {
             "InstrumentClose" | "instrument_closes" | "instrument_close" => {
                 Ok(Self::InstrumentClose)
             }
+            "CorporateAction" | "corporate_actions" | "corporate_action" => {
+                Ok(Self::CorporateAction)
+            }
             #[cfg(feature = "defi")]
             "Defi" => Ok(Self::Defi),
             _ => anyhow::bail!("Invalid `NautilusDataType`: '{s}'"),
@@ -249,6 +258,7 @@ impl NautilusDataType {
             Data::InstrumentStatus(_) => Self::InstrumentStatus,
             Data::OptionGreeks(_) => Self::OptionGreeks,
             Data::InstrumentClose(_) => Self::InstrumentClose,
+            Data::CorporateAction(_) => Self::CorporateAction,
             #[cfg(feature = "defi")]
             Data::Defi(_) => Self::Defi,
         }
@@ -271,6 +281,7 @@ pub enum DataRef<'a> {
     OptionGreeks(&'a OptionGreeks),
     InstrumentStatus(&'a InstrumentStatus),
     InstrumentClose(&'a InstrumentClose),
+    CorporateAction(&'a CorporateAction),
     Custom(&'a CustomData),
     #[cfg(feature = "defi")]
     Defi(&'a DefiData),
@@ -293,6 +304,7 @@ impl<'a> From<&'a Data> for DataRef<'a> {
             Data::OptionGreeks(greeks) => Self::OptionGreeks(greeks),
             Data::InstrumentStatus(status) => Self::InstrumentStatus(status),
             Data::InstrumentClose(close) => Self::InstrumentClose(close),
+            Data::CorporateAction(action) => Self::CorporateAction(action),
             #[cfg(feature = "defi")]
             Data::Defi(defi) => Self::Defi(defi),
         }
@@ -329,6 +341,7 @@ impl DataRef<'_> {
             Self::OptionGreeks(greeks) => greeks.instrument_id,
             Self::InstrumentStatus(status) => status.instrument_id,
             Self::InstrumentClose(close) => close.instrument_id,
+            Self::CorporateAction(action) => action.instrument_id,
             #[cfg(feature = "defi")]
             Self::Defi(defi) => defi.instrument_id(),
         }
@@ -361,6 +374,7 @@ impl DataRef<'_> {
             Self::OptionGreeks(greeks) => Data::OptionGreeks(**greeks),
             Self::InstrumentStatus(status) => Data::InstrumentStatus(**status),
             Self::InstrumentClose(close) => Data::InstrumentClose(**close),
+            Self::CorporateAction(action) => Data::CorporateAction(**action),
             #[cfg(feature = "defi")]
             Self::Defi(defi) => Data::Defi(Box::new((**defi).clone())),
         }
@@ -384,6 +398,7 @@ impl HasTsInit for DataRef<'_> {
             Self::OptionGreeks(greeks) => greeks.ts_init,
             Self::InstrumentStatus(status) => status.ts_init,
             Self::InstrumentClose(close) => close.ts_init,
+            Self::CorporateAction(action) => action.ts_init,
             #[cfg(feature = "defi")]
             Self::Defi(defi) => defi.ts_init(),
         }
@@ -501,6 +516,7 @@ pub enum DataBatch {
     OptionGreeks(BatchView<OptionGreeks>),
     InstrumentStatus(BatchView<InstrumentStatus>),
     InstrumentClose(BatchView<InstrumentClose>),
+    CorporateAction(BatchView<CorporateAction>),
     Custom(BatchView<CustomData>),
     #[cfg(feature = "defi")]
     Defi(BatchView<DefiData>),
@@ -627,6 +643,7 @@ impl DataBatch {
             Self::OptionGreeks(data) => data.len(),
             Self::InstrumentStatus(data) => data.len(),
             Self::InstrumentClose(data) => data.len(),
+            Self::CorporateAction(data) => data.len(),
             #[cfg(feature = "defi")]
             Self::Defi(data) => data.len(),
         }
@@ -655,6 +672,7 @@ impl DataBatch {
             Self::OptionGreeks(_) => "option_greeks",
             Self::InstrumentStatus(_) => "instrument_status",
             Self::InstrumentClose(_) => "instrument_closes",
+            Self::CorporateAction(_) => "corporate_actions",
             #[cfg(feature = "defi")]
             Self::Defi(_) => "defi",
         }
@@ -685,6 +703,7 @@ impl DataBatch {
             Self::OptionGreeks(data) => data.get(index).map(DataRef::OptionGreeks),
             Self::InstrumentStatus(data) => data.get(index).map(DataRef::InstrumentStatus),
             Self::InstrumentClose(data) => data.get(index).map(DataRef::InstrumentClose),
+            Self::CorporateAction(data) => data.get(index).map(DataRef::CorporateAction),
             #[cfg(feature = "defi")]
             Self::Defi(data) => data.get(index).map(DataRef::Defi),
         }
@@ -738,6 +757,7 @@ impl DataBatch {
             Self::OptionGreeks(data) => Self::OptionGreeks(data.slice(start, end)),
             Self::InstrumentStatus(data) => Self::InstrumentStatus(data.slice(start, end)),
             Self::InstrumentClose(data) => Self::InstrumentClose(data.slice(start, end)),
+            Self::CorporateAction(data) => Self::CorporateAction(data.slice(start, end)),
             #[cfg(feature = "defi")]
             Self::Defi(data) => Self::Defi(data.slice(start, end)),
         }
@@ -984,6 +1004,9 @@ impl<'de> Deserialize<'de> for Data {
             "InstrumentClose" => Ok(Self::InstrumentClose(
                 serde_json::from_value(value).map_err(D::Error::custom)?,
             )),
+            "CorporateAction" => Ok(Self::CorporateAction(
+                serde_json::from_value(value).map_err(D::Error::custom)?,
+            )),
             _ => {
                 if let Some(data) =
                     deserialize_custom_from_json(type_name, &value).map_err(D::Error::custom)?
@@ -1014,6 +1037,7 @@ impl Clone for Data {
             Self::OptionGreeks(x) => Self::OptionGreeks(*x),
             Self::InstrumentStatus(x) => Self::InstrumentStatus(*x),
             Self::InstrumentClose(x) => Self::InstrumentClose(*x),
+            Self::CorporateAction(x) => Self::CorporateAction(*x),
             #[cfg(feature = "defi")]
             Self::Defi(x) => Self::Defi(x.clone()),
         }
@@ -1037,6 +1061,7 @@ impl PartialEq for Data {
             (Self::OptionGreeks(a), Self::OptionGreeks(b)) => a == b,
             (Self::InstrumentStatus(a), Self::InstrumentStatus(b)) => a == b,
             (Self::InstrumentClose(a), Self::InstrumentClose(b)) => a == b,
+            (Self::CorporateAction(a), Self::CorporateAction(b)) => a == b,
             #[cfg(feature = "defi")]
             (Self::Defi(a), Self::Defi(b)) => a == b,
             _ => false,
@@ -1068,6 +1093,7 @@ impl Serialize for Data {
             Self::OptionGreeks(x) => x.serialize(serializer),
             Self::InstrumentStatus(x) => x.serialize(serializer),
             Self::InstrumentClose(x) => x.serialize(serializer),
+            Self::CorporateAction(x) => x.serialize(serializer),
             #[cfg(feature = "defi")]
             Self::Defi(_) => Err(serde::ser::Error::custom(
                 "Data::Defi serialization is not supported",
@@ -1140,6 +1166,7 @@ impl_data_conversions!(FundingRate, FundingRateUpdate);
 impl_data_conversions!(OptionGreeks, OptionGreeks);
 impl_data_conversions!(InstrumentStatus, InstrumentStatus);
 impl_data_conversions!(InstrumentClose, InstrumentClose);
+impl_data_conversions!(CorporateAction, CorporateAction);
 
 /// Converts a vector of `Data` items to a specific variant type.
 ///
@@ -1251,6 +1278,7 @@ macro_rules! for_each_data_type {
             (InstrumentStatus, InstrumentStatus, InstrumentStatus, InstrumentStatus, "instrument_status"),
             (OptionGreeks, OptionGreeks, OptionGreeks, OptionGreeks, "option_greeks"),
             (InstrumentClose, InstrumentClose, InstrumentClose, InstrumentClose, "instrument_closes"),
+            (CorporateAction, CorporateAction, CorporateAction, CorporateAction, "corporate_actions"),
         }
     };
     ($macro:ident, $($args:tt)*) => {
@@ -1268,6 +1296,7 @@ macro_rules! for_each_data_type {
             (InstrumentStatus, InstrumentStatus, InstrumentStatus, InstrumentStatus, "instrument_status"),
             (OptionGreeks, OptionGreeks, OptionGreeks, OptionGreeks, "option_greeks"),
             (InstrumentClose, InstrumentClose, InstrumentClose, InstrumentClose, "instrument_closes"),
+            (CorporateAction, CorporateAction, CorporateAction, CorporateAction, "corporate_actions"),
         }
     };
 }

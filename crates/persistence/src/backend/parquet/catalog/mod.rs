@@ -85,9 +85,9 @@ use nautilus_core::{
 };
 use nautilus_model::{
     data::{
-        Bar, CustomData, Data, DataBatch, FundingRateUpdate, HasTsInit, IndexPriceUpdate,
-        InstrumentStatus, MarkPriceUpdate, NautilusDataType, NautilusRecordType, OptionGreeks,
-        OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick, close::InstrumentClose,
+        Bar, CorporateAction, CustomData, Data, DataBatch, FundingRateUpdate, HasTsInit,
+        IndexPriceUpdate, InstrumentStatus, MarkPriceUpdate, NautilusDataType, NautilusRecordType,
+        OptionGreeks, OrderBookDelta, OrderBookDepth, QuoteTick, TradeTick, close::InstrumentClose,
         is_monotonically_increasing_by_init,
     },
     instruments::{Instrument, InstrumentAny},
