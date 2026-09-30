@@ -396,6 +396,13 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
 `OrderMatchingEngineConfig`; margin models in `crates/model/src/accounts/margin_model.rs`;
 `MarketStatusAction::Halt`.
 
+**Inventory.** `docs/concepts/backtesting/fill-models.md` carries an `## Execution realism
+inventory` section that maps every fee model, fill model, latency model, queue position, liquidity
+consumption setting, market status handling, and partial-fill path to the source lines that run, and
+closes with the paths that are random or time dependent and whether they take a seed. It describes
+the code as it stands, so it is a step of this workstream rather than a settled contract: the later
+steps must keep it true.
+
 **Steps.**
 
 1. Inventory and document the matrix of fee, fill, latency, queue, and liquidity behaviour per venue
