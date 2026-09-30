@@ -139,6 +139,12 @@ High-performance logging for both backtesting and live trading, implemented in R
 Backtest APIs, data and venue setup, execution sequencing, fill simulation,
 accounts, funding, and margin configuration.
 
+## Optimization
+
+[Optimization](optimization.md) describes parameter optimization as a research subsystem over
+backtests: the parameter space and search, the run through `BacktestNode`, the statistics bridge,
+the methodology stages, the persistence layout, and the memory-driven concurrency limit.
+
 ## Behavioral Models
 
 [Behavioral Models](behavioral_models.md) explains how Rust and Python model implementations enter
