@@ -35,6 +35,9 @@ from typing import TYPE_CHECKING
 
 from nautilus_trader.optimization.report import ExperimentResult
 from nautilus_trader.optimization.report import SearchReport
+from nautilus_trader.optimization.splits import LeakagePolicy
+from nautilus_trader.optimization.splits import SplitContract
+from nautilus_trader.optimization.splits import SplitDirection
 
 
 if TYPE_CHECKING:
@@ -71,19 +74,37 @@ class WalkForwardWindow:
     out_of_sample_end: int
 
 
+WALK_FORWARD_SETS = ("in_sample", "out_of_sample")
+
+# The walk-forward stages compute per-window statistics from results realised inside each window and
+# declare no label horizon, so their leakage policy is a declared zero rather than an unstated one.
+# A study whose labels or features reach across a window boundary declares its own policy.
+WALK_FORWARD_LEAKAGE = LeakagePolicy(
+    zero_interval_justification=(
+        "The walk-forward stages compute statistics from results realised inside each window and "
+        "declare no label horizon, so no observation is excluded from the in-sample set by "
+        "default; a study whose labels or features reach across a window boundary must declare a "
+        "leakage policy of its own."
+    ),
+)
+
+
 def walk_forward_windows(
     start: int,
     end: int,
     *,
     in_sample: int,
     out_of_sample: int,
+    leakage: LeakagePolicy | None = None,
 ) -> tuple[WalkForwardWindow, ...]:
     """
     Split a period into consecutive in-sample/out-of-sample windows.
 
-    The period is cut into as many windows as fit, each an in-sample segment of `in_sample`
-    nanoseconds immediately followed by an out-of-sample segment of `out_of_sample` nanoseconds.
-    The split is deterministic and the out-of-sample segment never outlives the period.
+    The period is cut into as many whole windows as fit, each an in-sample segment of `in_sample`
+    nanoseconds followed by an out-of-sample segment of `out_of_sample` nanoseconds. The split is
+    deterministic, the out-of-sample segment never outlives the period, and the layout comes from a
+    `SplitContract`, so the bounds are owned in one place. The `leakage` policy trims the in-sample
+    segment and spaces the windows; it defaults to the declared zero policy above.
 
     Parameters
     ----------
@@ -95,6 +116,8 @@ def walk_forward_windows(
         The in-sample length in nanoseconds. Must be positive.
     out_of_sample : int
         The out-of-sample length in nanoseconds. Must be positive.
+    leakage : LeakagePolicy | None, default None
+        The exclusion relation between each window's segments. Defaults to `WALK_FORWARD_LEAKAGE`.
 
     Returns
     -------
@@ -103,25 +126,18 @@ def walk_forward_windows(
     """
     if in_sample <= 0 or out_of_sample <= 0:
         raise ValueError("in_sample and out_of_sample must be positive")
-    if end <= start:
-        return ()
 
-    step = in_sample + out_of_sample
-    count = (end - start) // step
-    windows = []
-    cursor = start
-    for _ in range(count):
-        in_sample_end = cursor + in_sample
-        windows.append(
-            WalkForwardWindow(
-                cursor,
-                in_sample_end,
-                in_sample_end,
-                in_sample_end + out_of_sample,
-            ),
-        )
-        cursor += step
-    return tuple(windows)
+    contract = SplitContract(
+        sets=WALK_FORWARD_SETS,
+        lengths={"in_sample": in_sample, "out_of_sample": out_of_sample},
+        leakage=WALK_FORWARD_LEAKAGE if leakage is None else leakage,
+        direction=SplitDirection.EXACT,
+    )
+
+    return tuple(
+        WalkForwardWindow(*split.bounds["in_sample"], *split.bounds["out_of_sample"])
+        for split in contract.split(start, end)
+    )
 
 
 @dataclass(frozen=True)

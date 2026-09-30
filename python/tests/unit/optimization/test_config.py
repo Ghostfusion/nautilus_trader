@@ -32,11 +32,13 @@ from nautilus_trader.optimization.config import load_config
 from nautilus_trader.optimization.config import main
 from nautilus_trader.optimization.config import parse_config
 from nautilus_trader.optimization.config import run_config
+from nautilus_trader.optimization.splits import LabelOverlapRule
 
 
 STRATEGY = "strategies.ema_cross:EMACross"
 STRATEGY_CONFIG = "strategies.ema_cross:EMACrossConfig"
 FACTORY = "tests.integration.test_optimization:_config_parts"
+JUSTIFICATION = "The study declares no label horizon."
 
 
 def document() -> dict[str, Any]:
@@ -200,6 +202,93 @@ def test_out_of_sample_requires_the_selected_parameters() -> None:
 
     with pytest.raises(ConfigError, match=r"stage\.parameters is required"):
         run_config(parse_config(payload))
+
+
+def test_walk_forward_leakage_parses_into_the_stage() -> None:
+    """
+    Test a declared walk-forward leakage policy parses into the stage.
+    """
+    payload = document()
+    payload["stage"] = {
+        "kind": "walk_forward",
+        "in_sample_ns": 1000,
+        "out_of_sample_ns": 500,
+        "leakage": {
+            "purge_before_ns": 100,
+            "embargo_after_ns": 0,
+            "label_overlap_rule": "enforce",
+            "label_horizon_ns": 250,
+            "zero_interval_justification": JUSTIFICATION,
+        },
+    }
+
+    stage = parse_config(payload).stage
+
+    assert stage.leakage is not None
+    assert stage.leakage.purge == 250
+    assert stage.leakage.after == 0
+    assert stage.leakage.label_horizon == 250
+    assert stage.leakage.label_overlap_rule is LabelOverlapRule.ENFORCE
+    assert stage.leakage.decided == frozenset({"purge_before", "embargo_after"})
+
+
+def test_walk_forward_leakage_requires_a_zero_interval_justification() -> None:
+    """
+    Test a leakage policy that leaves an interval at zero without a reason is rejected.
+    """
+    payload = document()
+    payload["stage"] = {
+        "kind": "walk_forward",
+        "in_sample_ns": 1000,
+        "out_of_sample_ns": 500,
+        "leakage": {"purge_before_ns": 100},
+    }
+
+    with pytest.raises(ConfigError, match=r"stage\.leakage: zero intervals"):
+        parse_config(payload)
+
+
+def test_a_leakage_policy_outside_the_walk_forward_stage_is_rejected() -> None:
+    """
+    Test a leakage policy on a stage that cannot apply it is rejected rather than ignored.
+    """
+    payload = document()
+    payload["stage"] = {"kind": "optimize", "leakage": {"purge_before_ns": 100}}
+
+    with pytest.raises(ConfigError, match=r"stage\.leakage requires the walk_forward stage"):
+        parse_config(payload)
+
+
+def test_an_unknown_leakage_key_is_rejected() -> None:
+    """
+    Test an unknown key in the leakage policy is rejected.
+    """
+    payload = document()
+    payload["stage"] = {
+        "kind": "walk_forward",
+        "in_sample_ns": 1000,
+        "out_of_sample_ns": 500,
+        "leakage": {"purge_before_ns": 100, "unknown": 1},
+    }
+
+    with pytest.raises(ConfigError, match="unknown key"):
+        parse_config(payload)
+
+
+def test_an_unknown_label_overlap_rule_is_rejected() -> None:
+    """
+    Test an unsupported label overlap rule is rejected.
+    """
+    payload = document()
+    payload["stage"] = {
+        "kind": "walk_forward",
+        "in_sample_ns": 1000,
+        "out_of_sample_ns": 500,
+        "leakage": {"label_overlap_rule": "assume"},
+    }
+
+    with pytest.raises(ConfigError, match=r"stage\.leakage\.label_overlap_rule"):
+        parse_config(payload)
 
 
 def test_validate_parses_the_selected_parameters() -> None:

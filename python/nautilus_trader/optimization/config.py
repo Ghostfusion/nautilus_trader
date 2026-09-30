@@ -68,6 +68,8 @@ from nautilus_trader.optimization.search import GridSearch
 from nautilus_trader.optimization.space import Experiment
 from nautilus_trader.optimization.space import Parameter
 from nautilus_trader.optimization.space import ParameterSpace
+from nautilus_trader.optimization.splits import LabelOverlapRule
+from nautilus_trader.optimization.splits import LeakagePolicy
 from nautilus_trader.optimization.stages import OutOfSampleStage
 from nautilus_trader.optimization.stages import TrainStage
 from nautilus_trader.optimization.stages import ValidateStage
@@ -92,6 +94,19 @@ OUTPUT_SCHEMA = "nautilus.optimization.cli/v1"
 
 # The supported methodology stage kinds.
 STAGE_KINDS = ("optimize", "train", "validate", "out_of_sample", "walk_forward")
+
+# The keys of the stage leakage policy, and the label rules it accepts.
+_LEAKAGE_KEYS = frozenset(
+    {
+        "purge_before_ns",
+        "purge_after_ns",
+        "embargo_after_ns",
+        "label_overlap_rule",
+        "label_horizon_ns",
+        "zero_interval_justification",
+    },
+)
+_LABEL_RULES = {rule.value: rule for rule in LabelOverlapRule}
 
 _DIRECTIONS: dict[str, ObjectiveDirection] = {
     "maximize": ObjectiveDirection.MAXIMIZE,
@@ -162,6 +177,8 @@ class StageSpec:
         The walk-forward in-sample length in nanoseconds, or None.
     out_of_sample_ns : int | None
         The walk-forward out-of-sample length in nanoseconds, or None.
+    leakage : LeakagePolicy | None
+        The walk-forward leakage policy, or None for the declared default of the stage.
 
     """
 
@@ -169,6 +186,7 @@ class StageSpec:
     parameters: Mapping[str, JsonValue] | None = None
     in_sample_ns: int | None = None
     out_of_sample_ns: int | None = None
+    leakage: LeakagePolicy | None = None
 
 
 @dataclass(frozen=True)
@@ -489,7 +507,13 @@ def _walk_forward_document(
     out_of_sample = _require_int(stage.out_of_sample_ns, "stage.out_of_sample_ns")
     start = _require_int(config.start, "window.start")
     end = _require_int(config.end, "window.end")
-    windows = walk_forward_windows(start, end, in_sample=in_sample, out_of_sample=out_of_sample)
+    windows = walk_forward_windows(
+        start,
+        end,
+        in_sample=in_sample,
+        out_of_sample=out_of_sample,
+        leakage=stage.leakage,
+    )
     report = WalkForwardStage(in_sample=optimizer, out_of_sample=optimizer).run(
         config.space,
         windows,
@@ -705,10 +729,16 @@ def _parse_stage(payload: object) -> StageSpec:
     Parse the methodology stage.
     """
     mapping = _require_mapping(payload, "stage")
-    _reject_unknown(mapping, {"kind", "parameters", "in_sample_ns", "out_of_sample_ns"}, "stage")
+    _reject_unknown(
+        mapping,
+        {"kind", "parameters", "in_sample_ns", "out_of_sample_ns", "leakage"},
+        "stage",
+    )
     kind = _require_str(mapping, "kind", "stage")
     if kind not in STAGE_KINDS:
         raise ConfigError(f"stage.kind must be one of {list(STAGE_KINDS)}, was {kind!r}")
+    if mapping.get("leakage") is not None and kind != "walk_forward":
+        raise ConfigError(f"stage.leakage requires the walk_forward stage, was {kind!r}")
 
     parameters = mapping.get("parameters")
     return StageSpec(
@@ -718,7 +748,56 @@ def _parse_stage(payload: object) -> StageSpec:
         ),
         in_sample_ns=_optional_int(mapping.get("in_sample_ns"), "stage.in_sample_ns"),
         out_of_sample_ns=_optional_int(mapping.get("out_of_sample_ns"), "stage.out_of_sample_ns"),
+        leakage=_parse_leakage(mapping.get("leakage")),
     )
+
+
+def _parse_leakage(payload: object) -> LeakagePolicy | None:
+    """
+    Parse the walk-forward leakage policy, which must justify any zero interval.
+    """
+    if payload is None:
+        return None
+
+    mapping = _require_mapping(payload, "stage.leakage")
+    _reject_unknown(mapping, _LEAKAGE_KEYS, "stage.leakage")
+
+    rule = mapping.get("label_overlap_rule")
+    if rule is None:
+        label_overlap_rule = LabelOverlapRule.NONE
+    elif not isinstance(rule, str) or rule not in _LABEL_RULES:
+        raise ConfigError(
+            f"stage.leakage.label_overlap_rule must be one of {sorted(_LABEL_RULES)}, was {rule!r}",
+        )
+    else:
+        label_overlap_rule = _LABEL_RULES[rule]
+
+    try:
+        return LeakagePolicy(
+            purge_before=_optional_int(
+                mapping.get("purge_before_ns"),
+                "stage.leakage.purge_before_ns",
+            ),
+            purge_after=_optional_int(
+                mapping.get("purge_after_ns"),
+                "stage.leakage.purge_after_ns",
+            ),
+            embargo_after=_optional_int(
+                mapping.get("embargo_after_ns"),
+                "stage.leakage.embargo_after_ns",
+            ),
+            label_overlap_rule=label_overlap_rule,
+            label_horizon=_optional_int(
+                mapping.get("label_horizon_ns"),
+                "stage.leakage.label_horizon_ns",
+            ),
+            zero_interval_justification=_optional_str(
+                mapping.get("zero_interval_justification"),
+                "stage.leakage.zero_interval_justification",
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"stage.leakage: {exc}") from exc
 
 
 def _parse_concurrency(payload: object) -> ConcurrencyPolicy:
@@ -885,6 +964,17 @@ def _optional_int(value: object, where: str) -> int | None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{where} must be an integer")
+    return value
+
+
+def _optional_str(value: object, where: str) -> str | None:
+    """
+    Parse an optional string.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ConfigError(f"{where} must be a string")
     return value
 
 

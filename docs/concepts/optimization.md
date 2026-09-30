@@ -57,6 +57,32 @@ the stages differ in what they do with its outcome.
 by a fixed out-of-sample length; the out-of-sample segment never outlives the period. Each stage
 composes runs through the runner and re-windows the runner for its segment.
 
+### Split contracts and leakage
+
+The window bounds come from a `SplitContract`, which owns the layout rather than each caller
+improvising one. The contract names its sets, takes each set's length in nanoseconds, as a fraction
+of the window, or omitted for one set that absorbs the rest, and lays the windows out whole with
+every set positively long. Its `direction` decides where a leftover span at the end of the period
+goes, and `n_splits` selects that many evenly spaced windows rather than the first ones.
+
+Leakage is an exclusion relation, not a time distance. A `LeakagePolicy` states it:
+
+| Field                | Effect                                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| `purge_before`       | Removes the training tail adjacent to the evaluation set.                                            |
+| `purge_after`        | Moves a training set that follows the evaluation set.                                                |
+| `embargo_after`      | Sets the minimum gap between one split and the next.                                                 |
+| `label_overlap_rule` | Folds a declared `label_horizon` into `purge_before`, excluding an overlapping observation outright. |
+
+Labels look forward, so a training observation within one label horizon of the evaluation start
+carries evaluation information whatever the distance between the sets. A zero interval is
+permitted, but not silently: an interval left unset and an interval decided to be zero are
+distinguishable, and any zero interval requires a `zero_interval_justification`. The walk-forward
+stages declare their zero policy with its reason in
+`nautilus_trader.optimization.stages.WALK_FORWARD_LEAKAGE`, because those stages compute statistics
+from results realised inside each window and declare no label horizon. A study whose labels or
+features reach across a window boundary declares a policy of its own under `stage.leakage`.
+
 ## The statistics bridge
 
 A default run reports its returns statistics in `BacktestResult.stats_returns`, but that set is the
@@ -125,6 +151,8 @@ runner and produce the same results, in the same order.
 - `statistic_values`: the statistics bridge.
 - `TrainStage`, `OptimizeStage`, `ValidateStage`, `OutOfSampleStage`, `WalkForwardStage`,
   `WalkForwardWindow`, `walk_forward_windows`, `WalkForwardReport`: the methodology stages.
+- `SplitContract`, `Split`, `SplitDirection`, `LeakagePolicy`, `LabelOverlapRule`: the split
+  contract, the bounds it yields, and the leakage exclusion relation it applies.
 - `OptimizationConfig`, `load_config`, `run_config`: the JSON configuration-file entry point the
   `nautilus optimize` command and notebooks share.
 
@@ -132,7 +160,8 @@ runner and produce the same results, in the same order.
 
 The subsystem lives in `python/nautilus_trader/optimization/`: the parameter model in `space.py`,
 enumeration in `search.py`, execution in `runner.py`, the statistics bridge in `metrics.py`, result
-aggregation in `report.py`, the sweep in `optimizer.py`, the stages in `stages.py`, persistence in
+aggregation in `report.py`, the sweep in `optimizer.py`, the stages in `stages.py`, the split
+contract and the leakage policy in `splits.py`, persistence in
 `persistence.py`, process fan-out in `concurrency.py`, and the configuration-file entry point in
 `config.py`. The objective and constraints are the existing Rust types exposed from
 `nautilus_trader.analysis`; this subsystem adds no second objective and no second execution path.
@@ -215,14 +244,18 @@ concurrency policy, and an optional persistence directory.
 - `objective.terms[].direction` is `maximize` or `minimize`, and
   `constraints[].comparison` is `at_least` or `at_most`.
 - `store` is optional; when present the sweep is persisted under its directory.
+- `stage.leakage`, on `walk_forward` only, takes `purge_before_ns`, `purge_after_ns`,
+  `embargo_after_ns`, `label_overlap_rule` (`none` or `enforce`), `label_horizon_ns`, and
+  `zero_interval_justification`. A policy that leaves any interval at zero must justify it. When
+  the key is absent the stage uses its declared default, which excludes nothing and says so.
 
-| `stage.kind`    | Extra keys                         | Runs                                                         |
-| --------------- | ---------------------------------- | ------------------------------------------------------------ |
-| `optimize`      | none                               | The ranked report of a search.                               |
-| `train`         | none                               | The best experiment selected on the window.                  |
-| `validate`      | `parameters`                       | One experiment evaluated against the constraints.            |
-| `out_of_sample` | `parameters`                       | One experiment evaluated on a window it was not selected on. |
-| `walk_forward`  | `in_sample_ns`, `out_of_sample_ns` | A search and out-of-sample evaluation per window.            |
+| `stage.kind`    | Extra keys                                    | Runs                                                         |
+| --------------- | --------------------------------------------- | ------------------------------------------------------------ |
+| `optimize`      | none                                          | The ranked report of a search.                               |
+| `train`         | none                                          | The best experiment selected on the window.                  |
+| `validate`      | `parameters`                                  | One experiment evaluated against the constraints.            |
+| `out_of_sample` | `parameters`                                  | One experiment evaluated on a window it was not selected on. |
+| `walk_forward`  | `in_sample_ns`, `out_of_sample_ns`, `leakage` | A search and out-of-sample evaluation per window.            |
 
 ## Notebook helper
 

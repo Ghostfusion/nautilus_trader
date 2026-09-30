@@ -19,7 +19,9 @@ The pipeline is a parameter space, a search strategy, a run through `BacktestNod
 and constraints from `nautilus_trader.analysis`, and a ranked result. The optimizer composes runs
 and never alters one, so every backtest still goes through the single execution path. Runs fan out
 to processes with a memory-driven concurrency limit, and the methodology stages (train, optimize,
-validate, out-of-sample, walk-forward) are explicit rather than one loop over a grid.
+validate, out-of-sample, walk-forward) are explicit rather than one loop over a grid. Validation
+windows come from a split contract that states which observations the evaluation information
+excludes from training, rather than from an implicit time distance.
 """
 
 from nautilus_trader.optimization.concurrency import ConcurrencyPolicy as ConcurrencyPolicy
@@ -40,6 +42,11 @@ from nautilus_trader.optimization.search import SearchStrategy as SearchStrategy
 from nautilus_trader.optimization.space import Experiment as Experiment
 from nautilus_trader.optimization.space import Parameter as Parameter
 from nautilus_trader.optimization.space import ParameterSpace as ParameterSpace
+from nautilus_trader.optimization.splits import LabelOverlapRule as LabelOverlapRule
+from nautilus_trader.optimization.splits import LeakagePolicy as LeakagePolicy
+from nautilus_trader.optimization.splits import Split as Split
+from nautilus_trader.optimization.splits import SplitContract as SplitContract
+from nautilus_trader.optimization.splits import SplitDirection as SplitDirection
 from nautilus_trader.optimization.stages import OptimizeStage as OptimizeStage
 from nautilus_trader.optimization.stages import OutOfSampleStage as OutOfSampleStage
 from nautilus_trader.optimization.stages import TrainStage as TrainStage
@@ -62,6 +69,8 @@ __all__ = [
     "ExperimentStore",
     "FailedExperiment",
     "GridSearch",
+    "LabelOverlapRule",
+    "LeakagePolicy",
     "OptimizationConfig",
     "OptimizeStage",
     "Optimizer",
@@ -70,6 +79,9 @@ __all__ = [
     "ParameterSpace",
     "SearchReport",
     "SearchStrategy",
+    "Split",
+    "SplitContract",
+    "SplitDirection",
     "TrainStage",
     "ValidateStage",
     "ValidationResult",
