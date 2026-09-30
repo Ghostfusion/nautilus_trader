@@ -287,12 +287,16 @@ inert for assets where a corporate action cannot occur.
 7. The contract is documented: the `## Corporate actions` section in
    `docs/concepts/data/catalog.md` and the colocated file-format contract
    `crates/persistence/src/catalog/README.md`.
+8. Delivery reaches actors and strategies: `crates/common/src/actor/corporate_action.rs` registers a
+   handler on the topic `data.corporate_actions.{venue}.{symbol}` that dispatches
+   `DataActor::on_corporate_action`, and `DataActor::subscribe_corporate_actions` /
+   `DataActor::unsubscribe_corporate_actions` (forwarded on `Strategy`) register and release it
+   through the actor's existing topic subscriptions. In a backtest the action records reach a
+   subscriber only when the data is loaded with an adjustment (or another configuration that
+   replays them); an unconfigured run never opens the action stream.
 
 **Not implemented yet.**
 
-- Delivery of a corporate action to the Python actor and strategy surface. The data engine publishes
-  each action on `data.corporate_actions.{venue}.{symbol}`, but no `on_corporate_action` callback and
-  no subscribe helper reach Python, so a Python component cannot observe an action.
 - Declared regression scenarios for a mid-series rename and a delisting close. Both behaviours are
   implemented and unit tested, but no declared scenario pins them.
 - A declared regression scenario for the adjustment stage. `BacktestNode.get_engine_canonical_result`
@@ -319,7 +323,9 @@ in the data configuration allow list. The stage is covered end to end by
 `python/tests/integration/test_backtest_node_corporate_actions.py`, which runs a node over a
 synthetic catalog holding a 4:1 split and a dividend and asserts the converted series, the reverse
 conversion, an unconfigured run passing raw prices through while replaying no action record, and
-that each action record is processed at its effective instant rather than at its announcement.
+that each action record is processed at its effective instant rather than at its announcement. That
+suite also asserts delivery to a subscribed strategy: with an adjustment the strategy receives each
+action re-stamped to its effective instant, and without one it receives nothing.
 `BacktestNode.get_engine_canonical_result` exposes the canonical document of a catalog-driven run,
 so a declared scenario could pin the stage using the shape that
 `python/tests/integration/test_backtest_node_bar_fills.py` establishes for a node run over bars. The

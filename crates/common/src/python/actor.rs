@@ -37,8 +37,9 @@ use nautilus_model::defi::{
 use nautilus_model::{
     calendars::{SessionEvent, SessionScheduleConfig, TradingCalendar},
     data::{
-        Bar, BarType, CustomData, DataType, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus,
-        MarkPriceUpdate, OrderBookDelta, OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
+        Bar, BarType, CorporateAction, CustomData, DataType, FundingRateUpdate, IndexPriceUpdate,
+        InstrumentStatus, MarkPriceUpdate, OrderBookDelta, OrderBookDeltas, OrderBookDepth,
+        QuoteTick, TradeTick,
         close::InstrumentClose,
         option_chain::{OptionChainSlice, OptionGreeks},
     },
@@ -425,6 +426,15 @@ impl PyDataActorInner {
         if let Some(py_self) = self.python_instance()? {
             Python::attach(|py| {
                 py_self.call_method1(py, "on_universe_changed", (change.into_py_any(py)?,))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn dispatch_on_corporate_action(&mut self, action: CorporateAction) -> PyResult<()> {
+        if let Some(py_self) = self.python_instance()? {
+            Python::attach(|py| {
+                py_self.call_method1(py, "on_corporate_action", (action.into_py_any(py)?,))
             })?;
         }
         Ok(())
@@ -1105,6 +1115,15 @@ impl DataActor for PyDataActorInner {
             })
     }
 
+    fn on_corporate_action(&mut self, action: &CorporateAction) -> anyhow::Result<()> {
+        self.dispatch_on_corporate_action(*action).map_err(|e| {
+            anyhow::anyhow!(
+                "Python on_corporate_action failed:\n{}",
+                format_exception(&e)
+            )
+        })
+    }
+
     #[allow(unused_variables)]
     fn on_data(&mut self, data: &CustomData) -> anyhow::Result<()> {
         Python::attach(|py| {
@@ -1614,6 +1633,33 @@ impl PyDataActor {
         DataActor::unsubscribe_universe_changes(self.inner_mut(), Ustr::from(universe));
     }
 
+    /// Subscribes this actor to the corporate actions of `instrument_id`.
+    ///
+    /// Actions are dispatched to `on_corporate_action`. The subscription is released with the
+    /// actor's other subscriptions. In a backtest the actions are delivered only when the data is
+    /// loaded with an adjustment (or another configuration that replays them).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the actor is not registered with a trader.
+    #[pyo3(name = "subscribe_corporate_actions")]
+    fn py_subscribe_corporate_actions(&self, instrument_id: InstrumentId) -> PyResult<()> {
+        if !self.inner().core.is_registered() {
+            return Err(to_pyruntime_err(
+                "Actor must be registered with a trader before subscribing to corporate actions",
+            ));
+        }
+
+        DataActor::subscribe_corporate_actions(self.inner_mut(), instrument_id);
+        Ok(())
+    }
+
+    /// Unsubscribes this actor from the corporate actions of `instrument_id`.
+    #[pyo3(name = "unsubscribe_corporate_actions")]
+    fn py_unsubscribe_corporate_actions(&self, instrument_id: InstrumentId) {
+        DataActor::unsubscribe_corporate_actions(self.inner_mut(), instrument_id);
+    }
+
     #[pyo3(name = "publish_data")]
     fn py_publish_data(&self, data_type: &DataType, data: &CustomData) -> PyResult<()> {
         self.ensure_registered_for_data()?;
@@ -1751,6 +1797,10 @@ impl PyDataActor {
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_universe_changed")]
     fn py_on_universe_changed(_slf: &Bound<'_, Self>, change: UniverseChange) {}
+
+    #[allow(unused_variables, clippy::needless_pass_by_value)]
+    #[pyo3(name = "on_corporate_action")]
+    fn py_on_corporate_action(_slf: &Bound<'_, Self>, action: CorporateAction) {}
 
     #[allow(unused_variables, clippy::needless_pass_by_value)]
     #[pyo3(name = "on_data")]

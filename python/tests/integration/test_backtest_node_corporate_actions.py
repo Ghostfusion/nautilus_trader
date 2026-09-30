@@ -24,8 +24,9 @@ cash dividend, and observe the prices a strategy receives on `on_bar` and the ru
 record count and final boundary. The node does not expose a canonical backtest result (its
 `run()` returns `BacktestResult` objects and only the engine exposes the canonical projection), so
 the adjustment is verified through the node's observable outputs rather than the regression
-harness. Corporate actions are not routable to Python actors (only the engine's typed Rust
-callbacks subscribe to the action topic), so delivery is asserted through the run boundary.
+harness. A subscribed strategy observes the actions themselves on `on_corporate_action`, but only
+when the data is loaded with an adjustment: without one the action records are never loaded, so a
+subscriber receives nothing.
 """
 
 from __future__ import annotations
@@ -103,18 +104,26 @@ class BarRecordingStrategy(Strategy):
         super().__init__(config)
         self._bar_type = BarType.from_str(config.bar_type)
         self.closes: list[tuple[int, Decimal]] = []
+        self.actions: list[CorporateAction] = []
 
     def on_start(self) -> None:
         """
         On start.
         """
         self.subscribe_bars(self._bar_type)
+        self.subscribe_corporate_actions(INSTRUMENT_ID)
 
     def on_bar(self, bar: Bar) -> None:
         """
         On bar.
         """
         self.closes.append((bar.ts_event, bar.close.as_decimal()))
+
+    def on_corporate_action(self, action: CorporateAction) -> None:
+        """
+        On corporate action.
+        """
+        self.actions.append(action)
 
 
 def _bars(prices: tuple[str, ...]) -> list[Bar]:
@@ -168,7 +177,7 @@ def _run_node(
     prices: tuple[str, ...],
     actions: list[CorporateAction],
     adjustment: DataAdjustment | None,
-) -> tuple[list[tuple[int, Decimal]], Any]:
+) -> tuple[BarRecordingStrategy, Any]:
     catalog = ParquetDataCatalog(str(catalog_path))
     catalog.write_instruments([INSTRUMENT])
     catalog.write_bars(_bars(prices))
@@ -203,19 +212,20 @@ def _run_node(
         result = node.run()[0]
     finally:
         node.dispose()
-    return strategy.closes, result
+    return strategy, result
 
 
 def test_node_adjusts_bars_from_raw_to_adjusted(tmp_path: Path) -> None:
     """
     Test the node converts catalog raw bars into the adjusted series.
     """
-    closes, result = _run_node(
+    strategy, result = _run_node(
         tmp_path,
         RAW_PRICES,
         _corporate_actions(),
         DataAdjustment(PriceRepresentation.RAW, PriceRepresentation.ADJUSTED),
     )
+    closes = strategy.closes
 
     assert [value for _, value in closes] == [Decimal(value) for value in ADJUSTED_PRICES]
     assert [ts for ts, _ in closes] == [TS_START + index * MINUTE_NS for index in range(4)]
@@ -228,23 +238,23 @@ def test_node_adjusts_bars_from_adjusted_to_raw(tmp_path: Path) -> None:
     """
     Test the node converts catalog adjusted bars back into the raw series.
     """
-    closes, _ = _run_node(
+    strategy, _ = _run_node(
         tmp_path,
         ADJUSTED_PRICES,
         _corporate_actions(),
         DataAdjustment(PriceRepresentation.ADJUSTED, PriceRepresentation.RAW),
     )
 
-    assert [value for _, value in closes] == [Decimal(value) for value in RAW_PRICES]
+    assert [value for _, value in strategy.closes] == [Decimal(value) for value in RAW_PRICES]
 
 
 def test_node_default_path_leaves_raw_prices_untouched(tmp_path: Path) -> None:
     """
     Test an unconfigured node passes the raw catalog bars through exactly.
     """
-    closes, result = _run_node(tmp_path, RAW_PRICES, _corporate_actions(), None)
+    strategy, result = _run_node(tmp_path, RAW_PRICES, _corporate_actions(), None)
 
-    assert [value for _, value in closes] == [Decimal(value) for value in RAW_PRICES]
+    assert [value for _, value in strategy.closes] == [Decimal(value) for value in RAW_PRICES]
     # The action records are only appended when the adjustment is active.
     assert result.iterations == 4
     assert result.backtest_end == TS_START + 3 * MINUTE_NS
@@ -254,7 +264,7 @@ def test_node_delivers_corporate_actions_at_their_effective_instants(tmp_path: P
     """
     Test the node replays each action as data at its effective instant, not its announcement.
     """
-    closes, result = _run_node(
+    strategy, result = _run_node(
         tmp_path,
         RAW_PRICES,
         _corporate_actions(dividend_ns=TRAILING_DIVIDEND_NS),
@@ -264,12 +274,45 @@ def test_node_delivers_corporate_actions_at_their_effective_instants(tmp_path: P
     # All four bars precede the trailing dividend, so it is subtracted from each; the split only
     # affects the first two.
     expected = ("97.50", "97.50", "197.50", "197.50")
-    assert [value for _, value in closes] == [Decimal(value) for value in expected]
+    assert [value for _, value in strategy.closes] == [Decimal(value) for value in expected]
     assert result.iterations == 6
     # The final boundary is the trailing action's effective instant. It can only be reached if the
     # action record was re-stamped to its effective instant; the announcement is earlier.
     assert result.backtest_end == TRAILING_DIVIDEND_NS
     assert result.backtest_end != ANNOUNCE_NS
+
+
+def test_node_delivers_corporate_actions_to_a_subscribed_strategy(tmp_path: Path) -> None:
+    """
+    Test a subscribed strategy receives each action, ordered and re-stamped to its effective
+    instant, when the data is loaded with an adjustment.
+    """
+    strategy, _ = _run_node(
+        tmp_path,
+        RAW_PRICES,
+        _corporate_actions(),
+        DataAdjustment(PriceRepresentation.RAW, PriceRepresentation.ADJUSTED),
+    )
+
+    received = [
+        (str(action.action), action.value, action.effective_ns, action.ts_init, action.ts_event)
+        for action in strategy.actions
+    ]
+
+    assert received == [
+        ("SPLIT", Decimal(4), SPLIT_NS, SPLIT_NS, ANNOUNCE_NS),
+        ("DIVIDEND", Decimal("2.50"), DIVIDEND_NS, DIVIDEND_NS, ANNOUNCE_NS),
+    ]
+
+
+def test_node_without_adjustment_delivers_no_corporate_actions(tmp_path: Path) -> None:
+    """
+    Test a subscribed strategy receives nothing when the action records are not loaded.
+    """
+    strategy, result = _run_node(tmp_path, RAW_PRICES, _corporate_actions(), None)
+
+    assert strategy.actions == []
+    assert result.iterations == 4
 
 
 def _canonical_digest(catalog_path: Path, run_id: str) -> str:

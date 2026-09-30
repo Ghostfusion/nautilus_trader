@@ -34,8 +34,9 @@ use nautilus_model::defi::{
 use nautilus_model::{
     calendars::{SessionEvent, SessionScheduleConfig, TradingCalendar},
     data::{
-        Bar, BarType, CustomData, DataType, FundingRateUpdate, IndexPriceUpdate, InstrumentStatus,
-        MarkPriceUpdate, OrderBookDelta, OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
+        Bar, BarType, CorporateAction, CustomData, DataType, FundingRateUpdate, IndexPriceUpdate,
+        InstrumentStatus, MarkPriceUpdate, OrderBookDelta, OrderBookDeltas, OrderBookDepth,
+        QuoteTick, TradeTick,
         close::InstrumentClose,
         option_chain::{OptionChainSlice, OptionGreeks, StrikeRange},
     },
@@ -489,6 +490,44 @@ pub trait DataActor {
         Self: DataActorNative,
     {
         super::universe::unsubscribe_universe_changes(self.core_mut(), universe);
+    }
+
+    /// Actions to be performed when receiving a corporate action.
+    ///
+    /// Delivered to actors subscribed to the instrument with
+    /// [`DataActor::subscribe_corporate_actions`]. A corporate action is auxiliary data: it reports
+    /// a change to the economic meaning or identity of the instrument, not a market event.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if handling the action fails.
+    #[allow(unused_variables)]
+    fn on_corporate_action(&mut self, action: &CorporateAction) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Subscribes this actor to the corporate actions of `instrument_id`.
+    ///
+    /// The subscription is released with the actor's other subscriptions, and an explicit
+    /// unsubscribe is available through [`DataActor::unsubscribe_corporate_actions`].
+    fn subscribe_corporate_actions(&mut self, instrument_id: InstrumentId)
+    where
+        Self: DataActorNative + Actor + Sized + 'static,
+    {
+        let actor_id = self.core().actor_id().inner();
+        super::corporate_action::subscribe_corporate_actions::<Self>(
+            self.core_mut(),
+            actor_id,
+            instrument_id,
+        );
+    }
+
+    /// Unsubscribes this actor from the corporate actions of `instrument_id`.
+    fn unsubscribe_corporate_actions(&mut self, instrument_id: InstrumentId)
+    where
+        Self: DataActorNative,
+    {
+        super::corporate_action::unsubscribe_corporate_actions(self.core_mut(), instrument_id);
     }
 
     /// Actions to be performed when receiving custom data.

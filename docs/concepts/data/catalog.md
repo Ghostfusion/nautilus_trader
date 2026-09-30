@@ -227,6 +227,33 @@ A corporate action is published to `data.corporate_actions.{venue}.{symbol}`, fo
 `data.corporate_actions.XNYS.AAPL` for `AAPL.XNYS`. `crates/common/src/msgbus/switchboard.rs`
 builds the live topic and the `data.pipeline.corporate_actions.{venue}.{symbol}` pipeline topic.
 
+### Delivery to actors and strategies
+
+A subscribed component receives each action on `on_corporate_action`. Subscribe with
+`subscribe_corporate_actions(instrument_id)` and release with
+`unsubscribe_corporate_actions(instrument_id)`; both are available on `Actor` and `Strategy`. The
+subscription registers a handler on the topic `data.corporate_actions.{venue}.{symbol}`, so it is
+released with the component's other subscriptions when the component is disposed or unsubscribed.
+
+```python
+from nautilus_trader.trading import Strategy
+
+
+class MyStrategy(Strategy):
+    def on_start(self) -> None:
+        self.subscribe_corporate_actions(self.instrument_id)
+
+    def on_corporate_action(self, action) -> None:
+        self.log.info(f"Corporate action: {action}")
+```
+
+In a backtest the action records reach a subscriber only when the data is loaded with an
+adjustment, a `BacktestDataConfig` carrying `DataAdjustment(RAW, ADJUSTED)` or
+`DataAdjustment(ADJUSTED, RAW)`, or another configuration that replays them. An unconfigured run
+never opens the corporate action stream, so a subscribed component receives nothing. Each action is
+delivered at its effective instant (`effective_ns`), and the delivered record's `ts_init` is
+re-stamped to that instant.
+
 ### Adjustment convention
 
 `crates/model/src/data/adjustment.rs` defines `PriceRepresentation` (`RAW`, `ADJUSTED`) and
