@@ -125,8 +125,8 @@ pub use strategy::{
     ImportableStrategyConfig, Strategy, StrategyConfig, StrategyCore, StrategyNative,
 };
 pub use target::{
-    TargetConstruction, TargetConstructionConfig, TargetConstructionContext,
-    TargetConstructionError,
+    ReconcileContext, TargetConstruction, TargetConstructionConfig, TargetConstructionContext,
+    TargetConstructionError, TargetOrder, TargetReconciler, TargetReconcilerError,
 };
 pub use universe::{
     ScheduledUniverseRule, ScheduledUniverseSet, SharedUniverseRule, StaticUniverseRule, Universe,

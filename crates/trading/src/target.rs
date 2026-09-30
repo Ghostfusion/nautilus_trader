@@ -31,7 +31,11 @@
 //! `src/target/` directory untracked. It matches the layout of the target and signal values in
 //! `nautilus-model`.
 //!
-//! # Sizing
+//! # Construction
+//!
+//! The construction stage turns signals into targets. It is described by the sections below.
+//!
+//! ## Sizing
 //!
 //! A directional signal is sized by the existing fixed-risk sizing calculation in
 //! `nautilus_risk::sizing`, which is the only sizing implementation the stage uses. The entry price
@@ -42,13 +46,13 @@
 //! rate, an exchange rate of one, and the instrument's size increment are passed through, so the
 //! result follows the sizing calculation's own conventions.
 //!
-//! # Direction
+//! ## Direction
 //!
 //! `SignalDirection::Long` constructs a positive weight, `SignalDirection::Short` a negative one,
 //! and `SignalDirection::Flat` a flat target. A flat signal is how a caller states reduce-to-zero,
 //! and it is resolved without reading the context at all.
 //!
-//! # Strength
+//! ## Strength
 //!
 //! `TradingSignal::strength` scales the risk the position is sized from, by a factor of:
 //!
@@ -63,7 +67,7 @@
 //! pinned by a test. A strength of zero scales the risk to zero, which a directional signal cannot
 //! be sized from, so it is reported (see below).
 //!
-//! # Weight
+//! ## Weight
 //!
 //! A constructed target carries a weight: the notional of the sized quantity at the entry price as
 //! a fraction of the context equity, signed by the direction and capped in magnitude by
@@ -72,7 +76,7 @@
 //! how much exposure a given risk buys, and the cap is what keeps a tight stop from asking for
 //! more exposure than the caller allows.
 //!
-//! # Degenerate inputs
+//! ## Degenerate inputs
 //!
 //! A construction step reports a typed error rather than silently omitting an input. A caller
 //! cannot otherwise tell a dropped signal from a signal that carries no view, and a dropped
@@ -94,19 +98,45 @@
 //! calling the stage. A flat signal is the one input that needs no context, so a caller can always
 //! state reduce-to-zero for an instrument the stage cannot size.
 //!
-//! # Determinism
+//! ## Determinism
 //!
-//! The stage reads no clock and no shared state. For equal signals and an equal context it returns
-//! equal targets in the same order, and it mutates neither input; the first instrument definition
-//! and the first price for an identifier win when a context repeats one.
+//! The construction stage reads no clock and no shared state. For equal signals and an equal
+//! context it returns equal targets in the same order, and it mutates neither input; the first
+//! instrument definition and the first price for an identifier win when a context repeats one.
+//!
+//! # Reconciliation
+//!
+//! The reconciliation stage is the last of the three layers. It is a pure function: a
+//! [`TargetReconciler`] takes the targets and an authoritative snapshot as plain data and returns
+//! the minimal order set as [`TargetOrder`] values. It reads or writes neither the cache nor the
+//! portfolio, it submits, cancels, or modifies no order, and it reads no clock. The cache and the
+//! portfolio stay authoritative and a target never becomes a second position store: the caller
+//! submits the returned values on the existing strategy-to-[`crate::ExecutionAlgorithm`] path, so
+//! the direct order path is unchanged by this stage's presence.
+//!
+//! A target resolves to a signed quantity, the current exposure is netted against the position and
+//! the resting orders the caller supplies, and the difference is emitted as one order per target
+//! with a delta worth submitting. Because the reconciler takes the resting orders from the caller
+//! rather than from the cache, two calls with an unchanged context emit the same orders: only a
+//! caller that feeds the emitted orders back as resting orders sees the second call emit nothing.
+//!
+//! The snapshot carries the net position as an exact `Decimal` rather than a `Quantity`, because a
+//! [`Quantity`] is non-negative and cannot express a short position; the construction stage signs
+//! the same exposure with [`TargetValue::Weight`]. Like the construction stage, the reconciler
+//! reads no clock and mutates neither input.
+//!
+//! The reconciler lives in this file rather than a `target/` directory for the same reason as the
+//! construction stage: the repository ignores any directory named `target` (`.gitignore`, the Rust
+//! build artifact rule), and the values it consumes live with the stage that produces them.
 
 use std::fmt::Display;
 
 use nautilus_model::{
+    enums::OrderSide,
     identifiers::InstrumentId,
     instruments::{Instrument, InstrumentAny},
     signal::{SignalDirection, TradingSignal},
-    target::Target,
+    target::{Target, TargetValue},
     types::{Money, Price, Quantity},
 };
 use nautilus_risk::sizing::calculate_fixed_risk_position_size;
@@ -642,6 +672,368 @@ fn target(
     })
 }
 
+/// The authoritative snapshot a [`TargetReconciler`] reconciles targets against.
+///
+/// The context is plain data, so the reconciler is unit testable without an engine. The caller
+/// assembles it from the authoritative cache and portfolio and never writes it back: the reconciler
+/// mutates none of its fields, and neither the cache nor the portfolio is read here.
+///
+/// `positions` carries the signed net position per instrument, one entry each. A [`Quantity`] is
+/// non-negative, so it cannot express a short net position: following
+/// [`nautilus_model::position::fold_net_position`], the signed exposure is carried as an exact
+/// [`Decimal`], where a negative value is a short position and a positive value is a long one.
+/// `open_orders` carries the resting orders that will fill, so a delta they already cover is not
+/// submitted a second time.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReconcileContext {
+    /// The instrument definitions available to the reconciler.
+    pub instruments: Vec<InstrumentAny>,
+    /// The prices used to convert a weight or a notional target into a quantity.
+    pub prices: Vec<(InstrumentId, Price)>,
+    /// The account equity the construction stage sized from.
+    pub equity: Money,
+    /// The signed net position per instrument, one entry each.
+    pub positions: Vec<(InstrumentId, Decimal)>,
+    /// The resting orders that will fill, so a delta is not submitted twice.
+    pub open_orders: Vec<(InstrumentId, OrderSide, Quantity)>,
+}
+
+impl ReconcileContext {
+    /// Returns the instrument definition for `instrument_id`, if the context holds one.
+    ///
+    /// The first match wins, so a context that repeats an identifier resolves deterministically.
+    #[must_use]
+    pub fn instrument(&self, instrument_id: InstrumentId) -> Option<&InstrumentAny> {
+        self.instruments
+            .iter()
+            .find(|instrument| instrument.id() == instrument_id)
+    }
+
+    /// Returns the price for `instrument_id`, if the context holds one.
+    ///
+    /// The first match wins, so a context that repeats an identifier resolves deterministically.
+    #[must_use]
+    pub fn price(&self, instrument_id: InstrumentId) -> Option<Price> {
+        self.prices
+            .iter()
+            .find(|(id, _)| *id == instrument_id)
+            .map(|(_, price)| *price)
+    }
+
+    /// Returns the signed net position for `instrument_id`, or zero if the context holds none.
+    ///
+    /// A negative value is a short position. The first match wins, so a context that repeats an
+    /// identifier resolves deterministically.
+    #[must_use]
+    pub fn position(&self, instrument_id: InstrumentId) -> Decimal {
+        self.positions
+            .iter()
+            .find(|(id, _)| *id == instrument_id)
+            .map_or(Decimal::ZERO, |(_, quantity)| *quantity)
+    }
+
+    /// Returns the signed quantity of the resting orders for `instrument_id`.
+    ///
+    /// Every matching order is summed: a buy adds its quantity and a sell subtracts it, so the
+    /// result is the exposure the resting orders will reach once they fill.
+    #[must_use]
+    pub fn resting_quantity(&self, instrument_id: InstrumentId) -> Decimal {
+        self.open_orders
+            .iter()
+            .filter(|(id, _, _)| *id == instrument_id)
+            .fold(Decimal::ZERO, |exposure, (_, side, quantity)| {
+                exposure + signed_quantity(*side, *quantity)
+            })
+    }
+}
+
+/// The minimal order set as values.
+///
+/// A `TargetOrder` is a value, not a command: it states the instrument, side, and quantity the
+/// reconciler concluded are needed to reach the targets. The reconciler submits, cancels, and
+/// modifies no order; the caller submits it on the existing strategy-to-execution-algorithm path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TargetOrder {
+    /// The instrument the order applies to.
+    pub instrument_id: InstrumentId,
+    /// The side of the order: buy for a positive delta, sell for a negative one.
+    pub side: OrderSide,
+    /// The non-negative quantity to trade, rounded to the instrument's size increment.
+    pub quantity: Quantity,
+}
+
+impl Display for TargetOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TargetOrder(instrument_id={}, side={}, quantity={})",
+            self.instrument_id, self.side, self.quantity
+        )
+    }
+}
+
+/// The reason a target reconciliation stage rejected a target.
+///
+/// An input that will produce an order is reported when it cannot be resolved, so a caller can tell
+/// which target was not reconciled and why. A target that nets to no order is never an error.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TargetReconcilerError {
+    /// The context holds no instrument definition for the target's instrument.
+    UnknownInstrument {
+        /// The instrument the target names.
+        instrument_id: InstrumentId,
+    },
+    /// The context holds no price for a weight or notional target's instrument.
+    MissingPrice {
+        /// The instrument the target names.
+        instrument_id: InstrumentId,
+    },
+    /// A target cannot be resolved to a quantity.
+    UnresolvedTarget {
+        /// The instrument the target names.
+        instrument_id: InstrumentId,
+        /// Why the target cannot be resolved.
+        reason: &'static str,
+    },
+}
+
+impl Display for TargetReconcilerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownInstrument { instrument_id } => write!(
+                f,
+                "no instrument definition for {instrument_id} in the reconcile context"
+            ),
+            Self::MissingPrice { instrument_id } => {
+                write!(f, "no price for {instrument_id} in the reconcile context")
+            }
+            Self::UnresolvedTarget {
+                instrument_id,
+                reason,
+            } => write!(
+                f,
+                "target for {instrument_id} cannot be resolved to a quantity: {reason}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TargetReconcilerError {}
+
+/// The optional target reconciliation stage.
+///
+/// The stage resolves each target to a signed quantity, nets it against the position and the
+/// resting orders the caller supplies, and returns one order per target whose difference is worth
+/// submitting. It holds a minimum order quantity only: it is not registered on an engine or a
+/// strategy, it reads neither the cache nor the portfolio, and it submits, cancels, or modifies no
+/// order. The caller submits the returned values on the existing path.
+///
+/// The stage is deterministic and mutates neither input. It reads no clock, so the same targets and
+/// the same context always reconcile to the same orders.
+#[derive(Clone, Debug)]
+pub struct TargetReconciler {
+    min_order_quantity: Quantity,
+}
+
+impl Default for TargetReconciler {
+    /// Returns a reconciler whose minimum order quantity is zero.
+    ///
+    /// A zero threshold treats every non-zero delta as worth an order, which is the default because
+    /// the instrument's size increment already floors a delta too small to be traded.
+    fn default() -> Self {
+        Self::new(Quantity::zero(0))
+    }
+}
+
+impl TargetReconciler {
+    /// Creates a new [`TargetReconciler`] with a minimum order quantity.
+    ///
+    /// A delta whose magnitude is below `min_order_quantity` produces no order. The value is a
+    /// threshold only: it is not rounded, and the emitted quantity is rounded to the instrument's
+    /// size increment rather than to it.
+    #[must_use]
+    pub const fn new(min_order_quantity: Quantity) -> Self {
+        Self { min_order_quantity }
+    }
+
+    /// Returns the minimum order quantity.
+    #[must_use]
+    pub const fn min_order_quantity(&self) -> Quantity {
+        self.min_order_quantity
+    }
+
+    /// Reconciles targets to the minimal order set, in the order the targets are given.
+    ///
+    /// Each target resolves to a signed target quantity. The effective current exposure is the
+    /// instrument's position plus the signed quantity of its resting orders, and the delta is the
+    /// target quantity minus that exposure. A delta whose magnitude is zero, below the minimum
+    /// order quantity, or that rounds to zero at the instrument's size increment is omitted rather
+    /// than emitted. Every other delta is emitted as one order, a buy for a positive delta and a
+    /// sell for a negative one, with the magnitude rounded toward zero to the instrument's size
+    /// increment.
+    ///
+    /// A target with no position and no resting orders produces one order. Because the resting
+    /// orders come from the caller and not from the cache, two calls with an unchanged context emit
+    /// the same order set: a second call emits nothing only when the caller passes the orders it
+    /// already emitted as resting orders.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a target that would produce an order cannot be resolved:
+    ///
+    /// - a weight or notional target whose instrument has no price in the context,
+    ///   [`TargetReconcilerError::MissingPrice`];
+    /// - a target with a non-zero delta whose instrument has no definition in the context,
+    ///   [`TargetReconcilerError::UnknownInstrument`];
+    /// - a weight target whose equity or price is not positive, or whose quantity overflows or
+    ///   cannot be represented, [`TargetReconcilerError::UnresolvedTarget`].
+    ///
+    /// A flat target states no exposure and needs neither a price nor an instrument, so a caller
+    /// can always state reduce-to-zero for an instrument the context does not carry.
+    pub fn reconcile(
+        &self,
+        targets: &[Target],
+        context: &ReconcileContext,
+    ) -> Result<Vec<TargetOrder>, TargetReconcilerError> {
+        let mut orders = Vec::new();
+
+        for target in targets {
+            let instrument_id = target.instrument_id();
+            let desired = Self::target_quantity(target, context)?;
+            let delta =
+                desired - context.position(instrument_id) - context.resting_quantity(instrument_id);
+            let magnitude = delta.abs();
+
+            if magnitude.is_zero() || magnitude < self.min_order_quantity.as_decimal() {
+                continue;
+            }
+
+            let instrument = context
+                .instrument(instrument_id)
+                .ok_or(TargetReconcilerError::UnknownInstrument { instrument_id })?;
+            let side = if delta < Decimal::ZERO {
+                OrderSide::Sell
+            } else {
+                OrderSide::Buy
+            };
+
+            // A delta that rounds to zero or to an invalid quantity is omitted rather than emitted
+            // as a zero-sized order.
+            let Ok(quantity) = instrument.try_make_qty_from_decimal(magnitude, Some(true)) else {
+                continue;
+            };
+            if quantity.is_zero() {
+                continue;
+            }
+
+            orders.push(TargetOrder {
+                instrument_id,
+                side,
+                quantity,
+            });
+        }
+
+        Ok(orders)
+    }
+
+    /// Returns the signed quantity a target states.
+    ///
+    /// The conversion is `quantity = value / price` in the common case, against the context price
+    /// and equity:
+    ///
+    /// - `Quantity(q)` is the quantity `q` as stated, always positive because a [`Quantity`] is
+    ///   non-negative;
+    /// - `Weight(w)` is `w * equity / price`, signed by the weight, so a negative weight is a short
+    ///   exposure;
+    /// - `Notional(n)` is `n / price`, signed by the notional, so a negative notional is a short
+    ///   exposure.
+    ///
+    /// A flat target resolves to zero without reading the context at all.
+    fn target_quantity(
+        target: &Target,
+        context: &ReconcileContext,
+    ) -> Result<Decimal, TargetReconcilerError> {
+        let instrument_id = target.instrument_id();
+
+        // A flat target states no exposure, so it needs neither a price nor an instrument.
+        if target.value().is_flat() {
+            return Ok(Decimal::ZERO);
+        }
+
+        match target.value() {
+            TargetValue::Quantity(quantity) => Ok(quantity.as_decimal()),
+            TargetValue::Weight(weight) => {
+                let price = context
+                    .price(instrument_id)
+                    .ok_or(TargetReconcilerError::MissingPrice { instrument_id })?;
+                let equity = context.equity.as_decimal();
+
+                if equity <= Decimal::ZERO {
+                    return Err(unresolved(
+                        instrument_id,
+                        "the context equity is not positive",
+                    ));
+                }
+                if price.as_decimal() <= Decimal::ZERO {
+                    return Err(unresolved(
+                        instrument_id,
+                        "the context price is not positive",
+                    ));
+                }
+
+                let weight = Decimal::from_f64(*weight).ok_or(unresolved(
+                    instrument_id,
+                    "the target weight is not representable",
+                ))?;
+
+                weight
+                    .checked_mul(equity)
+                    .and_then(|notional| notional.checked_div(price.as_decimal()))
+                    .ok_or(unresolved(
+                        instrument_id,
+                        "the target quantity overflows decimal arithmetic",
+                    ))
+            }
+            TargetValue::Notional(notional) => {
+                let price = context
+                    .price(instrument_id)
+                    .ok_or(TargetReconcilerError::MissingPrice { instrument_id })?;
+
+                if price.as_decimal() <= Decimal::ZERO {
+                    return Err(unresolved(
+                        instrument_id,
+                        "the context price is not positive",
+                    ));
+                }
+
+                notional
+                    .as_decimal()
+                    .checked_div(price.as_decimal())
+                    .ok_or(unresolved(
+                        instrument_id,
+                        "the target quantity overflows decimal arithmetic",
+                    ))
+            }
+        }
+    }
+}
+
+/// Returns the signed quantity an order side contributes to the exposure.
+fn signed_quantity(side: OrderSide, quantity: Quantity) -> Decimal {
+    match side {
+        OrderSide::Buy => quantity.as_decimal(),
+        OrderSide::Sell => -quantity.as_decimal(),
+    }
+}
+
+/// Returns an unresolved target error for `instrument_id`.
+fn unresolved(instrument_id: InstrumentId, reason: &'static str) -> TargetReconcilerError {
+    TargetReconcilerError::UnresolvedTarget {
+        instrument_id,
+        reason,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use nautilus_core::UnixNanos;
@@ -1160,5 +1552,413 @@ mod tests {
         };
 
         assert!(TargetConstruction::new(config).is_err());
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Reconciliation
+    // -----------------------------------------------------------------------------------------
+
+    /// A reconciler with the default zero minimum order quantity.
+    #[fixture]
+    fn reconciler() -> TargetReconciler {
+        TargetReconciler::default()
+    }
+
+    #[fixture]
+    fn reconcile_context(
+        instrument: InstrumentAny,
+        instrument_id: InstrumentId,
+    ) -> ReconcileContext {
+        ReconcileContext {
+            instruments: vec![instrument],
+            prices: vec![(instrument_id, Price::from(ENTRY))],
+            equity: Money::new(EQUITY, Currency::USD()),
+            positions: Vec::new(),
+            open_orders: Vec::new(),
+        }
+    }
+
+    fn weight_target(instrument_id: InstrumentId, weight: f64) -> Target {
+        Target::from_weight(instrument_id, weight, 1.into(), 2.into()).unwrap()
+    }
+
+    fn notional_target(instrument_id: InstrumentId, amount: &str) -> Target {
+        Target::from_notional(instrument_id, Money::from(amount), 1.into(), 2.into()).unwrap()
+    }
+
+    fn quantity_target(instrument_id: InstrumentId, quantity: &str) -> Target {
+        Target::from_quantity(instrument_id, Quantity::from(quantity), 1.into(), 2.into()).unwrap()
+    }
+
+    #[rstest]
+    fn test_weight_target_converts_using_equity_and_price(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        // A half-equity weight on 100,000 of equity at a price of 100.00 is 500 units.
+        let orders = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.5)], &reconcile_context)
+            .unwrap();
+
+        assert_eq!(
+            orders,
+            vec![TargetOrder {
+                instrument_id,
+                side: OrderSide::Buy,
+                quantity: Quantity::from(500),
+            }]
+        );
+    }
+
+    #[rstest]
+    fn test_notional_target_converts_using_price(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        // 10,000 notional at a price of 100.00 is 100 units.
+        let orders = reconciler
+            .reconcile(
+                &[notional_target(instrument_id, "10000 USD")],
+                &reconcile_context,
+            )
+            .unwrap();
+
+        assert_eq!(orders[0].side, OrderSide::Buy);
+        assert_eq!(orders[0].quantity, Quantity::from(100));
+    }
+
+    #[rstest]
+    fn test_quantity_target_converts_as_stated(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        let orders = reconciler
+            .reconcile(&[quantity_target(instrument_id, "42")], &reconcile_context)
+            .unwrap();
+
+        assert_eq!(orders[0].side, OrderSide::Buy);
+        assert_eq!(orders[0].quantity, Quantity::from(42));
+    }
+
+    #[rstest]
+    fn test_buying_and_selling_deltas(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        let long = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.1)], &reconcile_context)
+            .unwrap();
+        let short = reconciler
+            .reconcile(&[weight_target(instrument_id, -0.1)], &reconcile_context)
+            .unwrap();
+
+        assert_eq!(long[0].side, OrderSide::Buy);
+        assert_eq!(long[0].quantity, Quantity::from(100));
+        assert_eq!(short[0].side, OrderSide::Sell);
+        assert_eq!(short[0].quantity, Quantity::from(100));
+    }
+
+    #[rstest]
+    fn test_nets_against_a_position(reconciler: TargetReconciler, instrument_id: InstrumentId) {
+        let context = |position: Decimal| ReconcileContext {
+            instruments: vec![InstrumentAny::Equity(equity_aapl())],
+            prices: vec![(instrument_id, Price::from(ENTRY))],
+            equity: Money::new(EQUITY, Currency::USD()),
+            positions: vec![(instrument_id, position)],
+            open_orders: Vec::new(),
+        };
+
+        // A long position of 500 already reaches a half-equity target, so nothing is emitted.
+        let settled = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.5)], &context(dec!(500)))
+            .unwrap();
+        // A target of 750 against the same position needs the 250 difference.
+        let topped_up = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.75)], &context(dec!(500)))
+            .unwrap();
+        // A short position of 500 is an exposure of -500, so a target of 500 needs 1,000.
+        let flipped = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.5)], &context(dec!(-500)))
+            .unwrap();
+
+        assert!(settled.is_empty());
+        assert_eq!(topped_up[0].quantity, Quantity::from(250));
+        assert_eq!(topped_up[0].side, OrderSide::Buy);
+        assert_eq!(flipped[0].quantity, Quantity::from(1_000));
+        assert_eq!(flipped[0].side, OrderSide::Buy);
+    }
+
+    #[rstest]
+    fn test_nets_against_a_resting_order_on_the_same_side(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        let context = ReconcileContext {
+            open_orders: vec![(instrument_id, OrderSide::Buy, Quantity::from(500))],
+            ..reconcile_context
+        };
+
+        let orders = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.5)], &context)
+            .unwrap();
+
+        assert!(orders.is_empty());
+    }
+
+    #[rstest]
+    fn test_nets_against_a_resting_order_on_the_opposite_side(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        let context = ReconcileContext {
+            open_orders: vec![(instrument_id, OrderSide::Sell, Quantity::from(500))],
+            ..reconcile_context
+        };
+
+        let orders = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.5)], &context)
+            .unwrap();
+
+        // The resting sell is an exposure of -500, so a target of 500 needs 1,000 bought.
+        assert_eq!(orders[0].side, OrderSide::Buy);
+        assert_eq!(orders[0].quantity, Quantity::from(1_000));
+    }
+
+    #[rstest]
+    fn test_minimum_order_quantity_suppresses_a_small_delta(
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        let context = ReconcileContext {
+            positions: vec![(instrument_id, dec!(100))],
+            ..reconcile_context
+        };
+        let reconciler = TargetReconciler::new(Quantity::from(10));
+
+        let suppressed = reconciler
+            .reconcile(&[quantity_target(instrument_id, "105")], &context)
+            .unwrap();
+        let emitted = reconciler
+            .reconcile(&[quantity_target(instrument_id, "125")], &context)
+            .unwrap();
+        // The default has no threshold, so the same small delta is worth an order.
+        let defaulted = TargetReconciler::default()
+            .reconcile(&[quantity_target(instrument_id, "105")], &context)
+            .unwrap();
+
+        assert!(suppressed.is_empty());
+        assert_eq!(emitted[0].quantity, Quantity::from(25));
+        assert_eq!(defaulted[0].quantity, Quantity::from(5));
+    }
+
+    #[rstest]
+    fn test_rounds_the_delta_to_the_size_increment(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        // A 5.004 unit delta on a whole-unit instrument floors to 5.
+        let orders = reconciler
+            .reconcile(
+                &[weight_target(instrument_id, 0.005_004)],
+                &reconcile_context,
+            )
+            .unwrap();
+
+        assert_eq!(orders[0].quantity, Quantity::from(5));
+    }
+
+    #[rstest]
+    fn test_a_delta_that_rounds_to_zero_is_omitted(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        // A 0.4 unit delta floors to zero, which is omitted rather than emitted as a zero order.
+        let orders = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.0004)], &reconcile_context)
+            .unwrap();
+
+        assert!(orders.is_empty());
+    }
+
+    #[rstest]
+    fn test_flat_target_closes_an_existing_position(
+        reconciler: TargetReconciler,
+        instrument_id: InstrumentId,
+    ) {
+        let context = ReconcileContext {
+            instruments: vec![InstrumentAny::Equity(equity_aapl())],
+            prices: vec![(instrument_id, Price::from(ENTRY))],
+            equity: Money::new(EQUITY, Currency::USD()),
+            positions: vec![(instrument_id, dec!(250))],
+            open_orders: Vec::new(),
+        };
+
+        let orders = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.0)], &context)
+            .unwrap();
+
+        assert_eq!(orders[0].side, OrderSide::Sell);
+        assert_eq!(orders[0].quantity, Quantity::from(250));
+    }
+
+    #[rstest]
+    fn test_flat_target_needs_no_context(
+        reconciler: TargetReconciler,
+        instrument_id: InstrumentId,
+    ) {
+        // A flat target with no position resolves to no order even when the context carries no
+        // instrument and no price.
+        let context = ReconcileContext {
+            instruments: Vec::new(),
+            prices: Vec::new(),
+            equity: Money::new(0.0, Currency::USD()),
+            positions: Vec::new(),
+            open_orders: Vec::new(),
+        };
+
+        let orders = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.0)], &context)
+            .unwrap();
+
+        assert!(orders.is_empty());
+    }
+
+    #[rstest]
+    fn test_an_empty_target_list_emits_no_orders(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+    ) {
+        assert!(
+            reconciler
+                .reconcile(&[], &reconcile_context)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[rstest]
+    fn test_reconciliation_is_deterministic_and_mutates_nothing(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        let targets = vec![
+            weight_target(instrument_id, 0.25),
+            weight_target(instrument_id, -0.5),
+            quantity_target(instrument_id, "10"),
+        ];
+        let snapshot = reconcile_context.clone();
+
+        let first = reconciler.reconcile(&targets, &reconcile_context).unwrap();
+        let second = reconciler.reconcile(&targets, &reconcile_context).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(reconcile_context, snapshot);
+        assert_eq!(first.len(), targets.len());
+    }
+
+    #[rstest]
+    fn test_resting_orders_make_the_second_call_emit_nothing(
+        reconciler: TargetReconciler,
+        reconcile_context: ReconcileContext,
+        instrument_id: InstrumentId,
+    ) {
+        let targets = vec![weight_target(instrument_id, 0.5)];
+
+        let first = reconciler.reconcile(&targets, &reconcile_context).unwrap();
+        // With an unchanged context the same orders are emitted again: the reconciler does not
+        // remember what it emitted.
+        let repeated = reconciler.reconcile(&targets, &reconcile_context).unwrap();
+        // Only when the caller feeds the emitted orders back as resting orders is nothing emitted.
+        let settled_context = ReconcileContext {
+            open_orders: first
+                .iter()
+                .map(|order| (order.instrument_id, order.side, order.quantity))
+                .collect(),
+            ..reconcile_context
+        };
+        let settled = reconciler.reconcile(&targets, &settled_context).unwrap();
+
+        assert_eq!(first, repeated);
+        assert!(settled.is_empty());
+    }
+
+    #[rstest]
+    fn test_missing_price_is_reported_for_a_weight_target(
+        reconciler: TargetReconciler,
+        instrument: InstrumentAny,
+        instrument_id: InstrumentId,
+    ) {
+        let context = ReconcileContext {
+            instruments: vec![instrument],
+            prices: Vec::new(),
+            equity: Money::new(EQUITY, Currency::USD()),
+            positions: Vec::new(),
+            open_orders: Vec::new(),
+        };
+
+        let error = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.5)], &context)
+            .unwrap_err();
+
+        assert_eq!(error, TargetReconcilerError::MissingPrice { instrument_id });
+    }
+
+    #[rstest]
+    fn test_missing_instrument_is_reported_for_an_emitted_order(
+        reconciler: TargetReconciler,
+        instrument_id: InstrumentId,
+    ) {
+        let context = ReconcileContext {
+            instruments: Vec::new(),
+            prices: vec![(instrument_id, Price::from(ENTRY))],
+            equity: Money::new(EQUITY, Currency::USD()),
+            positions: Vec::new(),
+            open_orders: Vec::new(),
+        };
+
+        let error = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.5)], &context)
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            TargetReconcilerError::UnknownInstrument { instrument_id }
+        );
+    }
+
+    #[rstest]
+    fn test_non_positive_equity_is_reported_for_a_weight_target(
+        reconciler: TargetReconciler,
+        instrument: InstrumentAny,
+        instrument_id: InstrumentId,
+    ) {
+        let context = ReconcileContext {
+            instruments: vec![instrument],
+            prices: vec![(instrument_id, Price::from(ENTRY))],
+            equity: Money::new(0.0, Currency::USD()),
+            positions: Vec::new(),
+            open_orders: Vec::new(),
+        };
+
+        let error = reconciler
+            .reconcile(&[weight_target(instrument_id, 0.5)], &context)
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            TargetReconcilerError::UnresolvedTarget {
+                instrument_id,
+                reason: "the context equity is not positive",
+            }
+        );
     }
 }
