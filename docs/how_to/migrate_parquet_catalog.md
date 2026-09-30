@@ -170,4 +170,6 @@ Point `ParquetDataCatalog`, backtest data configuration, or the live node's cata
 Use the current Nautilus version to write additional data. PyArrow, pandas, and Polars read the open Arrow values
 without a Nautilus-specific binary decoder.
 
-For new streamed data, see [Parquet streaming](stream_parquet_catalog.md).
+For new streamed data, see [Parquet streaming](stream_parquet_catalog.md). To inspect, validate, or
+copy a catalog between locations, see
+[Inspect, validate, and convert a data catalog](catalog_data_cli.md).

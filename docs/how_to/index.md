@@ -8,10 +8,11 @@ path and [tutorials](../tutorials/) first.
 
 ## Data workflows
 
-| Guide                                                 | Description                                  |
-| :---------------------------------------------------- | :------------------------------------------- |
-| [Loading external data][loading_external_data]        | Load CSV data into the Parquet data catalog. |
-| [Data catalog with Databento][data_catalog_databento] | Set up a catalog with Databento market data. |
+| Guide                                                             | Description                                  |
+| :---------------------------------------------------------------- | :------------------------------------------- |
+| [Loading external data][loading_external_data]                    | Load CSV data into the Parquet data catalog. |
+| [Data catalog with Databento][data_catalog_databento]             | Set up a catalog with Databento market data. |
+| [Inspect, validate, and convert a data catalog](catalog_data_cli) | Data CLI subcommands over a catalog.         |
 
 ## Live trading
 

@@ -38,6 +38,7 @@ nautilus-blockchain = { workspace = true, features = [
   "hypersync",
 ], optional = true }
 
+ahash = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 dotenvy = { workspace = true }

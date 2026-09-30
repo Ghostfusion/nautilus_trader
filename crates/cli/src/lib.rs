@@ -56,6 +56,7 @@
 
 #[cfg(feature = "defi")]
 mod blockchain;
+mod catalog;
 mod database;
 pub mod opt;
 
@@ -100,6 +101,11 @@ pub async fn run(opt: NautilusCli) -> anyhow::Result<()> {
                 })?;
                 println!("{report}");
             }
+            CatalogCommand::Inspect(args) => crate::catalog::run_inspect(&args)?,
+            CatalogCommand::Validate(args) => crate::catalog::run_validate(&args)?,
+            CatalogCommand::Convert(args) => crate::catalog::run_convert(&args)?,
+            CatalogCommand::Download(args) => crate::catalog::run_download(&args)?,
+            CatalogCommand::Generate(args) => crate::catalog::run_generate(&args)?,
         },
         Commands::Database(database_opt) => run_database_command(database_opt).await?,
         #[cfg(feature = "defi")]

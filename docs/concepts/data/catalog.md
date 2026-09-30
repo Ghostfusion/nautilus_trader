@@ -124,7 +124,9 @@ Catalog queries, and therefore backtests, read only these canonical directories.
 such as `data/trade_tick/`, `data/quote_tick/`, and the Python-written
 `data/custom_<snake_case>/` are not read at query time. To upgrade a catalog that still uses a
 legacy layout, convert it with
-[nautilus catalog migrate-parquet](../../how_to/migrate_parquet_catalog.md).
+[nautilus catalog migrate-parquet](../../how_to/migrate_parquet_catalog.md). To inspect, validate,
+or convert a catalog from the command line, see
+[Inspect, validate, and convert a data catalog](../../how_to/catalog_data_cli.md).
 
 :::warning[Overlapping writes]
 By default, overlapping writes raise an `OSError` to maintain data integrity.

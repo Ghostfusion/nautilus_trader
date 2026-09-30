@@ -401,7 +401,18 @@ pub struct CatalogOpt {
 /// Operations on persisted catalogs.
 #[derive(Debug, Parser)]
 pub enum CatalogCommand {
+    /// Convert a Parquet catalog to the current Arrow storage format.
     MigrateParquet(CatalogMigrationOpt),
+    /// Inspect the data types, identifiers, and coverage of a catalog.
+    Inspect(CatalogDataOpt),
+    /// Validate a catalog's layout, schemas, and decodable data.
+    Validate(CatalogDataOpt),
+    /// Convert a source catalog into a separate destination catalog.
+    Convert(CatalogConvertOpt),
+    /// Download provider market data into a catalog.
+    Download(CatalogDataOpt),
+    /// Generate synthetic market data into a catalog.
+    Generate(CatalogDataOpt),
 }
 
 /// Convert a Parquet catalog to the current Arrow storage format.
@@ -420,6 +431,133 @@ pub struct CatalogMigrationOpt {
     /// Destination object-store option in key=value form. Can be repeated.
     #[arg(long = "target-option", value_parser = parse_storage_option)]
     pub(crate) target_options: Vec<(String, String)>,
+}
+
+/// Catalog path and object-store options shared by the read-only data subcommands.
+#[derive(Debug, Parser)]
+pub struct CatalogDataOpt {
+    /// Catalog path or object-store URI.
+    pub(crate) catalog: String,
+    /// Object-store option in key=value form. Can be repeated.
+    #[arg(long = "storage-option", value_parser = parse_storage_option)]
+    pub(crate) storage_options: Vec<(String, String)>,
+}
+
+/// Convert a source catalog into a separate destination catalog.
+#[derive(Debug, Parser)]
+pub struct CatalogConvertOpt {
+    /// Source catalog path or object-store URI.
+    pub(crate) source: String,
+    /// Empty destination catalog path or object-store URI.
+    pub(crate) destination: String,
+    /// Source object-store option in key=value form. Can be repeated.
+    #[arg(long = "source-option", value_parser = parse_storage_option)]
+    pub(crate) source_options: Vec<(String, String)>,
+    /// Destination object-store option in key=value form. Can be repeated.
+    #[arg(long = "target-option", value_parser = parse_storage_option)]
+    pub(crate) target_options: Vec<(String, String)>,
+    /// Data family to convert; defaults to every supported family present. Can be repeated.
+    #[arg(long = "data-type")]
+    pub(crate) data_types: Vec<String>,
+    /// Identifier to restrict the conversion to. Can be repeated.
+    #[arg(long = "identifier")]
+    pub(crate) identifiers: Vec<String>,
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[test]
+    fn catalog_convert_parses_locations_options_and_filters() {
+        let cli = NautilusCli::try_parse_from([
+            "nautilus",
+            "catalog",
+            "convert",
+            "source",
+            "destination",
+            "--data-type",
+            "quotes",
+            "--data-type",
+            "trades",
+            "--identifier",
+            "AUDUSD.SIM",
+            "--source-option",
+            "region=us-east-1",
+            "--target-option",
+            "access_key_id=abc",
+        ])
+        .unwrap();
+
+        let Commands::Catalog(CatalogOpt {
+            command: CatalogCommand::Convert(config),
+        }) = cli.command
+        else {
+            panic!("Expected convert catalog command");
+        };
+
+        assert_eq!(config.source, "source");
+        assert_eq!(config.destination, "destination");
+        assert_eq!(config.data_types, vec!["quotes", "trades"]);
+        assert_eq!(config.identifiers, vec!["AUDUSD.SIM"]);
+        assert_eq!(
+            config.source_options,
+            vec![("region".to_string(), "us-east-1".to_string())]
+        );
+        assert_eq!(
+            config.target_options,
+            vec![("access_key_id".to_string(), "abc".to_string())]
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_parses_catalog_and_storage_options() {
+        let cli = NautilusCli::try_parse_from([
+            "nautilus",
+            "catalog",
+            "inspect",
+            "/tmp/catalog",
+            "--storage-option",
+            "region=us-east-1",
+        ])
+        .unwrap();
+
+        let Commands::Catalog(CatalogOpt {
+            command: CatalogCommand::Inspect(config),
+        }) = cli.command
+        else {
+            panic!("Expected inspect catalog command");
+        };
+
+        assert_eq!(config.catalog, "/tmp/catalog");
+        assert_eq!(
+            config.storage_options,
+            vec![("region".to_string(), "us-east-1".to_string())]
+        );
+    }
+
+    #[test]
+    fn catalog_validate_download_and_generate_parse_a_catalog() {
+        for name in ["validate", "download", "generate"] {
+            let cli =
+                NautilusCli::try_parse_from(["nautilus", "catalog", name, "/tmp/catalog"]).unwrap();
+
+            let Commands::Catalog(CatalogOpt { command }) = cli.command else {
+                panic!("Expected catalog command");
+            };
+
+            let catalog = match command {
+                CatalogCommand::Validate(config)
+                | CatalogCommand::Download(config)
+                | CatalogCommand::Generate(config) => config.catalog,
+                _ => panic!("Expected data subcommand"),
+            };
+
+            assert_eq!(catalog, "/tmp/catalog");
+        }
+    }
 }
 
 #[cfg(test)]
