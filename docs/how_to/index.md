@@ -16,9 +16,9 @@ path and [tutorials](../tutorials/) first.
 
 ## Configuration
 
-| Guide                                                                | Description                                     |
-| :------------------------------------------------------------------- | :---------------------------------------------- |
-| [Validate and resolve a configuration file](configuration_file_cli)  | Validate and print a typed configuration file.  |
+| Guide                                                               | Description                                    |
+| :------------------------------------------------------------------ | :--------------------------------------------- |
+| [Validate and resolve a configuration file](configuration_file_cli) | Validate and print a typed configuration file. |
 
 ## Live trading
 

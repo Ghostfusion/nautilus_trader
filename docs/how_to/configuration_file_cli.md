@@ -16,11 +16,11 @@ variable to configure logging and keep console output.
 
 The file is loaded as one of three existing typed configurations, selected by `--schema`:
 
-| `--schema` | Typed configuration      |
-| ---------- | ------------------------ |
-| `kernel`   | `KernelConfig`           |
-| `backtest` | `BacktestEngineConfig`   |
-| `live`     | `LiveNodeConfig`         |
+| `--schema` | Typed configuration    |
+| ---------- | ---------------------- |
+| `kernel`   | `KernelConfig`         |
+| `backtest` | `BacktestEngineConfig` |
+| `live`     | `LiveNodeConfig`       |
 
 `--schema` defaults to `kernel`. A file whose schema does not match the selected type is rejected,
 because each typed configuration denies unknown fields.
@@ -43,9 +43,9 @@ Each invocation prints exactly one JSON document:
 built-in defaults with the file applied. On failure the document carries `status: "invalid"` and an
 `error` field with the loader's own message, and the process exits non-zero.
 
-| Status    | Exit code | Meaning                                                        |
-| --------- | --------- | -------------------------------------------------------------- |
-| `ok`      | 0         | The file loaded into the selected typed configuration.         |
+| Status    | Exit code | Meaning                                                         |
+| --------- | --------- | --------------------------------------------------------------- |
+| `ok`      | 0         | The file loaded into the selected typed configuration.          |
 | `invalid` | 1         | The file could not be read, decoded, or contained unknown keys. |
 
 ## validate

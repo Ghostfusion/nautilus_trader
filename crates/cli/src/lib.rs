@@ -87,10 +87,29 @@ pub fn cli_command() -> clap::Command {
 
 /// Runs the Nautilus CLI based on the provided options.
 ///
+/// A failure from a command that silenced console logging is printed to standard error when no
+/// machine-readable document was written, so the failure never disappears with the silenced log.
+///
 /// # Errors
 ///
 /// Returns an error if execution of the specified command fails.
 pub async fn run(opt: NautilusCli) -> anyhow::Result<()> {
+    match dispatch(opt).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if catalog::console_logging_silenced()
+                && log::max_level() == log::LevelFilter::Off
+                && !catalog::emitted_document()
+            {
+                eprintln!("Error executing Nautilus CLI: {error}");
+            }
+            Err(error)
+        }
+    }
+}
+
+/// Dispatches one command and returns its result.
+async fn dispatch(opt: NautilusCli) -> anyhow::Result<()> {
     match opt.command {
         Commands::Catalog(catalog) => match catalog.command {
             CatalogCommand::MigrateParquet(args) => {

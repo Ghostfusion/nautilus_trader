@@ -28,11 +28,11 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-nautilus-backtest = { workspace = true }
+nautilus-backtest = { workspace = true, features = ["streaming"] }
 nautilus-common = { workspace = true }
 nautilus-core = { workspace = true }
 nautilus-infrastructure = { workspace = true, features = ["postgres"] }
-nautilus-live = { workspace = true, features = ["node"] }
+nautilus-live = { workspace = true, features = ["streaming"] }
 nautilus-model = { workspace = true }
 nautilus-persistence = { workspace = true, features = ["cloud"] }
 nautilus-system = { workspace = true }

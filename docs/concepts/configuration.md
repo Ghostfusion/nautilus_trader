@@ -119,6 +119,14 @@ Loading layers the built-in defaults, then the file, then any explicit `override
 explicit caller input; the loader never reads environment profiles or environment variables. A
 rejected file or override raises a `ValueError` carrying the underlying typed error text.
 
+Because the file schema is the typed config's serde surface, a field behind a cargo feature must be
+enabled in the validating build. `BacktestEngineConfig` and `LiveNodeConfig` carry their `streaming`
+and `catalogs` fields behind the `streaming` feature, which the Python extension always enables, so
+a file written from Python contains those keys. The `nautilus config validate` and `nautilus config
+resolve` commands enable the same config-schema features as the Python extension, so a file written
+from Python validates from the CLI as well. A build without the feature cannot read a file that has
+it: the keys then fall outside the schema and are rejected as unknown fields.
+
 The kernel-level configuration (`KernelConfig`, and the `NautilusKernelConfig` trait) has no Python
 binding, so no Python file surface is exposed for it.
 

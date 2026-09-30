@@ -20,7 +20,10 @@
 //! The commands only read catalog data and, for `convert`, write a separate destination catalog.
 //! No command reads or writes provider credentials.
 
-use std::str::FromStr;
+use std::{
+    str::FromStr,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use ahash::AHashMap;
 use nautilus_model::{
@@ -50,6 +53,10 @@ const GENERATE_PREREQUISITE: &str = "requires a synthetic market-data generator 
 ///
 /// Returns an error when the catalog cannot be listed or read.
 pub(crate) fn run_inspect(args: &CatalogDataOpt) -> anyhow::Result<()> {
+    guard("inspect", &args.catalog, || inspect(args))
+}
+
+fn inspect(args: &CatalogDataOpt) -> anyhow::Result<()> {
     silence_console_logging();
     let mut catalog = open_catalog(&args.catalog, &args.storage_options)?;
 
@@ -102,6 +109,10 @@ pub(crate) fn run_inspect(args: &CatalogDataOpt) -> anyhow::Result<()> {
 ///
 /// Returns an error when the catalog is malformed or cannot be opened.
 pub(crate) fn run_validate(args: &CatalogDataOpt) -> anyhow::Result<()> {
+    guard("validate", &args.catalog, || validate(args))
+}
+
+fn validate(args: &CatalogDataOpt) -> anyhow::Result<()> {
     silence_console_logging();
     let mut catalog = open_catalog(&args.catalog, &args.storage_options)?;
     let mut problems: Vec<String> = Vec::new();
@@ -183,6 +194,10 @@ pub(crate) fn run_validate(args: &CatalogDataOpt) -> anyhow::Result<()> {
 /// Returns an error when a location is invalid, the destination is not empty, or a read or write
 /// fails.
 pub(crate) fn run_convert(args: &CatalogConvertOpt) -> anyhow::Result<()> {
+    guard("convert", &args.source, || convert(args))
+}
+
+fn convert(args: &CatalogConvertOpt) -> anyhow::Result<()> {
     silence_console_logging();
     anyhow::ensure!(
         !same_location(&args.source, &args.destination),
@@ -279,6 +294,10 @@ pub(crate) fn run_convert(args: &CatalogConvertOpt) -> anyhow::Result<()> {
 ///
 /// Always returns an error naming the missing prerequisite.
 pub(crate) fn run_download(args: &CatalogDataOpt) -> anyhow::Result<()> {
+    guard("download", &args.catalog, || download(args))
+}
+
+fn download(args: &CatalogDataOpt) -> anyhow::Result<()> {
     silence_console_logging();
     unsupported("download", &args.catalog, DOWNLOAD_PREREQUISITE)
 }
@@ -289,9 +308,19 @@ pub(crate) fn run_download(args: &CatalogDataOpt) -> anyhow::Result<()> {
 ///
 /// Always returns an error naming the missing prerequisite.
 pub(crate) fn run_generate(args: &CatalogDataOpt) -> anyhow::Result<()> {
+    guard("generate", &args.catalog, || generate(args))
+}
+
+fn generate(args: &CatalogDataOpt) -> anyhow::Result<()> {
     silence_console_logging();
     unsupported("generate", &args.catalog, GENERATE_PREREQUISITE)
 }
+
+/// Whether a machine-readable document has been written to standard output.
+static EMITTED_DOCUMENT: AtomicBool = AtomicBool::new(false);
+
+/// Whether console logging has been silenced for this process.
+static CONSOLE_LOGGING_SILENCED: AtomicBool = AtomicBool::new(false);
 
 /// Suppresses console logging so the JSON document is the only standard output.
 ///
@@ -299,8 +328,54 @@ pub(crate) fn run_generate(args: &CatalogDataOpt) -> anyhow::Result<()> {
 /// is disabled unless `NAUTILUS_LOG` is set to configure it explicitly. Failures stay visible
 /// through the document and the process exit status.
 pub(crate) fn silence_console_logging() {
+    CONSOLE_LOGGING_SILENCED.store(true, Ordering::Relaxed);
+
     if std::env::var_os("NAUTILUS_LOG").is_none() {
         log::set_max_level(log::LevelFilter::Off);
+    }
+}
+
+/// Returns whether the running command asked for console logging to be silenced.
+///
+/// This is set by [`silence_console_logging`] whenever a machine-readable command family runs,
+/// even when `NAUTILUS_LOG` re-enables logging, so the top-level error path can distinguish those
+/// families from the commands that report through the logging layer.
+pub(crate) fn console_logging_silenced() -> bool {
+    CONSOLE_LOGGING_SILENCED.load(Ordering::Relaxed)
+}
+
+/// Returns whether a machine-readable document has been written to standard output.
+pub(crate) fn emitted_document() -> bool {
+    EMITTED_DOCUMENT.load(Ordering::Relaxed)
+}
+
+/// Runs a data subcommand body, emitting a failure document if it fails before emitting one.
+///
+/// A failure raised before the envelope is built would otherwise travel out as an error and be
+/// reported only through the logging layer, which these commands silence. Emitting the failure as
+/// the same envelope keeps every failure machine-readable, and a body that already emitted its own
+/// document (for example `validate` reporting an invalid catalog) is not duplicated.
+fn guard(
+    command: &str,
+    catalog: &str,
+    body: impl FnOnce() -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    EMITTED_DOCUMENT.store(false, Ordering::Relaxed);
+
+    match body() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if !emitted_document() {
+                emit(&json!({
+                    "schema": OUTPUT_SCHEMA,
+                    "command": command,
+                    "status": "error",
+                    "catalog": catalog,
+                    "error": error.to_string(),
+                }));
+            }
+            Err(error)
+        }
     }
 }
 
@@ -370,6 +445,7 @@ fn resolve_family(name: &str) -> Option<FamilySelector> {
 }
 
 pub(crate) fn emit(value: &Value) {
+    EMITTED_DOCUMENT.store(true, Ordering::Relaxed);
     println!("{value}");
 }
 
