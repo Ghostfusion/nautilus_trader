@@ -1004,3 +1004,56 @@ def test_run_config_chunk_size_zero_rejected() -> None:
     )
     with pytest.raises(ValueError, match="chunk_size"):
         BacktestRunConfig(venues=[venue], data=[data], chunk_size=0)
+
+
+def test_backtest_engine_config_to_file_and_from_file_roundtrip(tmp_path) -> None:
+    """
+    Test a `BacktestEngineConfig` round-trips through a JSON file.
+    """
+    path = tmp_path / "backtest_engine.json"
+    config = BacktestEngineConfig(
+        load_state=True,
+        save_state=True,
+        shutdown_on_error=True,
+        bypass_logging=True,
+        run_analysis=False,
+        timeout_connection=45,
+    )
+
+    config.to_file(str(path))
+
+    loaded = BacktestEngineConfig.from_file(str(path))
+
+    assert loaded.load_state is True
+    assert loaded.save_state is True
+    assert loaded.shutdown_on_error is True
+    assert loaded.bypass_logging is True
+    assert loaded.run_analysis is False
+    assert loaded.timeout_connection == 45.0
+
+
+def test_backtest_engine_config_from_file_rejects_unknown_key(tmp_path) -> None:
+    """
+    Test a `BacktestEngineConfig` file with an unknown key is rejected.
+    """
+    path = tmp_path / "backtest_engine_unknown.json"
+    path.write_text('{"unknown_field": 1}')
+
+    with pytest.raises(ValueError, match="unknown field") as exc_info:
+        BacktestEngineConfig.from_file(str(path))
+
+    message = str(exc_info.value)
+    assert "failed to decode configuration file" in message
+    assert "unknown field `unknown_field`" in message
+
+
+def test_backtest_engine_config_from_file_layers_overrides(tmp_path) -> None:
+    """
+    Test explicit overrides take precedence over the file contents.
+    """
+    path = tmp_path / "backtest_engine_overrides.json"
+    BacktestEngineConfig(run_analysis=False).to_file(str(path))
+
+    loaded = BacktestEngineConfig.from_file(str(path), overrides={"run_analysis": True})
+
+    assert loaded.run_analysis is True

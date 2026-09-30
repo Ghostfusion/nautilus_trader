@@ -845,6 +845,9 @@ class LiveNodeConfig:
         data_clients: dict | None = None,
         exec_clients: dict | None = None,
     ) -> LiveNodeConfig: ...
+    def to_file(self, path: str) -> None: ...
+    @staticmethod
+    def from_file(path: str, overrides: dict | None = None) -> LiveNodeConfig: ...
 
 @typing.final
 class LiveRiskEngineConfig:

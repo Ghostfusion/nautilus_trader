@@ -52,8 +52,12 @@ use nautilus_persistence::{
 };
 use nautilus_portfolio::config::PortfolioConfig;
 use nautilus_risk::engine::config::RiskEngineConfig;
+use nautilus_system::python::config_file::{load_config_file, save_config_file};
 use nautilus_trading::ImportableControllerConfig;
-use pyo3::{Bound, IntoPyObjectExt, Py, PyAny, PyResult, Python, types::PyAnyMethods};
+use pyo3::{
+    Bound, IntoPyObjectExt, Py, PyAny, PyResult, Python,
+    types::{PyAnyMethods, PyDict},
+};
 use rust_decimal::Decimal;
 use ustr::Ustr;
 
@@ -291,6 +295,25 @@ impl BacktestEngineConfig {
     #[pyo3(name = "catalogs")]
     fn py_catalogs(&self) -> Vec<DataCatalogConfig> {
         self.catalogs.clone()
+    }
+
+    /// Saves this configuration to the JSON file at `path`.
+    ///
+    /// The typed constructor remains the canonical API; the file is a view of this configuration
+    /// that can be reloaded with ``BacktestEngineConfig.from_file``.
+    #[pyo3(name = "to_file")]
+    fn py_to_file(&self, path: &str) -> PyResult<()> {
+        save_config_file(path, self)
+    }
+
+    /// Loads a configuration from the JSON file at `path`.
+    ///
+    /// When `overrides` is given it is merged over the file contents and takes precedence.
+    #[staticmethod]
+    #[pyo3(name = "from_file")]
+    #[pyo3(signature = (path, overrides=None))]
+    fn py_from_file(path: &str, overrides: Option<Bound<'_, PyDict>>) -> PyResult<Self> {
+        load_config_file(path, overrides)
     }
 
     fn __repr__(&self) -> String {

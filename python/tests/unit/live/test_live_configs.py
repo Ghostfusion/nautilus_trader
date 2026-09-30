@@ -672,3 +672,52 @@ def test_portfolio_config_properties() -> None:
     assert config.use_mark_xrates is False
     assert config.debug is False
     assert config.min_account_state_logging_interval_ms is None
+
+
+def test_live_node_config_to_file_and_from_file_roundtrip(tmp_path) -> None:
+    """
+    Test a `LiveNodeConfig` round-trips through a JSON file.
+    """
+    path = tmp_path / "live_node.json"
+    config = LiveNodeConfig(
+        load_state=True,
+        save_state=True,
+        shutdown_on_error=True,
+        timeout_connection_secs=45.0,
+    )
+
+    config.to_file(str(path))
+
+    loaded = LiveNodeConfig.from_file(str(path))
+
+    assert loaded.load_state is True
+    assert loaded.save_state is True
+    assert loaded.shutdown_on_error is True
+    assert loaded.timeout_connection_secs == 45.0
+
+
+def test_live_node_config_from_file_rejects_unknown_key(tmp_path) -> None:
+    """
+    Test a `LiveNodeConfig` file with an unknown key is rejected.
+    """
+    path = tmp_path / "live_node_unknown.json"
+    path.write_text('{"unknown_field": 1}')
+
+    with pytest.raises(ValueError, match="unknown field") as exc_info:
+        LiveNodeConfig.from_file(str(path))
+
+    message = str(exc_info.value)
+    assert "failed to decode configuration file" in message
+    assert "unknown field `unknown_field`" in message
+
+
+def test_live_node_config_from_file_layers_overrides(tmp_path) -> None:
+    """
+    Test explicit overrides take precedence over the file contents.
+    """
+    path = tmp_path / "live_node_overrides.json"
+    LiveNodeConfig(load_state=False).to_file(str(path))
+
+    loaded = LiveNodeConfig.from_file(str(path), overrides={"load_state": True})
+
+    assert loaded.load_state is True

@@ -90,6 +90,38 @@ Rust `None`. For example, passing `instrument_status_poll_secs=None` to `BybitDa
 retains its 60-second default. Rust callers can set `instrument_poll_interval_secs` to `None` to
 disable periodic instrument and status polling.
 
+## Configuration files
+
+Typed constructors remain the canonical configuration API. A configuration can optionally be
+serialized to a JSON file and loaded back; the file is a **view** of the typed configuration, not a
+separate model. The schema is exactly the `Serialize`/`Deserialize` surface of the typed config, so
+missing keys take the built-in defaults and unknown keys are rejected.
+
+`BacktestEngineConfig` and `LiveNodeConfig` expose `to_file(path)` and the `from_file(path,
+overrides=None)` constructor:
+
+```python
+from nautilus_trader.config import BacktestEngineConfig
+
+config = BacktestEngineConfig(load_state=True, timeout_connection=45)
+config.to_file("backtest.json")
+
+reloaded = BacktestEngineConfig.from_file("backtest.json")
+assert reloaded.load_state is True
+assert reloaded.timeout_connection == 45.0
+
+# Overrides are merged over the file contents and take precedence
+overridden = BacktestEngineConfig.from_file("backtest.json", overrides={"run_analysis": False})
+assert overridden.run_analysis is False
+```
+
+Loading layers the built-in defaults, then the file, then any explicit `overrides`. Overrides are
+explicit caller input; the loader never reads environment profiles or environment variables. A
+rejected file or override raises a `ValueError` carrying the underlying typed error text.
+
+The kernel-level configuration (`KernelConfig`, and the `NautilusKernelConfig` trait) has no Python
+binding, so no Python file surface is exposed for it.
+
 ## Rust configs
 
 Many Rust config structs derive [`bon::Builder`](https://bon-rs.com), which generates a type-safe

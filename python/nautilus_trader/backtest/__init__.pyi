@@ -175,6 +175,9 @@ class BacktestEngineConfig:
         streaming: persistence.StreamingConfig | None = None,
         catalogs: typing.Sequence[persistence.DataCatalogConfig] | None = None,
     ) -> BacktestEngineConfig: ...
+    def to_file(self, path: str) -> None: ...
+    @staticmethod
+    def from_file(path: str, overrides: dict | None = None) -> BacktestEngineConfig: ...
 
 @typing.final
 class BacktestNode:
