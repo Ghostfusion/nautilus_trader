@@ -281,6 +281,16 @@ The concerns compose in one order, and it is the order the matching engine appli
 Slippage therefore changes the price the fee model sees, and never changes eligibility or
 quantity. Market impact composes after slippage and never changes eligibility or quantity.
 
+The committed execution realism scenarios
+(`python/tests/regression/cases/venue_slippage_model.py`, `market_impact_model.py`, and
+`execution_realism_composed.py`) pin this ordering as increment arithmetic over one bar priced at
+`100.00`. Each submits one 100 unit market order from `on_bar`, and the synthetic L1 book supplies
+25 units, so the engine fills the remainder one increment beyond the last fill price
+(`crates/execution/src/matching_engine/mod.rs:5270-5341`). Against the same data the first fill is
+`100.00` by default, `100.01` with the seeded one-tick slippage model, `100.02` with a market impact
+model of one increment per 10 units, and `100.03` with both, so the concerns are additive and
+compose in the order above.
+
 ### Independent market impact
 
 Fill and slippage are configured independently of market impact. A venue can set a market impact

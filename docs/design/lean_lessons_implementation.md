@@ -538,6 +538,30 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
    `matching_engine/mod.rs:12174-12202`: the default path fills at the best ask and a configured
    model of one increment per 10 units fills three increments above it, reproducibly.
 
+9. Step 7, the golden scenarios for the added models. Three declared scenarios in
+   `python/tests/regression/cases/` pin the added execution realism in committed canonical
+   documents: `venue_slippage_model` configures the seeded `ProbabilisticSlippageModel` alone,
+   `market_impact_model` configures the `LinearMarketImpactModel` alone, and
+   `execution_realism_composed` configures both. They share one harness
+   (`python/tests/regression/execution_realism.py`), which runs a `BacktestNode` over a synthetic
+   bar catalog with a strategy that submits one market order from `on_bar`, in the shape the node
+   path integration test establishes, and each scenario declares a fixed run config ID.
+
+   The scenarios pin the increment arithmetic of the ordering against a bar whose price is
+   `100.00`: the default path fills the first fill at `100.00`, the seeded slip at `100.01`, the
+   impact model at `100.02` (two increments for the 25 unit fill the synthetic book supplies, at
+   one increment per 10 units), and the composition at `100.03`. The concerns are therefore
+   additive and compose in the documented order, and the committed digests are distinct.
+
+   Each scenario observes two fills, because the synthetic L1 book supplies 25 units of the 100
+   unit order: the engine fills the remainder one increment beyond the last fill price
+   (`crates/execution/src/matching_engine/mod.rs:5270-5341`), so the remainder carries the adjusted
+   price forward and the checkpoints pin two prices per scenario rather than one.
+
+   A node scenario needs a declared run config ID. A canonical document records
+   `run/run_config_id`, and a generated one is random, so a scenario that lets the node generate it
+   does not reproduce its own digest; each scenario passes a fixed ID to `BacktestRunConfig`.
+
 **Not implemented yet.**
 
 - The decomposition boundary for a stochastic composite. A composite fill model draws its
@@ -556,9 +580,6 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
   declare and nothing the engine could inherit from: the level would be a setting with no effect
   unless the order path itself changed. The delivered chain therefore ends at the per-instrument
   override.
-- Step 7, the golden scenario for the adopted market impact model. Step 5 evaluated the candidate
-  additions and step 6 implemented market impact; step 7 pins its canonical document in a declared
-  regression scenario and is not part of this change.
 
 **Boundary.** Engine and research. Models are used by both backtest and sandbox execution.
 
@@ -576,6 +597,9 @@ unchanged. The `slippage_model` field is absent by default, so a venue that sets
 slippage exactly as before. Steps 5 and 6 are separately complete when every candidate addition has
 a recorded decision with its reason, the adopted market impact model is deterministic and opt-in,
 and the `market_impact_model` field is absent by default so the default path stays byte-identical.
+Step 7 is complete: the three added scenarios commit distinct canonical digests over the arithmetic
+of the ordering, every scenario predating them passes with its committed expectations unchanged, and
+each scenario reproduces its digest across repeated runs.
 
 **Node path.** `python/tests/integration/test_backtest_node_bar_fills.py` runs a node over a
 synthetic bar catalog with a strategy that submits a market order from `on_bar` and asserts that the
@@ -583,8 +607,8 @@ order, the fill, and the position appear in the node's reports and that the cano
 differs from the same run without the order. The bar establishes the market before the strategy sees
 it, so a fill needs no quote or trade data. The same test configures the venue with a
 `OneTickSlippage` configuration and asserts the canonical document differs from the default one, so
-the configuration layer reaches the matching engine on the node path, which is the path a later step
-needs for a golden scenario over a new model. The venue-level `slippage_model` and
+the configuration layer reaches the matching engine on the node path, which the execution realism
+scenarios now use for their committed digests. The venue-level `slippage_model` and
 `market_impact_model` fields are mapped on the same path.
 
 **Migration invariant.** Separating an abstraction must not automatically change simulation
