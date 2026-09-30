@@ -19,6 +19,7 @@ pub mod config;
 pub mod fee;
 pub mod fill;
 pub mod latency;
+pub mod slippage;
 
 use pyo3::prelude::*;
 
@@ -53,5 +54,6 @@ pub fn execution(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::models::fill::VolumeSensitiveFillModel>()?;
     m.add_class::<crate::models::fill::MarketHoursFillModel>()?;
     m.add_class::<crate::models::latency::StaticLatencyModel>()?;
+    m.add_class::<crate::models::slippage::ProbabilisticSlippageModel>()?;
     Ok(())
 }

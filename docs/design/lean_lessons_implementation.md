@@ -444,26 +444,66 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
    holds, which `OrderMatchingEngine::set_fill_model` replaces at runtime.
    `SimulatedExchange` and the sandbox client both carry a `FillModelSelection` and resolve it once,
    when the matching engine for an instrument is created
-   (`crates/backtest/src/exchange.rs:322-341,528`, `crates/adapters/sandbox/src/execution.rs:143-154,1006`).
+   (`crates/backtest/src/exchange.rs:325-344,531`, `crates/adapters/sandbox/src/execution.rs:144-155,1010`).
    A venue-level `set_fill_model` replaces the venue default for every instrument without an
-   override and leaves the overrides in place (`exchange.rs:322-333`), and
+   override and leaves the overrides in place (`exchange.rs:325-336`), and
    `SimulatedExchange::fill_model_for` exposes the resolution for an instrument
-   (`exchange.rs:340-341`). The overrides are configured exactly like `leverages`:
-   `SimulatedVenueConfig.instrument_fill_models` (`crates/backtest/src/config.rs:294-299`) and
-   `BacktestVenueConfig.instrument_fill_models` (`config.rs:536-540`), mapped on the node path
-   (`crates/backtest/src/node.rs:270-275,301`) and accepted by `BacktestEngine.add_venue` and
+   (`exchange.rs:343-344`). The overrides are configured exactly like `leverages`:
+   `SimulatedVenueConfig.instrument_fill_models` (`crates/backtest/src/config.rs:295-300`) and
+   `BacktestVenueConfig.instrument_fill_models` (`config.rs:543-547`), mapped on the node path
+   (`crates/backtest/src/node.rs:271-276,304`) and accepted by `BacktestEngine.add_venue` and
    `SandboxExecutionClientConfig`. The sandbox field serializes as runtime-only, like its other
    models, and an empty map is omitted.
 
+7. Step 4, Stage B independent components (D15). `crates/execution/src/models/slippage.rs`
+   introduces `SlippageModel`, the second concern of the set: it answers only whether a fill price
+   moves one tick against the order direction (`slippage.rs:33-40`). `ProbabilisticSlippageModel`
+   is the built-in implementation (`slippage.rs:83-134`), carrying `prob_slippage` and
+   `random_seed` and drawing from the same `ProbabilisticFillState` the fill models use, so a
+   seeded model reproduces its draws and a decomposed configuration reproduces a composite one
+   draw for draw. The matching engine carries an optional independent slippage model
+   (`crates/execution/src/matching_engine/mod.rs:116,554-562,5124-5142`) and consults it in place
+   of the fill model's own slippage when one is set; when none is set the fill model decides,
+   which is the default path. Fill and fee were already independently configurable, and slippage
+   joins them as `slippage_model`, a venue-level field on `SimulatedVenueConfig`
+   (`crates/backtest/src/config.rs:301-306`), `BacktestVenueConfig` (`config.rs:549-554`),
+   `BacktestEngine.add_venue`, and `SandboxExecutionClientConfig`
+   (`crates/adapters/sandbox/src/config.rs:101-114`), mapped on the node path
+   (`crates/backtest/src/node.rs:290-291,305`), so backtest and sandbox stay at parity.
+   `ProbabilisticSlippageModel` is exposed through `nautilus_trader.execution`
+   (`crates/execution/src/python/mod.rs:57`).
+
+   The ordering the engine implements, and that the configuration documents, is: fill
+   eligibility, then fill quantity, then base fill price, then the slippage adjustment, then the
+   final fill price, then the fee. The fill model decides whether the order is eligible, how much
+   fills, and at what base price. The slippage model then adjusts that base price by one price
+   increment against the order direction on an L1 book, producing the final fill price. The fee
+   model is charged last, on that adjusted price and the fill quantity.
+
+   Stage B's acceptance evidence: a run with an independent `ProbabilisticSlippageModel`
+   (`prob_slippage=0.5`, `random_seed=7`) produces the same canonical digest as a run with the
+   composite `DefaultFillModel` that folds the same draw in, and a run without slippage differs,
+   so the draws are not vacuous. The reproduction holds for a composite whose fill decision is
+   deterministic; the limitation below records the boundary.
+
 **Not implemented yet.**
 
+- The decomposition boundary for a stochastic composite. A composite fill model draws its
+  limit-fill and slippage decisions from one random stream; an independent slippage model owns its
+  own. A decomposed run therefore reproduces a composite run exactly only when the composite's fill
+  decision is deterministic (`prob_fill_on_limit` of `0.0` or `1.0`), in which case the composite
+  consumes no random bytes before its slippage draws and the two streams coincide. With a
+  stochastic fill decision the draws are statistically equivalent but not identical, so the
+  canonical digests differ. Any future composite that folds more than one random concern into one
+  model inherits the same boundary.
+- A slippage inheritance chain. Independent slippage is venue-level only: `slippage_model` has no
+  per-instrument override level, and the matching-engine level holds whatever the venue resolved.
+  This step adds one concern without the chain, which is the staged-migration rule.
 - Order-specific fill model overrides, the last level of the chain. An order carries no fill model
   affiliation and the matching engine has no per-order hook, so there is nothing a caller could
   declare and nothing the engine could inherit from: the level would be a setting with no effect
   unless the order path itself changed. The delivered chain therefore ends at the per-instrument
   override.
-- Step 4, Stage B independent components (D15): fill, slippage, and fee are not yet independently
-  configurable.
 - Step 5, the optional model additions: market impact, spread, partial-fill policy, borrow and locate
   availability for short selling, and auction and halt policy.
 - Steps 6 and 7 apply to those additions: each must be deterministic, taking an explicit seed where
@@ -477,9 +517,12 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
 resolves as before. The selection chain adds no default behaviour, because a venue that configures
 no instrument overrides resolves every instrument to the venue model it already used, so the same
 gate covers it. Stage B is complete only when independently configured slippage reproduces the
-composite behaviour it replaces. Each new model is independently selectable and leaves the default
-path byte-identical, seeded models reproduce across runs, and existing fill variants continue to
-pass their tests unchanged.
+composite behaviour it replaces, which this step demonstrates for a deterministic-fill composite
+with matching canonical digests; the decomposition boundary above records where that reproduction
+stops. Each new model is independently selectable and leaves the default path byte-identical,
+seeded models reproduce across runs, and existing fill variants continue to pass their tests
+unchanged. The `slippage_model` field is absent by default, so a venue that sets none resolves
+slippage exactly as before.
 
 **Node path.** `python/tests/integration/test_backtest_node_bar_fills.py` runs a node over a
 synthetic bar catalog with a strategy that submits a market order from `on_bar` and asserts that the
@@ -488,7 +531,8 @@ differs from the same run without the order. The bar establishes the market befo
 it, so a fill needs no quote or trade data. The same test configures the venue with a
 `OneTickSlippage` configuration and asserts the canonical document differs from the default one, so
 the configuration layer reaches the matching engine on the node path, which is the path a later step
-needs for a golden scenario over a new model.
+needs for a golden scenario over a new model. The venue-level `slippage_model` field is mapped on
+the same path.
 
 **Migration invariant.** Separating an abstraction must not automatically change simulation
 semantics. This is the acceptance criterion that makes the staged migration safe.

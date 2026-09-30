@@ -19,7 +19,9 @@ use ahash::AHashMap;
 use nautilus_core::collections::MapLike;
 use nautilus_execution::{
     matching_engine::config::OrderMatchingEngineConfig,
-    models::{fee::FeeModelAny, fill::FillModelAny, latency::LatencyModelAny},
+    models::{
+        fee::FeeModelAny, fill::FillModelAny, latency::LatencyModelAny, slippage::SlippageModelAny,
+    },
 };
 use nautilus_model::{
     enums::{AccountType, BookType, OmsType},
@@ -98,6 +100,18 @@ pub struct SandboxExecutionClientConfig {
         deserialize_with = "deserialize_instrument_fill_models"
     )]
     pub instrument_fill_models: AHashMap<InstrumentId, FillModelAny>,
+    /// The optional independent slippage model for sandbox matching engines.
+    ///
+    /// When set, it is the single source of the slippage decision and the fill model's own
+    /// slippage is not consulted. When unset, the fill model decides, which is the default
+    /// behavior.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_slippage_model",
+        deserialize_with = "deserialize_slippage_model"
+    )]
+    pub slippage_model: Option<SlippageModelAny>,
     /// The latency model for sandbox matching engines.
     #[serde(
         default,
@@ -279,6 +293,35 @@ where
         None => Ok(AHashMap::new()),
         Some(_) => Err(de::Error::custom(
             "SandboxExecutionClientConfig.instrument_fill_models must be configured at runtime, not deserialized",
+        )),
+    }
+}
+
+fn serialize_slippage_model<S>(
+    slippage_model: &Option<SlippageModelAny>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match slippage_model {
+        None => serializer.serialize_none(),
+        Some(_) => Err(serde::ser::Error::custom(
+            "SandboxExecutionClientConfig.slippage_model is runtime-only and cannot be serialized",
+        )),
+    }
+}
+
+fn deserialize_slippage_model<'de, D>(deserializer: D) -> Result<Option<SlippageModelAny>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<IgnoredAny>::deserialize(deserializer)?;
+
+    match value {
+        None => Ok(None),
+        Some(_) => Err(de::Error::custom(
+            "SandboxExecutionClientConfig.slippage_model must be configured at runtime, not deserialized",
         )),
     }
 }

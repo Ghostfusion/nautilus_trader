@@ -33,6 +33,7 @@ use nautilus_execution::{
         fee::{FeeModelAny, FeeModelHandle},
         fill::{FillModelAny, FillModelHandle},
         latency::{LatencyModelAny, LatencyModelHandle},
+        slippage::{SlippageModelAny, SlippageModelHandle},
     },
 };
 use nautilus_model::{
@@ -297,6 +298,12 @@ pub struct SimulatedVenueConfig {
     /// instrument without one inherits the venue model.
     #[builder(default)]
     pub instrument_fill_models: AHashMap<InstrumentId, FillModelHandle>,
+    /// The optional model used to simulate fill slippage.
+    ///
+    /// When set, it is the venue's single source of the slippage decision and the fill model's
+    /// own slippage is not consulted. When unset, the fill model decides, which is the default
+    /// behavior.
+    pub slippage_model: Option<SlippageModelHandle>,
     /// The model used to calculate trading fees.
     ///
     /// Must be configured explicitly, including an explicit zero-fee model.
@@ -538,6 +545,12 @@ pub struct BacktestVenueConfig {
     /// An instrument with an override uses it instead of the venue fill model; an
     /// instrument without one inherits the venue fill model.
     instrument_fill_models: Option<AHashMap<InstrumentId, FillModelAny>>,
+    /// The optional independent slippage model for the venue.
+    ///
+    /// When set, it is the venue's single source of the slippage decision and the fill
+    /// model's own slippage is not consulted. When unset, the fill model decides, which is
+    /// the default behavior.
+    slippage_model: Option<SlippageModelAny>,
     /// The latency model for the venue.
     latency_model: Option<LatencyModelAny>,
     /// The fee model for the venue.
@@ -776,6 +789,11 @@ impl BacktestVenueConfig {
     #[must_use]
     pub fn instrument_fill_models(&self) -> Option<&AHashMap<InstrumentId, FillModelAny>> {
         self.instrument_fill_models.as_ref()
+    }
+
+    #[must_use]
+    pub fn slippage_model(&self) -> Option<&SlippageModelAny> {
+        self.slippage_model.as_ref()
     }
 
     #[must_use]

@@ -44,6 +44,7 @@ use nautilus_execution::{
         fee::FeeModelHandle,
         fill::{FillModelHandle, FillModelSelection},
         latency::{LatencyModel, LatencyModelHandle},
+        slippage::SlippageModelHandle,
     },
 };
 use nautilus_model::{
@@ -161,6 +162,7 @@ pub struct SimulatedExchange {
     deferring_events: Rc<Cell<bool>>,
     fee_model: FeeModelHandle,
     fill_models: FillModelSelection,
+    slippage_model: Option<SlippageModelHandle>,
     latency_model: Option<LatencyModelHandle>,
     instruments: AHashMap<InstrumentId, InstrumentAny>,
     matching_engines: IndexMap<InstrumentId, OrderMatchingEngine>,
@@ -251,6 +253,7 @@ impl SimulatedExchange {
             deferring_events: Rc::new(Cell::new(false)),
             fee_model: config.fee_model,
             fill_models: FillModelSelection::new(config.fill_model, config.instrument_fill_models),
+            slippage_model: config.slippage_model,
             latency_model: config.latency_model,
             instruments: AHashMap::new(),
             matching_engines: IndexMap::new(),
@@ -534,6 +537,9 @@ impl SimulatedExchange {
 
         if let Some(handler) = &self.event_handler {
             matching_engine.set_event_handler(Rc::clone(handler));
+        }
+        if let Some(slippage_model) = self.slippage_model.as_ref() {
+            matching_engine.set_slippage_model(slippage_model.clone());
         }
         self.instruments.insert(instrument_id, instrument);
         matching_engine.set_inflight_orders(self.inflight_orders.clone());

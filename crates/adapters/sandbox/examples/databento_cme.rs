@@ -104,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fee_model: Some(FeeModelAny::MakerTaker(MakerTakerFeeModel::zero())),
         fill_model: None,
         instrument_fill_models: ahash::AHashMap::new(),
+        slippage_model: None,
         latency_model: None,
         frozen_account: false,
         bar_execution: true,

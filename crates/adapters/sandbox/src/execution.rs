@@ -48,6 +48,7 @@ use nautilus_execution::{
         fee::FeeModelHandle,
         fill::{FillModelHandle, FillModelSelection},
         latency::LatencyModel,
+        slippage::SlippageModelHandle,
     },
 };
 use nautilus_model::{
@@ -160,6 +161,7 @@ impl SandboxExecutionClient {
                 "SandboxExecutionClientConfig requires an explicit fee_model, including an explicit zero-fee model"
             )
         })?;
+        let slippage_model = config.slippage_model.clone().map(SlippageModelHandle::from);
 
         let inner = Rc::new_cyclic(|weak: &std::rc::Weak<RefCell<SandboxInner>>| {
             RefCell::new(SandboxInner {
@@ -168,6 +170,7 @@ impl SandboxExecutionClient {
                 config: config.clone(),
                 fill_models,
                 fee_model,
+                slippage_model,
                 matching_engines: AHashMap::new(),
                 next_engine_raw_id: 0,
                 balances,
@@ -906,6 +909,7 @@ struct SandboxInner {
     config: SandboxExecutionClientConfig,
     fill_models: FillModelSelection,
     fee_model: FeeModelHandle,
+    slippage_model: Option<SlippageModelHandle>,
     matching_engines: AHashMap<InstrumentId, OrderMatchingEngine>,
     next_engine_raw_id: u32,
     balances: AHashMap<String, Money>,
@@ -1025,6 +1029,9 @@ impl SandboxInner {
 
             if let Some(handler) = &self.event_handler {
                 engine.set_event_handler(handler.clone());
+            }
+            if let Some(slippage_model) = self.slippage_model.as_ref() {
+                engine.set_slippage_model(slippage_model.clone());
             }
 
             engine.set_inflight_orders(self.inflight_orders.clone());

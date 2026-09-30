@@ -34,6 +34,7 @@ use nautilus_execution::{
         fee::{fee_model_any_to_pyobject, pyobject_to_fee_model_any},
         fill::{fill_model_any_to_pyobject, pyobject_to_fill_model_any},
         latency::{latency_model_any_to_pyobject, pyobject_to_latency_model_any},
+        slippage::pyobject_to_slippage_model_any,
     },
 };
 use nautilus_model::{
@@ -332,6 +333,7 @@ impl BacktestVenueConfig {
         liquidation_trigger_ratio = None,
         liquidation_cancel_open_orders = None,
         instrument_fill_models = None,
+        slippage_model = None,
     ))]
     #[expect(clippy::too_many_arguments)]
     fn py_new(
@@ -375,6 +377,7 @@ impl BacktestVenueConfig {
         liquidation_trigger_ratio: Option<f64>,
         liquidation_cancel_open_orders: Option<bool>,
         instrument_fill_models: Option<HashMap<InstrumentId, Py<PyAny>>>,
+        slippage_model: Option<Py<PyAny>>,
     ) -> pyo3::PyResult<Self> {
         let oms_type = enum_from_python(oms_type)?;
         let account_type = enum_from_python(account_type)?;
@@ -415,6 +418,9 @@ impl BacktestVenueConfig {
         let fee_model = fee_model
             .map(|obj| Python::attach(|py| pyobject_to_fee_model_any(obj.bind(py))))
             .transpose()?;
+        let slippage_model = slippage_model
+            .map(|obj| Python::attach(|py| pyobject_to_slippage_model_any(obj.bind(py))))
+            .transpose()?;
 
         Self::builder()
             .name(Ustr::from(name))
@@ -445,6 +451,7 @@ impl BacktestVenueConfig {
             .modules(modules)
             .maybe_fill_model(fill_model)
             .maybe_instrument_fill_models(instrument_fill_models)
+            .maybe_slippage_model(slippage_model)
             .maybe_latency_model(latency_model)
             .maybe_fee_model(fee_model)
             .maybe_price_protection_points(price_protection_points)

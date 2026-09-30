@@ -216,6 +216,67 @@ overrides keep applying.
 objects or `FillModelConfig` descriptions, like `fill_model` itself. The sandbox field is
 runtime-only in configuration serialization, as its other model fields are.
 
+### Independent slippage
+
+Fill, slippage, and fee are configured independently. A venue can set a slippage model on its own,
+without adopting a composite fill model that folds slippage in:
+
+```python
+from decimal import Decimal
+
+from nautilus_trader.config import BacktestVenueConfig
+from nautilus_trader.execution import DefaultFillModel
+from nautilus_trader.execution import MakerTakerFeeModel
+from nautilus_trader.execution import ProbabilisticSlippageModel
+from nautilus_trader.model import AccountType
+from nautilus_trader.model import BookType
+from nautilus_trader.model import OmsType
+
+venue = BacktestVenueConfig(
+    name="SIM",
+    oms_type=OmsType.NETTING,
+    account_type=AccountType.CASH,
+    book_type=BookType.L1_MBP,
+    starting_balances=["100_000 USD"],
+    fill_model=DefaultFillModel(prob_fill_on_limit=1.0, prob_slippage=0.0),
+    slippage_model=ProbabilisticSlippageModel(prob_slippage=0.5, random_seed=42),
+    fee_model=MakerTakerFeeModel(
+        maker_rate=Decimal("0"),
+        taker_rate=Decimal("0"),
+    ),
+)
+```
+
+`ProbabilisticSlippageModel` draws a one-tick adverse adjustment with probability `prob_slippage`
+on each L1 fill and takes `random_seed` for reproducibility, exactly as the fill models' own
+`prob_slippage` does. It is accepted wherever a venue is configured: `BacktestVenueConfig`,
+`BacktestEngine.add_venue`, and `SandboxExecutionClientConfig`. The field is optional and defaults
+to no independent model.
+
+When a venue sets a slippage model, it is the single source of the slippage decision and the fill
+model's own `prob_slippage` is not consulted. When a venue sets none, the fill model decides, which
+is the default behavior. Do not set both on the same venue: configure the fill model with
+`prob_slippage=0.0` when using an independent slippage model.
+
+A decomposed configuration reproduces a composite one draw for draw when the fill decision is
+deterministic (`prob_fill_on_limit` of `0.0` or `1.0`). A composite fill model draws its limit-fill
+and slippage decisions from one random stream, while an independent slippage model has its own, so
+with a stochastic fill decision the draws are statistically equivalent but not identical.
+
+#### Ordering
+
+The concerns compose in one order, and it is the order the matching engine applies them:
+
+1. Fill eligibility: the fill model decides whether a limit order fills (`is_limit_filled`).
+2. Fill quantity and base fill price: the fill model's book, or the synthetic book it returns,
+   determines how much fills and at what base price.
+3. Slippage adjustment: the slippage model decides whether the base fill price moves one price
+   increment against the order direction (BUY up, SELL down) on an L1 book.
+4. Final fill price: the adjusted price is the price recorded on the fill event.
+5. Fee: the fee model is charged on the final fill price and the fill quantity.
+
+Slippage therefore changes the price the fee model sees, and never changes eligibility or quantity.
+
 ### Custom fill models
 
 The low-level `BacktestEngine.add_venue()` method also accepts a custom Python object. It must
@@ -261,6 +322,10 @@ For L1 books, this value controls a one-tick adverse move on each fill:
 
 The draw applies to maker and taker fills. It does not apply to L2 or L3 books.
 
+The same draw is available as its own model, `ProbabilisticSlippageModel`, configured through a
+venue's `slippage_model` instead of the fill model's `prob_slippage`. See
+[Independent slippage](#independent-slippage).
+
 ## Synthetic order books
 
 Before determining a fill, the matching engine asks the model for an optional synthetic order book.
@@ -294,10 +359,10 @@ Maker/taker rate resolution is deterministic: an exact `InstrumentId` override w
 
 Where fees are actually applied:
 
-- The commission is computed per fill inside `OrderMatchingEngine::fill_order`, immediately before the fill event is generated. It is passed a clone of the order carrying the pre-fill `filled_qty` (so `FixedFeeModel` charges once) and the resolved liquidity side; the fee currency is the instrument quote currency (`crates/execution/src/matching_engine/mod.rs:5408-5437`).
-- For option instruments the underlying price for capped/tiered fees is resolved from cache (underlying `Last` then `Mark` then `Mid`, else option greeks) via `fee_underlying_price` (`mod.rs:5796-5829`).
-- The venue's `FeeModelHandle` is stored on `SimulatedExchange` (`crates/backtest/src/exchange.rs:162,252`) and cloned into each `OrderMatchingEngine::new` call (`exchange.rs:503-504`). `SimulatedVenueConfig.fee_model` is required, not optional (`crates/backtest/src/config.rs:294-299`).
-- `BacktestVenueConfig.fee_model` is `Option<FeeModelAny>` (`config.rs:533-536`) but `BacktestNode` errors if it is absent, requiring an explicit model including an explicit zero-fee model (`crates/backtest/src/node.rs:270-279`). The same requirement exists in the sandbox client (`crates/adapters/sandbox/src/execution.rs:126-149`).
+- The commission is computed per fill inside `OrderMatchingEngine::fill_order`, immediately before the fill event is generated. It is passed a clone of the order carrying the pre-fill `filled_qty` (so `FixedFeeModel` charges once) and the resolved liquidity side; the fee currency is the instrument quote currency (`crates/execution/src/matching_engine/mod.rs:5433-5462`).
+- For option instruments the underlying price for capped/tiered fees is resolved from cache (underlying `Last` then `Mark` then `Mid`, else option greeks) via `fee_underlying_price` (`mod.rs:5821-5854`).
+- The venue's `FeeModelHandle` is stored on `SimulatedExchange` (`crates/backtest/src/exchange.rs:163,254`) and cloned into each `OrderMatchingEngine::new` call (`exchange.rs:506-507`). `SimulatedVenueConfig.fee_model` is required, not optional (`crates/backtest/src/config.rs:295-300`).
+- `BacktestVenueConfig.fee_model` is `Option<FeeModelAny>` (`config.rs:540-543`) but `BacktestNode` errors if it is absent, requiring an explicit model including an explicit zero-fee model (`crates/backtest/src/node.rs:271-280`). The same requirement exists in the sandbox client (`crates/adapters/sandbox/src/execution.rs:127-150`).
 - A venue-specific model outside the core crate is `PolymarketFeeModel`, which implements `FeeModel` directly (`crates/adapters/polymarket/src/models.rs:52`).
 
 ### 2. Fill models
@@ -329,13 +394,13 @@ Default and selection:
 
 - The default is `FillModelAny::Default(DefaultFillModel::default())` (`fill.rs:1424-1427`), which is also what `FillModelHandle::default()` yields (`fill.rs:153-157`).
 - Selection is an inheritance chain resolved by `FillModelSelection` in the execution crate (`fill.rs:1643-1716`): the global default, then the venue default, then the per-instrument override. `resolve` returns the instrument's override when it has one and the venue default otherwise (`fill.rs:1708-1715`), so a level that sets no model inherits.
-- `BacktestVenueConfig.fill_model` is `Option<FillModelAny>` (`config.rs:528-529`) and `instrument_fill_models` is an optional `InstrumentId`-keyed map of the same description (`config.rs:536-540`); `BacktestNode` maps the venue model and the overrides to handles (`node.rs:264-275`).
-- `SimulatedVenueConfig.fill_model` is a `FillModelHandle` (`config.rs:291-293`) and `instrument_fill_models` is an `InstrumentId`-keyed handle map (`config.rs:294-299`); the exchange builds the selection from both (`exchange.rs:163,253-256`) and resolves it per instrument when the matching engine is created, so the engine receives exactly the resolved model (`exchange.rs:524-528`). `BacktestEngine::change_fill_model` replaces the venue default at runtime and leaves instrument overrides in place (`exchange.rs:322-333`; `crates/backtest/src/engine.rs:351-360`).
-- The sandbox client carries the same selection (`crates/adapters/sandbox/src/execution.rs:143-154`) and resolves it when it creates a matching engine (`crates/adapters/sandbox/src/execution.rs:1006`). Its `instrument_fill_models` field is runtime-only in serialization, like its other model fields (`crates/adapters/sandbox/src/config.rs:88-100`).
-- When a model returns a synthetic book, its fills come from `OrderBook::simulate_fills` using a market sentinel price (`Price::max`/`Price::min`), and are marked `from_synthetic` (`mod.rs:4575-4611`). When it returns `None`, the engine uses the real book: market orders cross the book (`determine_market_price_and_volume`, `mod.rs:4520-4548`) and limit orders use crossed levels or `simulate_fills` (`determine_limit_price_and_volume`, `mod.rs:4357-4517`).
-- `fill_limit_inside_spread` is applied once at engine construction: the matching core treats a limit at or better than the same-side best quote as fillable only when the model returns `true` (`mod.rs:184-186,551-555`).
-- After a fill price is produced, `apply_fills` may shift it by one tick when `is_slipped()` is true and the book is L1 (`mod.rs:5112-5117`).
-- Bar-driven fills: with `bar_execution` and an L1 book, `process_bar` synthesizes trade ticks from OHLC and fills the open at `bar.open`, the high at `bar.high`, the low at `bar.low`, and the close at `bar.close` (`mod.rs:1869-2048`), with high/low at bar prices (`mod.rs:2051-2085`).
+- `BacktestVenueConfig.fill_model` is `Option<FillModelAny>` (`config.rs:535-536`) and `instrument_fill_models` is an optional `InstrumentId`-keyed map of the same description (`config.rs:543-547`); `BacktestNode` maps the venue model and the overrides to handles (`node.rs:265-276`).
+- `SimulatedVenueConfig.fill_model` is a `FillModelHandle` (`config.rs:292-294`) and `instrument_fill_models` is an `InstrumentId`-keyed handle map (`config.rs:295-300`); the exchange builds the selection from both (`exchange.rs:164,255-259`) and resolves it per instrument when the matching engine is created, so the engine receives exactly the resolved model (`exchange.rs:527-531`). `BacktestEngine::change_fill_model` replaces the venue default at runtime and leaves instrument overrides in place (`exchange.rs:325-336`; `crates/backtest/src/engine.rs:351-360`).
+- The sandbox client carries the same selection (`crates/adapters/sandbox/src/execution.rs:144-155`) and resolves it when it creates a matching engine (`crates/adapters/sandbox/src/execution.rs:1010`). Its `instrument_fill_models` field is runtime-only in serialization, like its other model fields (`crates/adapters/sandbox/src/config.rs:90-102`).
+- When a model returns a synthetic book, its fills come from `OrderBook::simulate_fills` using a market sentinel price (`Price::max`/`Price::min`), and are marked `from_synthetic` (`mod.rs:4587-4623`). When it returns `None`, the engine uses the real book: market orders cross the book (`determine_market_price_and_volume`, `mod.rs:4532-4560`) and limit orders use crossed levels or `simulate_fills` (`determine_limit_price_and_volume`, `mod.rs:4369-4529`).
+- `fill_limit_inside_spread` is applied once at engine construction: the matching core treats a limit at or better than the same-side best quote as fillable only when the model returns `true` (`mod.rs:186-188,563-567`).
+- After a fill price is produced, `apply_fills` shifts it by one tick against the order direction when the book is L1 and the slippage decision is true (`mod.rs:5124-5142`). The decision is the venue's independent slippage model when one is configured, and the fill model's own `is_slipped()` otherwise, so the default path is the fill model. See [Slippage models](#8-slippage-models).
+- Bar-driven fills: with `bar_execution` and an L1 book, `process_bar` synthesizes trade ticks from OHLC and fills the open at `bar.open`, the high at `bar.high`, the low at `bar.low`, and the close at `bar.close` (`mod.rs:1881-2060`), with high/low at bar prices (`mod.rs:2063-2097`).
 
 ### 3. Latency models
 
@@ -344,44 +409,44 @@ The `LatencyModel` trait returns insert/update/delete and base durations in nano
 | Option               | Config field / path                                              | Effect                                                                                                                   | Citation                                           |
 | -------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
 | Static latency       | `StaticLatencyModel::new(base, insert, update, delete)`          | Fixed per-operation delay; base is folded into each.                                                                     | `latency.rs:124-176`                               |
-| Venue latency        | `BacktestVenueConfig.latency_model: Option<LatencyModelAny>`     | Optional; mapped to a handle in `BacktestNode`.                                                                          | `config.rs:530-531,765-768`; `node.rs:281,295`     |
-| Runtime config       | `SimulatedVenueConfig.latency_model: Option<LatencyModelHandle>` | Stored on the exchange; `set_latency_model` raises it to `Some`.                                                         | `config.rs:300-301`; `exchange.rs:164,254,323-326` |
-| Order submit latency | applied in `generate_inflight_command`                           | `SubmitOrder` -> `ts_init + insert_latency`; `Modify` -> `+ update_latency`; `Cancel` -> `+ delete_latency`.             | `exchange.rs:859-886`                              |
-| Dispatch gate        | `Exchange::send`                                                 | With a latency model the command enters the inflight min-heap queue; without one it goes to the immediate message queue. | `exchange.rs:849-853`                              |
+| Venue latency        | `BacktestVenueConfig.latency_model: Option<LatencyModelAny>`     | Optional; mapped to a handle in `BacktestNode`.                                                                          | `config.rs:537-538,778-781`; `node.rs:282,298`     |
+| Runtime config       | `SimulatedVenueConfig.latency_model: Option<LatencyModelHandle>` | Stored on the exchange; `set_latency_model` raises it to `Some`.                                                         | `config.rs:307-308`; `exchange.rs:166,257,326-329` |
+| Order submit latency | applied in `generate_inflight_command`                           | `SubmitOrder` -> `ts_init + insert_latency`; `Modify` -> `+ update_latency`; `Cancel` -> `+ delete_latency`.             | `exchange.rs:865-892`                              |
+| Dispatch gate        | `Exchange::send`                                                 | With a latency model the command enters the inflight min-heap queue; without one it goes to the immediate message queue. | `exchange.rs:855-859`                              |
 
-Data latency: no latency model is applied to market-data replay. The latency model is only consulted for `TradingCommand` dispatch (`exchange.rs:859-886`); nothing in `crates/backtest/src/` applies latency to data ticks. To be explicit, a data-latency model does not exist in this code.
+Data latency: no latency model is applied to market-data replay. The latency model is only consulted for `TradingCommand` dispatch (`exchange.rs:865-892`); nothing in `crates/backtest/src/` applies latency to data ticks. To be explicit, a data-latency model does not exist in this code.
 
 ### 4. Queue position
 
 | Option               | Config field / path                                          | Effect                                                                                       | Citation                                               |
 | -------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | Queue position       | `OrderMatchingEngineConfig.queue_position` (default `false`) | Enables resting-order queue tracking so passive fills wait for depth ahead to trade through. | `crates/execution/src/matching_engine/config.rs:50-51` |
-| Venue queue position | `BacktestVenueConfig.queue_position` (default `false`)       | Copied into the matching-engine config.                                                      | `config.rs:347-349,512-513`                            |
+| Venue queue position | `BacktestVenueConfig.queue_position` (default `false`)       | Copied into the matching-engine config.                                                      | `config.rs:354-356,519-520`                            |
 
 What it does to a fill:
 
-- When an order is accepted/rested, `snapshot_queue_position` records the resting-side quantity ahead at that price via `get_quantity_at_level`; L1 orders behind the BBO are held pending until the BBO reaches the price (`mod.rs:558-601`).
-- `determine_trade_fill_qty` returns `None` (blocking the fill) while tracked `ahead_raw > 0`, when the order is pending an L1 snapshot, or when the trade-excess budget is zero; otherwise it caps the fill by remaining trade volume and queue excess (`mod.rs:795-844`).
-- In `fill_limit_order_with_snapshot`, when queue position is on, this allowed quantity caps (and can empty) the fills, cancelling FOK/IOC orders that cannot fill (`mod.rs:4853-4876`).
-- On trade ticks, `decrement_queue_on_trade` front-consumes the tracked depth FIFO and allocates a shared trade-size budget by queue priority (`mod.rs:700-790`). Book snapshots/clears and depth updates rebase positions via `rebase_queue_positions` and `seed_tob_baseline` (`mod.rs:847-926,1635-1705`). Modify re-indexes an order's queue position when its price changes (`mod.rs:3430-3437`).
+- When an order is accepted/rested, `snapshot_queue_position` records the resting-side quantity ahead at that price via `get_quantity_at_level`; L1 orders behind the BBO are held pending until the BBO reaches the price (`mod.rs:570-613`).
+- `determine_trade_fill_qty` returns `None` (blocking the fill) while tracked `ahead_raw > 0`, when the order is pending an L1 snapshot, or when the trade-excess budget is zero; otherwise it caps the fill by remaining trade volume and queue excess (`mod.rs:807-856`).
+- In `fill_limit_order_with_snapshot`, when queue position is on, this allowed quantity caps (and can empty) the fills, cancelling FOK/IOC orders that cannot fill (`mod.rs:4865-4888`).
+- On trade ticks, `decrement_queue_on_trade` front-consumes the tracked depth FIFO and allocates a shared trade-size budget by queue priority (`mod.rs:712-802`). Book snapshots/clears and depth updates rebase positions via `rebase_queue_positions` and `seed_tob_baseline` (`mod.rs:859-938,1647-1717`). Modify re-indexes an order's queue position when its price changes (`mod.rs:3442-3449`).
 
 ### 5. Liquidity consumption
 
 | Option                | Config field / path                                                 | Effect                                                                  | Citation                    |
 | --------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------- |
 | Liquidity consumption | `OrderMatchingEngineConfig.liquidity_consumption` (default `false`) | Fills consume displayed book liquidity so later orders cannot reuse it. | `config.rs:34-35`           |
-| Venue option          | `BacktestVenueConfig.liquidity_consumption` (default `false`)       | Copied into the matching-engine config.                                 | `config.rs:338-340,506-507` |
+| Venue option          | `BacktestVenueConfig.liquidity_consumption` (default `false`)       | Copied into the matching-engine config.                                 | `config.rs:345-347,513-514` |
 
-Effect in the code: `apply_liquidity_consumption` tracks per-level `(original_size, consumed)` for the side being hit, returns fills capped to `original_size - consumed`, and resets consumption when the book level size changes; with the option off it returns fills unchanged (`mod.rs:331-405`). When enabled, fill determination uses `get_all_crossed_levels` instead of `simulate_fills` so consumed levels are filtered out while valid deeper levels are still found (`mod.rs:4368,4390,4528`). Trade ticks seed a per-trade consumption budget (`mod.rs:2461-2477`). FOK attempts journal and revert consumption if unfillable (`mod.rs:414-443`). Synthetic fill-model books and L1 trigger-price fills deliberately skip consumption (`mod.rs:4703-4725`).
+Effect in the code: `apply_liquidity_consumption` tracks per-level `(original_size, consumed)` for the side being hit, returns fills capped to `original_size - consumed`, and resets consumption when the book level size changes; with the option off it returns fills unchanged (`mod.rs:334-408`). When enabled, fill determination uses `get_all_crossed_levels` instead of `simulate_fills` so consumed levels are filtered out while valid deeper levels are still found (`mod.rs:4380,4402,4540`). Trade ticks seed a per-trade consumption budget (`mod.rs:2473-2489`). FOK attempts journal and revert consumption if unfillable (`mod.rs:417-446`). Synthetic fill-model books and L1 trigger-price fills deliberately skip consumption (`mod.rs:4715-4737`).
 
 ### 6. Market status and halts
 
-- `OrderMatchingEngine::process_status` maps actions onto `market_status` (`mod.rs:2544-2568`): `Trading`/`PreOpen` from Closed/Paused/Suspended -> Open; `Pause` from Open -> Paused; `Suspend` from Open -> Suspended; and `Halt | Close` from Open -> Closed. There is no distinct Halt state: a halt is treated exactly as a close.
-- `SimulatedExchange::process_instrument_status` forwards the action to the matching engine (`crates/backtest/src/exchange.rs:1085-1108`).
-- Matching is gated on `market_status == MarketStatus::Open`: both `iterate_bids` and `iterate_asks` (fill and stop-trigger actions) run only inside that branch, so halts/closes stop new fills and triggers (`mod.rs:4065-4091`).
-- New orders are rejected while the market is not Open with a `Market <id> is <status>, cannot accept order ...` rejection (`mod.rs:3014-3022`).
-- Expiration forces the status to Closed and cancels open orders (`mod.rs:2649-2653`).
-- Auction behaviour: none was found. `PreOpen` only transitions the status to Open (`mod.rs:2548-2554`); there is no auction/uncrossing routine in the matching engine.
+- `OrderMatchingEngine::process_status` maps actions onto `market_status` (`mod.rs:2556-2580`): `Trading`/`PreOpen` from Closed/Paused/Suspended -> Open; `Pause` from Open -> Paused; `Suspend` from Open -> Suspended; and `Halt | Close` from Open -> Closed. There is no distinct Halt state: a halt is treated exactly as a close.
+- `SimulatedExchange::process_instrument_status` forwards the action to the matching engine (`crates/backtest/src/exchange.rs:1091-1114`).
+- Matching is gated on `market_status == MarketStatus::Open`: both `iterate_bids` and `iterate_asks` (fill and stop-trigger actions) run only inside that branch, so halts/closes stop new fills and triggers (`mod.rs:4077-4103`).
+- New orders are rejected while the market is not Open with a `Market <id> is <status>, cannot accept order ...` rejection (`mod.rs:3026-3034`).
+- Expiration forces the status to Closed and cancels open orders (`mod.rs:2661-2665`).
+- Auction behaviour: none was found. `PreOpen` only transitions the status to Open (`mod.rs:2560-2566`); there is no auction/uncrossing routine in the matching engine.
 
 ### 7. Partial fills
 
@@ -389,23 +454,36 @@ Partial fills do occur. There is no purely random partial-fill model; partial fi
 
 - Every fill model with finite synthetic level size produces partial fills when the order exceeds that size: `TwoTierFillModel` (10, `fill.rs:682-707`), `ThreeTierFillModel` (50/30/20, `fill.rs:784-823`), `LimitOrderPartialFillModel` (5, `fill.rs:899-924`), `SizeAwareFillModel` (10 or 50, `fill.rs:998-1021`), `CompetitionAwareFillModel` (`fill.rs:1104-1110`), `VolumeSensitiveFillModel` (`fill.rs:1196-1214`), and `MarketHoursFillModel` (500, `fill.rs:1301-1317`). `BestPriceFillModel` uses effectively unlimited size.
 - `DefaultFillModel` returns `None`, so partial fills come from the real book's available liquidity instead.
-- With `queue_position`, allowed fill quantity is capped by leaves quantity, remaining trade volume, and queue excess (`mod.rs:795-844,4853-4876`).
-- `apply_fills` caps each fill to the order's remaining quantity (`mod.rs:5148-5158`), and `fill_order` caps the fill quantity to leaves (`mod.rs:5399-5405`). Orders unfilled after an IOC are cancelled (`mod.rs:5200-5203`).
+- With `queue_position`, allowed fill quantity is capped by leaves quantity, remaining trade volume, and queue excess (`mod.rs:807-856,4865-4888`).
+- `apply_fills` caps each fill to the order's remaining quantity (`mod.rs:5173-5183`), and `fill_order` caps the fill quantity to leaves (`mod.rs:5424-5430`). Orders unfilled after an IOC are cancelled (`mod.rs:5225-5228`).
+
+### 8. Slippage models
+
+Slippage is its own concern, separate from the fill model and the fee model:
+
+- The `SlippageModel` trait has one method, `is_slipped() -> bool`, and answers only whether a fill price moves one tick against the order direction (`crates/execution/src/models/slippage.rs:33-40`). `SlippageModelHandle` is the shared runtime handle (`slippage.rs:43-75`).
+- `ProbabilisticSlippageModel` is the built-in implementation. It holds `prob_slippage` and `random_seed` in a `ProbabilisticFillState`, exactly as the fill models do, so a seeded model reproduces its draws and a decomposed configuration reproduces a composite one draw for draw (`slippage.rs:83-134`). `SlippageModelAny` is the runtime enum with that one variant (`slippage.rs:139-164`).
+- The matching engine holds `Option<SlippageModelHandle>` next to the fill and fee models (`mod.rs:116`) and `set_slippage_model` replaces it (`mod.rs:554-562`). When it is `Some`, `apply_fills` consults it and does not consult the fill model's own slippage; when it is `None`, the fill model decides (`mod.rs:5124-5142`).
+- `SimulatedVenueConfig.slippage_model` is `Option<SlippageModelHandle>` (`config.rs:301-306`) and `BacktestVenueConfig.slippage_model` is `Option<SlippageModelAny>` (`config.rs:549-554`, accessor `config.rs:794-798`); `BacktestNode` maps it to a handle (`node.rs:290-291,305`).
+- `SimulatedExchange` stores it (`exchange.rs:165`) and passes it to each matching engine it creates (`exchange.rs:256,541-543`). The sandbox client does the same (`crates/adapters/sandbox/src/execution.rs:164,173,912,1033-1035`), and its config field is runtime-only in serialization (`crates/adapters/sandbox/src/config.rs:101-114`).
+- `ProbabilisticSlippageModel` is exposed through `nautilus_trader.execution` (`crates/execution/src/python/mod.rs:57`), and `pyobject_to_slippage_model_any` converts it at the Python boundary (`crates/execution/src/python/slippage.rs:47-70`).
+
+The ordering the engine applies is: fill eligibility, then fill quantity, then base fill price, then the slippage adjustment, then the final fill price, then the fee. Slippage adjusts the base fill price by one price increment against the order direction on an L1 book, and the fee model is charged last, on the adjusted price and the fill quantity.
 
 ### Determinism and seeds
 
-All randomness is confined to the fill models; latency, fees, and the matching engine itself are deterministic given the same inputs. The `Isa_simulation`/random state lives in `ProbabilisticFillState`, which seeds `StdRng` with `random_seed` when provided and otherwise uses `default_std_rng` (`crates/execution/src/models/fill.rs:166-214,250-263`).
+All randomness is confined to the fill and slippage models; latency, fees, and the matching engine itself are deterministic given the same inputs. The random state lives in `ProbabilisticFillState`, which seeds `StdRng` with `random_seed` when provided and otherwise uses `default_std_rng` (`crates/execution/src/models/fill.rs:166-214,250-263`).
 
 | Random / time-dependent path          | Where                                                                                                 | Seed                                                                                                                                    | Citation                                                                                           |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | Limit-fill decision `is_limit_filled` | all eleven fill models, via `ProbabilisticFillState::is_limit_filled`                                 | `random_seed: Option<u64>` on each model constructor; fully deterministic when `prob_fill_on_limit` is `0.0`/`1.0` due to short-circuit | `fill.rs:179-214,294-296` (defaults)                                                               |
-| Slippage decision `is_slipped`        | all eleven fill models                                                                                | same `random_seed`; default `prob_slippage=0.0` is deterministic                                                                        | `fill.rs:202-208,294-296`                                                                          |
+| Slippage decision `is_slipped`        | all eleven fill models, or `ProbabilisticSlippageModel` when one is configured                        | same `random_seed`; default `prob_slippage=0.0` is deterministic                                                                        | `fill.rs:202-208,294-296`; `slippage.rs:83-134`                                                    |
 | One-tick-vs-best coin flip            | `ProbabilisticFillModel::get_orderbook_for_fill_simulation` (`random_bool(0.5)`)                      | same `random_seed`                                                                                                                      | `fill.rs:575-612`                                                                                  |
 | Seeded RNG                            | `StdRng::seed_from_u64(seed)` when a seed is supplied                                                 | explicit seed honored                                                                                                                   | `fill.rs:189-192`                                                                                  |
 | Unseeded RNG                          | `default_std_rng`: madsim `thread_rng` under a madsim runtime, otherwise `rand::rng()` (host entropy) | none -> not reproducible across runs                                                                                                    | `fill.rs:250-263`                                                                                  |
 | Venue/position IDs                    | `IdGen::generate*` uses `UUID4::new()` when `use_random_ids` is true                                  | `OrderMatchingEngineConfig.use_random_ids` (default `false`); trade IDs are always deterministic                                        | `config.rs:44-45`; `crates/execution/src/matching_engine/ids_generator.rs:194-197,242-243,267-268` |
-| Order submit/update/delete latency    | `ts_init + fixed duration`                                                                            | deterministic; no randomness                                                                                                            | `exchange.rs:859-886`                                                                              |
-| Fee and price arithmetic              | fee models, matching-engine price logic                                                               | deterministic; no randomness or wall-clock reads                                                                                        | `fee.rs:135-660`; `mod.rs:4357-4548`                                                               |
+| Order submit/update/delete latency    | `ts_init + fixed duration`                                                                            | deterministic; no randomness                                                                                                            | `exchange.rs:865-892`                                                                              |
+| Fee and price arithmetic              | fee models, matching-engine price logic                                                               | deterministic; no randomness or wall-clock reads                                                                                        | `fee.rs:135-660`; `mod.rs:4369-4560`                                                               |
 
 A `FillModelConfig` forwards `random_seed` to the model it resolves to (`fill.rs:1544-1623`), so a
 seeded configuration reproduces its draws across resolutions.

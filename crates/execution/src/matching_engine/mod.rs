@@ -83,6 +83,7 @@ use crate::{
     models::{
         fee::{FeeModel, FeeModelHandle},
         fill::{FillModel, FillModelHandle},
+        slippage::{SlippageModel, SlippageModelHandle},
     },
     protection::protection_price_calculate,
     trailing::trailing_stop_calculate,
@@ -112,6 +113,7 @@ pub struct OrderMatchingEngine {
     book: OrderBook,
     fill_model: FillModelHandle,
     fee_model: FeeModelHandle,
+    slippage_model: Option<SlippageModelHandle>,
     event_handler: Option<Rc<dyn Fn(OrderEventAny)>>,
     inflight_orders: InflightOrders,
     target_bid: Option<Price>,
@@ -198,6 +200,7 @@ impl OrderMatchingEngine {
             raw_id,
             fill_model,
             fee_model,
+            slippage_model: None,
             event_handler: None,
             inflight_orders: InflightOrders::default(),
             book_type,
@@ -546,6 +549,15 @@ impl OrderMatchingEngine {
         self.core
             .set_fill_limit_inside_spread(Self::fill_limit_inside_spread_or_false(&fill_model));
         self.fill_model = fill_model;
+    }
+
+    /// Sets an independent slippage model for the matching engine.
+    ///
+    /// When set, the model is the single source of the slippage decision and the fill model's
+    /// own slippage is not consulted. When unset, the fill model decides, which is the default
+    /// behavior.
+    pub fn set_slippage_model(&mut self, slippage_model: SlippageModelHandle) {
+        self.slippage_model = Some(slippage_model);
     }
 
     fn fill_limit_inside_spread_or_false(fill_model: &FillModelHandle) -> bool {
@@ -5109,10 +5121,23 @@ impl OrderMatchingEngine {
                 initial_market_to_limit_fill = true;
             }
 
-            if self.book_type == BookType::L1_MBP && self.fill_model.is_slipped()? {
-                fill_px = match order.order_side() {
-                    OrderSide::Buy => fill_px.add(self.instrument.price_increment()),
-                    OrderSide::Sell => fill_px.sub(self.instrument.price_increment()),
+            if self.book_type == BookType::L1_MBP {
+                // The slippage concern composes after the fill model: the model decides
+                // eligibility, quantity, and the base fill price first, and slippage then
+                // adjusts that price. An independent slippage model, when configured, is the
+                // single source of the decision and the fill model's own slippage is not
+                // consulted.
+                let is_slipped = if let Some(slippage_model) = self.slippage_model.as_mut() {
+                    slippage_model.is_slipped()?
+                } else {
+                    self.fill_model.is_slipped()?
+                };
+
+                if is_slipped {
+                    fill_px = match order.order_side() {
+                        OrderSide::Buy => fill_px.add(self.instrument.price_increment()),
+                        OrderSide::Sell => fill_px.sub(self.instrument.price_increment()),
+                    }
                 }
             }
 
