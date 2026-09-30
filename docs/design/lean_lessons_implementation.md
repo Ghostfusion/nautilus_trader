@@ -759,6 +759,86 @@ reproducible optimization golden scenario passes.
 Python orchestration layer becoming a second execution path for backtests. Mitigation: documented
 concurrency limit, explicit stage separation, and routing all execution through `BacktestNode`.
 
+**Delivered** in three commits. Step 1 (`21b258e1ba`) is `crates/analysis/src/objective.rs` with its
+Python binding: `Objective` is built from `ObjectiveTerm`s, each naming a metric, carrying a weight
+and a direction, and the score is the sum over terms in declaration order of `weight * direction *
+value` with the search maximising it; `Constraint` names a metric, a comparison and an inclusive
+bound and is evaluated against the same value map; the error type is a typed `ObjectiveError`
+(empty objective, unknown metric, missing value, non-finite weight or bound) surfacing in Python as
+`ValueError`. Metric names are the statistics' own names - `supported_metric_names()` builds them by
+constructing every built-in statistic and reading its `name()` or `Display`, so there is no
+hand-written name table to drift, and 34 names are supported, including `Sharpe Ratio (252 days)`
+and `Max Drawdown`. A value absent from the map is an error rather than a zero.
+
+Steps 2 to 6 (`5c091e708f`) are the package `python/nautilus_trader/optimization/`, deliberately ten
+single-concern modules rather than one: `space.py` (parameter model, deterministic expansion, a
+canonical digest per experiment), `search.py` (enumeration only, so a strategy never sees a result),
+`runner.py` (the single execution path), `metrics.py` (the statistics bridge), `report.py` (ranking
+and aggregation), `optimizer.py` (search, runner and objective tied together), `stages.py`, 
+`persistence.py`, and `concurrency.py`. Search and execution are separate: `GridSearch` enumerates
+and `BacktestRunner` executes exactly one experiment, building its run config and running it through
+`BacktestNode` - no engine is constructed and no run is reached into. A run that fails is recorded as
+a `FailedExperiment` carrying its error type and message and never aborts the sweep, and an
+objective or constraint that cannot be evaluated is recorded rather than scored as zero. Results are
+canonical backtest results plus the parameter set, comparable by digest: the run config id is the
+experiment digest, so the same experiment reproduces the same canonical digest and a random id would
+not (both were probed). Because a default run does not report every statistic an objective may name,
+`metrics.py` enumerates the classes exported by `nautilus_trader.analysis`, indexes them by their own
+`name`, and for a metric the run did not report feeds that run's `returns_series()` into a
+`PortfolioAnalyzer` with the statistic registered - the project's own Rust statistics, with no metric
+computed in Python. The methodology stages are explicit (`TrainStage`, `OptimizeStage`,
+`ValidateStage`, `OutOfSampleStage`, `WalkForwardStage` over `walk_forward_windows`), persistence is
+a digest-keyed store, and fan-out is a spawn-context process pool whose limit is memory-driven
+rather than CPU-driven: a measured per-run footprint became `DEFAULT_PER_RUN_BYTES` of 512 MiB with a
+0.75 memory fraction, giving 61 workers on a host with 57.9 GB available after the platform clamp.
+The subsystem is documented in `docs/concepts/optimization.md`.
+
+Step 7 (`d8d2ae468b`) adds the `optimize` command to `crates/cli/src/opt.rs` with its front end in
+`crates/cli/src/optimize.rs`, which resolves a Python interpreter, runs
+`python -m nautilus_trader.optimization.config <config>`, and relays the child's stdout; it holds no
+search, objective or aggregation code. The Python entry point
+`python/nautilus_trader/optimization/config.py` reads a strict JSON configuration (unknown keys
+rejected, the same convention as the config loader of W10) and emits one JSON document under the
+envelope schema `nautilus.optimization.cli/v1`, so the CLI and a notebook drive exactly the same
+code path. The notebook helper is `examples/backtest/notebooks/optimization_sweep.py`.
+
+The acceptance evidence, all observed:
+
+- the sweep against a hand run. The optimizer's best over a two-by-two grid is
+  `fast_ema_period=10, slow_ema_period=30` with score `-27.269647329463734` and canonical digest
+  `blake3:199f2eb6524925b88ebd6c5cfd0fdc599ec9dc3da3b736ac104178e1592f961f`, and running the same
+  experiment by hand through `BacktestNode` with the same deterministic run config id gives the same
+  score and the same digest; the test pins both literals so the comparison cannot pass vacuously;
+- the objective over Sharpe and maximum drawdown. With a weight of one on each and both maximised,
+  the score of each result equals its Sharpe plus its drawdown, a `Max Drawdown` constraint at
+  `-0.013` classifies exactly two of four results as feasible, and the best feasible result is the
+  `fast=5, slow=30` row - the sign convention matters, because drawdown is a negative fraction, so a
+  shallow drawdown is preferred by maximising it;
+- a failing run does not abort the sweep. The regression entry point was also driven with the
+  strategy module unimportable, and all four experiments were reported as failures with their
+  messages, `best` null, and exit 0;
+- the CLI and the Python API return identical results for the same configuration. Both were run over
+  the same config document and produced byte-identical stdout with sha256
+  `f5fab2c3eb570fe4e1a1e86d13c962d45b97bb0f7233a4eaae3da533f2b61ac8`, for a sweep of four
+  experiments with the best digest above, reproduced independently;
+- the golden scenario `optimization_golden` is registered in the regression registry, its
+  expectations were generated with `--regenerate-regression` and then verified by a clean re-run,
+  and it re-runs the selected experiment by hand through `BacktestNode`, asserting the hand run's
+  canonical digest equals the optimizer's reported best digest before regression comparison.
+
+Known limits, stated rather than glossed. Bridge equality with a Rust-produced value is
+independently established only for Sharpe, where the engine reports it and the bridged value is
+bit-identical; there is no engine-side maximum drawdown to compare against, so that value is
+equivalent by construction (the same Rust statistic) rather than cross-checked. The walk-forward
+test's out-of-sample window contains no trades on the sample data, so its out-of-sample score is
+NaN; the test proves the windows separate the data by the out-of-sample digest differing from the
+in-sample one, not out-of-sample profitability. Fan-out requires the run config factory to be
+picklable, so the child rebuilds the venue, data and engine configs; objective and constraint
+evaluation always happens in the parent, which is what keeps fan-out and sequential scoring
+identical. Not exercised by tests: a custom non-grid `SearchStrategy`, `ConstraintComparison::AtMost`,
+hard worker-crash propagation, the `ValidateStage` failure path, and persistence of non-finite
+metric values. The notebook helper was executed as a script, not inside a Jupyter kernel.
+
 ## 11. W9: research API over shared primitives (L7)
 
 **Objective.** Notebook workflows over the same primitives as backtests, without a second runtime.
@@ -784,6 +864,34 @@ for the same data; the module imports only catalog, wrangler, and indicator code
 
 **Risks.** A divergent second data path. Mitigation: reuse the catalog and wrangler code paths, and
 assert equality against a backtest in a test.
+
+**Delivered** in commit `24244c8231`. `python/nautilus_trader/analysis/research.py` exposes
+`ResearchData`, which opens a `ParquetDataCatalog` and returns typed Nautilus objects through the
+existing bindings (`instruments`, `bars`, `quote_ticks`, `trade_ticks`, and the generic `data`),
+plus `to_dataframe`, which delegates to `query_catalog` in
+`python/nautilus_trader/persistence/catalog_to_df.py` rather than reading parquet directly. Two
+module functions carry the notebook workflow: `replay` yields items in ascending `ts_init` order,
+and `compute_indicator` feeds each replayed item to the indicator object the caller supplies and
+returns the value after each one, so the indicator series a notebook sees is the series a strategy
+sees. No indicator implementation was added. The example
+`examples/backtest/notebooks/catalog_research_indicator.py` loads a catalog, computes an indicator
+over the replayed data, and prints it, in the jupytext style of the other examples in that
+directory.
+
+The equality evidence is `python/tests/integration/test_research_api.py`, which builds a temporary
+catalog from the repository's `btc-perp-20211231-20220201_1m.csv` fixture and an
+`ExponentialMovingAverage(10)` over `BTCUSDT.BINANCE-1-MINUTE-LAST-EXTERNAL`, then compares the
+research path against a `BacktestNode` run whose strategy records the same indicator in `on_bar`.
+Both series have 120 values and are element-wise identical by exact float equality, from `46377.0`
+at the first bar to `46673.042432056885` at the last. The import set is the concrete evidence for
+the no-second-data-path criterion: the module imports only `Bar`, `QuoteTick`, `TradeTick`,
+`NautilusDataType`, `ParquetDataCatalog`, `CatalogOutput`, and `query_catalog`, with no pandas or
+pyarrow import (the frame library is chosen inside `query_catalog`), no backtest import, and no
+indicator import. A wrangler is deliberately not imported: typed bars come from
+`ParquetDataCatalog.query_bars`, which already runs the same wranglers `BacktestNode` uses, so a
+direct wrangler import in this module would be dead weight rather than reuse. Two per-file ruff
+ignores were added to `python/pyproject.toml` for the new module, mirroring the existing exemption
+for `catalog_to_df.py`.
 
 ## 12. W10: optional configuration serialization (L8)
 
@@ -835,6 +943,52 @@ reads; `inspect` lists data types, instruments, and coverage; no credentials are
 
 **Risks.** Scope growth into a data platform. Mitigation: the five documented subcommands are the
 whole added surface, alongside the existing `migrate-parquet`.
+
+**Delivered** in commit `58699eff1f`. `crates/cli/src/catalog.rs` holds the five subcommands and
+`crates/cli/src/opt.rs` their arguments, with dispatch in `crates/cli/src/lib.rs`; `migrate-parquet`,
+`database`, and `blockchain` are unchanged. Each subcommand prints exactly one JSON document on
+stdout under the envelope schema `nautilus.catalog.cli/v1`, with console logging disabled by default
+(set `NAUTILUS_LOG` to keep it) so that stdout is machine-readable for CI, and with failure
+distinguishable from an empty result by exit status as well as content.
+
+`validate` runs the schema and layout preflight (`build_catalog_migration_plan`) and then forces a
+decode of every data family through `CatalogReader::query_batch`; `inspect` reports data types,
+identifiers, file counts and coverage via `ParquetDataCatalog::{list_data_types,
+list_directory_stems, get_directory_intervals}` plus `CatalogReader::instruments`; `convert` reads
+the source with `CatalogReader::query_batch` and writes it with `CatalogWriter::write_data_batch`,
+resolving a directory name to a data family or to an instrument class. The observed evidence:
+
+- `validate` on a catalog whose bars file was overwritten with `not a parquet file` exits 1 with the
+  Parquet reader's own error: `catalog schema preflight failed: Parquet error: Invalid Parquet file.
+  Corrupt footer`, and the same error again from the decode sweep. No parallel validator was written;
+  a clean catalog exits 0 with an empty `problems` array, so the two are distinguishable by both
+  output and status.
+- `convert` of a catalog built from the repository fixture reports `{"data_type":"Bar",
+  "directory":"bars","rows":120}` and `{"data_type":"Instrument","directory":"currency_pair",
+  "rows":1}`, and the produced directory is read back by the existing Python `BacktestNode` path,
+  which resolves `BTCUSDT.BINANCE`, adds 120 data elements, and reads 120 bars with a first close of
+  `46377.00`.
+- `inspect` of that catalog lists `bars` with identifier
+  `BTCUSDT.BINANCE-1-MINUTE-LAST-EXTERNAL` and coverage
+  `1640991660000000000` to `1640998800000000000`, `currency_pair` with `BTCUSDT.BINANCE`, and the
+  resolved instrument class `SPOT`.
+- No credentials are written: `download` reads any provider key from the environment only, and no
+  command writes a credential file.
+
+`download` and `generate` are declared because section 13 names them, but they have no
+implementation and are not stubs: each emits `status unsupported` with the missing prerequisite and
+exits 1, writing nothing. `download` would need an adapter data-loader dependency and a provider API
+key from the environment (the loader exists, for example
+`crates/adapters/databento/src/loader.rs`, but it is not in the CLI's dependency set); `generate`
+would need a Rust market-data generator, which does not exist (the `generate_*` helpers in
+`crates/backtest/benches/engine.rs` are benchmark-local and `TestOrdersGenerator` in
+`crates/model/src/orders/stubs.rs` emits orders). Also not covered: custom data types and record
+families appear in `skipped` with a reason unless a decoder is registered, and `inspect` coverage
+comes from catalog file-name timestamp ranges rather than row contents. The `migrate-parquet` command
+fails on this Windows host with `os error 123` from a `\\?\` path normalisation the local object
+store rejects; its own unmodified test fails identically, independently confirmed, so it is a
+pre-existing persistence defect rather than a regression, and it is why the acceptance evidence above
+used a catalog built in process and from Python.
 
 ## 14. Sequencing
 
