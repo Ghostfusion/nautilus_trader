@@ -33,6 +33,7 @@ pub fn backtest(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::config::BacktestEngineConfig>()?;
     m.add_class::<crate::config::BacktestVenueConfig>()?;
     m.add_class::<crate::config::BacktestDataConfig>()?;
+    m.add_class::<crate::config::DataAdjustment>()?;
     m.add_class::<crate::config::BacktestRunConfig>()?;
     m.add_class::<crate::result::BacktestResult>()?;
     m.add_class::<crate::result::CanonicalBacktestResult>()?;

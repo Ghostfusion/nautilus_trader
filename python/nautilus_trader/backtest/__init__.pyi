@@ -29,6 +29,7 @@ __all__ = [
     "CanonicalBacktestResult",
     "CfdSwapModule",
     "CfdSwapRate",
+    "DataAdjustment",
     "FXRolloverInterestModule",
     "InterestRateRecord",
     "SimulationModule",
@@ -76,6 +77,8 @@ class BacktestDataConfig:
     def bar_types(self) -> list[str] | None: ...
     @property
     def optimize_file_loading(self) -> bool: ...
+    @property
+    def data_adjustment(self) -> DataAdjustment | None: ...
     def __new__(
         cls,
         data_type: model.NautilusDataType,
@@ -93,6 +96,7 @@ class BacktestDataConfig:
         bar_spec: model.BarSpecification | None = None,
         bar_types: typing.Sequence[str] | None = None,
         optimize_file_loading: bool | None = None,
+        data_adjustment: DataAdjustment | None = None,
         catalog_backend: persistence.CatalogBackend | None = None,
     ) -> BacktestDataConfig: ...
 
@@ -416,6 +420,16 @@ class CfdSwapRate:
         long_rate: decimal.Decimal,
         short_rate: decimal.Decimal,
     ) -> CfdSwapRate: ...
+
+@typing.final
+class DataAdjustment:
+    @property
+    def input(self) -> model.PriceRepresentation: ...
+    @property
+    def output(self) -> model.PriceRepresentation: ...
+    def __new__(
+        cls, input: model.PriceRepresentation, output: model.PriceRepresentation
+    ) -> DataAdjustment: ...
 
 @typing.final
 class FXRolloverInterestModule(SimulationModule):

@@ -37,7 +37,7 @@ use nautilus_execution::{
 };
 use nautilus_model::{
     accounts::margin_model::{MarginModelAny, MarginModelHandle},
-    data::{BarSpecification, BarType, NautilusDataType},
+    data::{BarSpecification, BarType, NautilusDataType, PriceRepresentation},
     enums::{AccountType, BookType, OmsType, OtoTriggerMode},
     identifiers::{ClientId, InstrumentId, TraderId, Venue},
     types::{Currency, Money},
@@ -793,6 +793,45 @@ impl BacktestVenueConfig {
     }
 }
 
+/// The price representations to convert between in the corporate action adjustment stage.
+///
+/// `input` is the representation the catalog prices are stored in and `output` the representation
+/// the run should consume. When `input` equals `output` the stage is a no-op and the data is
+/// passed through untouched, exactly as when the adjustment is unset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.backtest", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.backtest")
+)]
+pub struct DataAdjustment {
+    /// The representation the catalog prices are stored in.
+    pub input: PriceRepresentation,
+    /// The representation the run should consume.
+    pub output: PriceRepresentation,
+}
+
+impl DataAdjustment {
+    /// Creates a new [`DataAdjustment`].
+    #[must_use]
+    pub const fn new(input: PriceRepresentation, output: PriceRepresentation) -> Self {
+        Self { input, output }
+    }
+
+    /// Returns `true` if the conversion is a no-op, i.e. the representations are equal.
+    #[must_use]
+    pub const fn is_noop(&self) -> bool {
+        matches!(
+            (self.input, self.output),
+            (PriceRepresentation::Raw, PriceRepresentation::Raw)
+                | (PriceRepresentation::Adjusted, PriceRepresentation::Adjusted)
+        )
+    }
+}
+
 /// Represents the data configuration for one specific backtest run.
 #[derive(Debug, Clone, bon::Builder)]
 #[builder(finish_fn(name = build_inner, vis = ""))]
@@ -840,6 +879,11 @@ pub struct BacktestDataConfig {
     /// If directory-based file registration should be used for more efficient loading.
     #[builder(default)]
     optimize_file_loading: bool,
+    /// The optional corporate action adjustment stage applied to the loaded data.
+    ///
+    /// `None` (the default) leaves the catalog data untouched. A no-op combination
+    /// (`input == output`) is equivalent to `None`.
+    data_adjustment: Option<DataAdjustment>,
 }
 
 impl<S: backtest_data_config_builder::IsComplete> BacktestDataConfigBuilder<S> {
@@ -921,6 +965,26 @@ impl BacktestDataConfig {
             ConfigError::required_one_of(["instrument_id", "instrument_ids", "bar_types"]),
         );
 
+        if let Some(adjustment) = self.data_adjustment
+            && !adjustment.is_noop()
+        {
+            errors.check(
+                matches!(
+                    self.data_type,
+                    NautilusDataType::Bar
+                        | NautilusDataType::QuoteTick
+                        | NautilusDataType::TradeTick
+                ),
+                ConfigError::unsupported_value(
+                    "data_adjustment",
+                    format!(
+                        "cannot adjust {} data, which carries no prices",
+                        self.data_type
+                    ),
+                ),
+            );
+        }
+
         errors.into_result()
     }
 
@@ -997,6 +1061,12 @@ impl BacktestDataConfig {
     #[must_use]
     pub fn optimize_file_loading(&self) -> bool {
         self.optimize_file_loading
+    }
+
+    /// Returns the optional corporate action adjustment stage for this data config.
+    #[must_use]
+    pub fn data_adjustment(&self) -> Option<DataAdjustment> {
+        self.data_adjustment
     }
 
     /// Constructs identifier strings for catalog queries.
@@ -1285,6 +1355,63 @@ mod tests {
                 format!("{data_type} is not supported by BacktestDataConfig"),
             ),
         );
+    }
+
+    #[rstest]
+    #[case(NautilusDataType::Bar)]
+    #[case(NautilusDataType::QuoteTick)]
+    #[case(NautilusDataType::TradeTick)]
+    fn test_data_config_accepts_adjustment_for_price_family(#[case] data_type: NautilusDataType) {
+        let adjustment =
+            DataAdjustment::new(PriceRepresentation::Raw, PriceRepresentation::Adjusted);
+        let config = BacktestDataConfig::builder()
+            .data_type(data_type)
+            .catalog_path("/tmp/catalog".to_string())
+            .instrument_id(InstrumentId::from("ETH/USDT.BINANCE"))
+            .data_adjustment(adjustment)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.data_adjustment(), Some(adjustment));
+    }
+
+    #[rstest]
+    fn test_data_config_rejects_adjustment_for_non_price_family() {
+        let data_type = NautilusDataType::CorporateAction;
+        let error = BacktestDataConfig::builder()
+            .data_type(data_type.clone())
+            .catalog_path("/tmp/catalog".to_string())
+            .instrument_id(InstrumentId::from("ETH/USDT.BINANCE"))
+            .data_adjustment(DataAdjustment::new(
+                PriceRepresentation::Raw,
+                PriceRepresentation::Adjusted,
+            ))
+            .build()
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            ConfigError::unsupported_value(
+                "data_adjustment",
+                format!("cannot adjust {data_type} data, which carries no prices"),
+            ),
+        );
+    }
+
+    #[rstest]
+    fn test_data_config_allows_noop_adjustment_on_any_family() {
+        let config = BacktestDataConfig::builder()
+            .data_type(NautilusDataType::CorporateAction)
+            .catalog_path("/tmp/catalog".to_string())
+            .instrument_id(InstrumentId::from("ETH/USDT.BINANCE"))
+            .data_adjustment(DataAdjustment::new(
+                PriceRepresentation::Raw,
+                PriceRepresentation::Raw,
+            ))
+            .build()
+            .unwrap();
+
+        assert!(config.data_adjustment().unwrap().is_noop());
     }
 
     macro_rules! minimal_simulated_builder {

@@ -36,7 +36,7 @@ use nautilus_execution::{
 };
 use nautilus_model::{
     accounts::margin_model::MarginModelAny,
-    data::BarSpecification,
+    data::{BarSpecification, PriceRepresentation},
     enums::{AccountType, BookType, OmsType, OtoTriggerMode},
     identifiers::{ClientId, InstrumentId, TraderId},
     python::data::PyNautilusDataType,
@@ -59,6 +59,7 @@ use super::{
 };
 use crate::config::{
     BacktestDataConfig, BacktestEngineConfig, BacktestRunConfig, BacktestVenueConfig,
+    DataAdjustment,
 };
 
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -658,6 +659,43 @@ impl BacktestVenueConfig {
 
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 #[pyo3::pymethods]
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "PyO3 pymethods require `&self` receivers"
+)]
+impl DataAdjustment {
+    /// The price representations to convert between in the corporate action adjustment stage.
+    ///
+    /// `input` is the representation the catalog prices are stored in and `output` the representation
+    /// the run should consume. When `input` equals `output` the stage is a no-op and the data is
+    /// passed through untouched, exactly as when the adjustment is unset.
+    #[new]
+    #[pyo3(signature = (input, output))]
+    fn py_new(input: PriceRepresentation, output: PriceRepresentation) -> Self {
+        Self::new(input, output)
+    }
+
+    /// The representation the catalog prices are stored in.
+    #[getter]
+    #[pyo3(name = "input")]
+    fn py_input(&self) -> PriceRepresentation {
+        self.input
+    }
+
+    /// The representation the run should consume.
+    #[getter]
+    #[pyo3(name = "output")]
+    fn py_output(&self) -> PriceRepresentation {
+        self.output
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+#[pyo3::pymethods]
 impl BacktestDataConfig {
     /// Represents the data configuration for one specific backtest run.
     #[new]
@@ -677,6 +715,7 @@ impl BacktestDataConfig {
         bar_spec = None,
         bar_types = None,
         optimize_file_loading = None,
+        data_adjustment = None,
         catalog_backend = None,
     ))]
     #[expect(clippy::too_many_arguments)]
@@ -707,6 +746,7 @@ impl BacktestDataConfig {
         bar_spec: Option<BarSpecification>,
         bar_types: Option<Vec<String>>,
         optimize_file_loading: Option<bool>,
+        data_adjustment: Option<DataAdjustment>,
         catalog_backend: Option<pyo3::PyRef<'_, PyCatalogBackend>>,
     ) -> pyo3::PyResult<Self> {
         let data_type = data_type
@@ -740,6 +780,7 @@ impl BacktestDataConfig {
             .maybe_bar_spec(bar_spec)
             .maybe_bar_types(bar_types)
             .maybe_optimize_file_loading(optimize_file_loading)
+            .maybe_data_adjustment(data_adjustment)
             .build()
             .map_err(config_error_to_pyvalue_err)
     }
@@ -852,6 +893,13 @@ impl BacktestDataConfig {
     #[pyo3(name = "optimize_file_loading")]
     fn py_optimize_file_loading(&self) -> bool {
         self.optimize_file_loading()
+    }
+
+    /// Returns the optional corporate action adjustment stage for this data config.
+    #[getter]
+    #[pyo3(name = "data_adjustment")]
+    fn py_data_adjustment(&self) -> Option<DataAdjustment> {
+        self.data_adjustment()
     }
 
     fn __repr__(&self) -> String {

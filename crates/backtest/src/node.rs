@@ -20,7 +20,7 @@ use std::iter::Peekable;
 use ahash::{AHashMap, AHashSet};
 use nautilus_core::{Params, UnixNanos};
 use nautilus_model::{
-    data::{Data, HasTsInit, NautilusDataType},
+    data::{CorporateAction, Data, HasTsInit, NautilusDataType},
     enums::{BookType, OtoTriggerMode},
     identifiers::{InstrumentId, Venue},
     types::Money,
@@ -31,6 +31,7 @@ use nautilus_persistence::{
 };
 
 use crate::{
+    adjustment::{action_records, active_adjustment, apply_to_vec, build_series, convert_data},
     config::{BacktestDataConfig, BacktestRunConfig, SimulatedVenueConfig},
     engine::BacktestEngine,
     result::BacktestResult,
@@ -420,10 +421,14 @@ fn validate_configs(configs: &[BacktestRunConfig]) -> anyhow::Result<()> {
 
 fn run_oneshot(engine: &mut BacktestEngine, config: &BacktestRunConfig) -> anyhow::Result<()> {
     for data_config in config.data() {
-        let data = load_data(data_config, config.start(), config.end())?;
+        let mut data = load_data(data_config, config.start(), config.end())?;
         if data.is_empty() {
             log::warn!("No data found for config: {:?}", data_config.data_type());
             continue;
+        }
+        if let Some(adjustment) = active_adjustment(data_config.data_adjustment()) {
+            let actions = load_corporate_actions(data_config, config.start(), config.end())?;
+            data = apply_to_vec(data, &actions, adjustment)?;
         }
         engine.add_data(data, data_config.client_id(), false, false)?;
     }
@@ -453,11 +458,33 @@ fn run_streaming(
     let mut streams = Vec::with_capacity(catalogs.len());
 
     for (catalog, data_config) in catalogs.iter_mut().zip(data_configs) {
-        let result = dispatch_query(catalog, data_config, config.start(), config.end())?;
+        let adjustment = active_adjustment(data_config.data_adjustment());
+        let mut actions = Vec::new();
+        let result: Box<dyn Iterator<Item = anyhow::Result<Data>>> = if let Some(adjustment) =
+            adjustment
+        {
+            actions = load_corporate_actions(data_config, config.start(), config.end())?;
+            let series = build_series(&actions)?;
+            Box::new(
+                dispatch_query(catalog, data_config, config.start(), config.end())?
+                    .map(move |item| item.and_then(|data| convert_data(data, adjustment, &series))),
+            )
+        } else {
+            dispatch_query(catalog, data_config, config.start(), config.end())?
+        };
         let mut stream = result.peekable();
 
         match stream.peek() {
-            Some(Ok(_)) => streams.push(stream),
+            Some(Ok(_)) => {
+                streams.push(stream);
+                // Deliver the actions through the same merge so the ReplayKey orders them at
+                // their effective instants alongside the price series.
+                if !actions.is_empty() {
+                    let action_stream: Box<dyn Iterator<Item = anyhow::Result<Data>>> =
+                        Box::new(action_records(&actions).into_iter().map(Ok));
+                    streams.push(action_stream.peekable());
+                }
+            }
             // Surface a failed query in config order, before opening later ones
             Some(Err(_)) => {
                 stream.next().transpose()?;
@@ -597,6 +624,51 @@ fn load_data(
     let mut catalog = create_catalog(config)?;
     let result = dispatch_query(&mut catalog, config, run_start, run_end)?;
     result.collect::<Result<Vec<_>, _>>()
+}
+
+/// Loads the corporate action series for a data config's instruments over the run window.
+///
+/// The actions are queried from the same catalog as the data config, keyed by instrument ID, and
+/// are fully materialized before the price stream is opened so the adjustment can look ahead.
+fn load_corporate_actions(
+    config: &BacktestDataConfig,
+    run_start: Option<UnixNanos>,
+    run_end: Option<UnixNanos>,
+) -> anyhow::Result<Vec<CorporateAction>> {
+    let identifiers: Vec<String> = config
+        .get_instrument_ids()?
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    if identifiers.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut catalog = create_catalog(config)?;
+    catalog.reset_session();
+    let mut query = CatalogQuery::new(NautilusDataType::CorporateAction)
+        .with_identifiers(Some(identifiers))
+        .with_range(
+            max_opt(config.start_time(), run_start),
+            min_opt(config.end_time(), run_end),
+        );
+    let mut params = Params::new();
+    params.insert(
+        "optimize_file_loading".to_string(),
+        config.optimize_file_loading().into(),
+    );
+    query.params = Some(params);
+    let mut session = catalog.query_batch_session(&query, None)?;
+
+    let mut actions = Vec::new();
+    while let Some(batch) = session.next_batch()? {
+        for data in batch.to_data_vec_for_compat() {
+            if let Data::CorporateAction(action) = data {
+                actions.push(action);
+            }
+        }
+    }
+    Ok(actions)
 }
 
 fn dispatch_query(

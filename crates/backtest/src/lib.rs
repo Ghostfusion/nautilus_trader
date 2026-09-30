@@ -75,6 +75,7 @@
 #![allow(clippy::clone_on_copy)]
 
 pub mod accumulator;
+pub mod adjustment;
 pub mod config;
 pub mod data_client;
 pub mod data_iterator;
