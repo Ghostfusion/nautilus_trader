@@ -397,6 +397,7 @@ class BacktestVenueConfig:
         liquidation_cancel_open_orders: bool | None = None,
         instrument_fill_models: typing.Mapping[model.InstrumentId, typing.Any] | None = None,
         slippage_model: typing.Any | None = None,
+        market_impact_model: typing.Any | None = None,
     ) -> BacktestVenueConfig: ...
 
 @typing.final
@@ -522,6 +523,7 @@ class BacktestEngine:
         liquidation_cancel_open_orders: bool = True,
         instrument_fill_models: typing.Mapping[model.InstrumentId, typing.Any] | None = None,
         slippage_model: typing.Any | None = None,
+        market_impact_model: typing.Any | None = None,
     ) -> None: ...
     def change_fill_model(self, venue: model.Venue, fill_model: typing.Any) -> None: ...
     def add_data(

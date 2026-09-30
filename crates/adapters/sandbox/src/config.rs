@@ -20,7 +20,8 @@ use nautilus_core::collections::MapLike;
 use nautilus_execution::{
     matching_engine::config::OrderMatchingEngineConfig,
     models::{
-        fee::FeeModelAny, fill::FillModelAny, latency::LatencyModelAny, slippage::SlippageModelAny,
+        fee::FeeModelAny, fill::FillModelAny, latency::LatencyModelAny,
+        market_impact::MarketImpactModelAny, slippage::SlippageModelAny,
     },
 };
 use nautilus_model::{
@@ -112,6 +113,18 @@ pub struct SandboxExecutionClientConfig {
         deserialize_with = "deserialize_slippage_model"
     )]
     pub slippage_model: Option<SlippageModelAny>,
+    /// The optional independent market impact model for sandbox matching engines.
+    ///
+    /// When set, it moves the fill price of a liquidity-taking L1 fill against the order
+    /// direction by the number of increments it returns, after the slippage adjustment.
+    /// When unset, no market impact adjustment is applied, which is the default behavior.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_market_impact_model",
+        deserialize_with = "deserialize_market_impact_model"
+    )]
+    pub market_impact_model: Option<MarketImpactModelAny>,
     /// The latency model for sandbox matching engines.
     #[serde(
         default,
@@ -341,6 +354,37 @@ where
     }
 }
 
+fn serialize_market_impact_model<S>(
+    market_impact_model: &Option<MarketImpactModelAny>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match market_impact_model {
+        None => serializer.serialize_none(),
+        Some(_) => Err(serde::ser::Error::custom(
+            "SandboxExecutionClientConfig.market_impact_model is runtime-only and cannot be serialized",
+        )),
+    }
+}
+
+fn deserialize_market_impact_model<'de, D>(
+    deserializer: D,
+) -> Result<Option<MarketImpactModelAny>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<IgnoredAny>::deserialize(deserializer)?;
+
+    match value {
+        None => Ok(None),
+        Some(_) => Err(de::Error::custom(
+            "SandboxExecutionClientConfig.market_impact_model must be configured at runtime, not deserialized",
+        )),
+    }
+}
+
 fn deserialize_latency_model<'de, D>(deserializer: D) -> Result<Option<LatencyModelAny>, D::Error>
 where
     D: Deserializer<'de>,
@@ -362,7 +406,9 @@ mod tests {
         fee::{FeeModelAny, ProbabilityPriceFeeModel},
         fill::FillModelAny,
         latency::{LatencyModelAny, StaticLatencyModel},
+        market_impact::LinearMarketImpactModel,
     };
+    use nautilus_model::types::Quantity;
     use rstest::rstest;
     use rust_decimal_macros::dec;
 
@@ -381,6 +427,8 @@ mod tests {
         assert!(config.fee_model.is_none());
         assert!(config.fill_model.is_none());
         assert!(config.latency_model.is_none());
+        assert!(config.slippage_model.is_none());
+        assert!(config.market_impact_model.is_none());
         assert_eq!(config.bar_execution, expected.bar_execution);
         assert_eq!(config.trade_execution, expected.trade_execution);
         assert_eq!(config.use_position_ids, expected.use_position_ids);
@@ -502,6 +550,20 @@ mod tests {
                 DurationNanos::ZERO,
                 DurationNanos::ZERO,
             ))),
+            ..SandboxExecutionClientConfig::default()
+        };
+
+        let result = toml::Value::try_from(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    fn test_exec_config_toml_rejects_serializing_runtime_market_impact_model() {
+        let config = SandboxExecutionClientConfig {
+            market_impact_model: Some(MarketImpactModelAny::Linear(
+                LinearMarketImpactModel::new(Quantity::from("100"), 5).unwrap(),
+            )),
             ..SandboxExecutionClientConfig::default()
         };
 

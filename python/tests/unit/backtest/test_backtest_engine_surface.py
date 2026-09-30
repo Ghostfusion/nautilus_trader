@@ -41,6 +41,7 @@ from nautilus_trader.backtest import SimulationModuleContext
 from nautilus_trader.common import ImportableActorConfig
 from nautilus_trader.execution import BestPriceFillModel
 from nautilus_trader.execution import DefaultFillModel
+from nautilus_trader.execution import LinearMarketImpactModel
 from nautilus_trader.execution import MakerTakerFeeModel
 from nautilus_trader.execution import OneTickSlippageFillModel
 from nautilus_trader.execution import StaticLatencyModel
@@ -304,6 +305,7 @@ def test_add_venue_applies_static_latency_model() -> None:
     [
         ("margin_model", "MarginModel"),
         ("latency_model", "LatencyModel"),
+        ("market_impact_model", "MarketImpactModel"),
     ],
 )
 def test_add_venue_rejects_unsupported_models(
@@ -327,6 +329,30 @@ def test_add_venue_rejects_unsupported_models(
                 taker_rate=Decimal(0),
             ),
         )
+
+    engine.dispose()
+
+
+def test_add_venue_accepts_market_impact_model() -> None:
+    """
+    Test add venue accepts an independent market impact model.
+    """
+    engine = BacktestEngine(BacktestEngineConfig(bypass_logging=True, run_analysis=False))
+
+    engine.add_venue(
+        venue=Venue("SIM"),
+        oms_type=OmsType.NETTING,
+        account_type=AccountType.MARGIN,
+        starting_balances=[Money(1_000_000.0, USD)],
+        market_impact_model=LinearMarketImpactModel(
+            quantity_per_increment=Quantity.from_str("100"),
+            max_increments=5,
+        ),
+        fee_model=MakerTakerFeeModel(
+            maker_rate=Decimal(0),
+            taker_rate=Decimal(0),
+        ),
+    )
 
     engine.dispose()
 

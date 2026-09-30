@@ -35,7 +35,8 @@ use nautilus_execution::{
     models::fill::FillModelHandle,
     python::{
         fee::pyobject_to_fee_model_handle, fill::pyobject_to_fill_model_handle,
-        latency::pyobject_to_latency_model_any, slippage::pyobject_to_slippage_model_any,
+        latency::pyobject_to_latency_model_any, market_impact::pyobject_to_market_impact_model_any,
+        slippage::pyobject_to_slippage_model_any,
     },
 };
 #[cfg(feature = "defi")]
@@ -171,6 +172,7 @@ impl PyBacktestEngine {
             liquidation_cancel_open_orders = true,
             instrument_fill_models = None,
             slippage_model = None,
+            market_impact_model = None,
         )
     )]
     #[expect(
@@ -216,6 +218,7 @@ impl PyBacktestEngine {
         liquidation_cancel_open_orders: bool,
         instrument_fill_models: Option<HashMap<InstrumentId, Py<PyAny>>>,
         slippage_model: Option<Py<PyAny>>,
+        market_impact_model: Option<Py<PyAny>>,
     ) -> PyResult<()> {
         let leverages: AHashMap<InstrumentId, Decimal> = leverages
             .map(|m| m.into_iter().collect())
@@ -258,6 +261,10 @@ impl PyBacktestEngine {
             .map(|obj| Python::attach(|py| pyobject_to_slippage_model_any(obj.bind(py))))
             .transpose()?
             .map(Into::into);
+        let market_impact_model = market_impact_model
+            .map(|obj| Python::attach(|py| pyobject_to_market_impact_model_any(obj.bind(py))))
+            .transpose()?
+            .map(Into::into);
         let modules = modules
             .map(|objs| {
                 objs.into_iter()
@@ -283,6 +290,7 @@ impl PyBacktestEngine {
             .fill_model(fill_model)
             .instrument_fill_models(instrument_fill_models)
             .maybe_slippage_model(slippage_model)
+            .maybe_market_impact_model(market_impact_model)
             .fee_model(fee_model)
             .maybe_latency_model(latency_model)
             .routing(routing)
@@ -1878,6 +1886,7 @@ mod model_tests {
                     false,
                     None,
                     true,
+                    None,
                     None,
                     None,
                 )

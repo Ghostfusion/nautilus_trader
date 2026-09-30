@@ -83,6 +83,7 @@ use crate::{
     models::{
         fee::{FeeModel, FeeModelHandle},
         fill::{FillModel, FillModelHandle},
+        market_impact::{MarketImpactModel, MarketImpactModelHandle},
         slippage::{SlippageModel, SlippageModelHandle},
     },
     protection::protection_price_calculate,
@@ -114,6 +115,7 @@ pub struct OrderMatchingEngine {
     fill_model: FillModelHandle,
     fee_model: FeeModelHandle,
     slippage_model: Option<SlippageModelHandle>,
+    market_impact_model: Option<MarketImpactModelHandle>,
     event_handler: Option<Rc<dyn Fn(OrderEventAny)>>,
     inflight_orders: InflightOrders,
     target_bid: Option<Price>,
@@ -201,6 +203,7 @@ impl OrderMatchingEngine {
             fill_model,
             fee_model,
             slippage_model: None,
+            market_impact_model: None,
             event_handler: None,
             inflight_orders: InflightOrders::default(),
             book_type,
@@ -558,6 +561,16 @@ impl OrderMatchingEngine {
     /// behavior.
     pub fn set_slippage_model(&mut self, slippage_model: SlippageModelHandle) {
         self.slippage_model = Some(slippage_model);
+    }
+
+    /// Sets an independent market impact model for the matching engine.
+    ///
+    /// When set, the model moves the fill price of a liquidity-taking L1 fill against the
+    /// order direction by the number of increments it returns, after the slippage
+    /// adjustment. When unset, no market impact adjustment is applied, which is the default
+    /// behavior.
+    pub fn set_market_impact_model(&mut self, market_impact_model: MarketImpactModelHandle) {
+        self.market_impact_model = Some(market_impact_model);
     }
 
     fn fill_limit_inside_spread_or_false(fill_model: &FillModelHandle) -> bool {
@@ -5141,6 +5154,32 @@ impl OrderMatchingEngine {
                 }
             }
 
+            if self.book_type == BookType::L1_MBP && liquidity_side == LiquiditySide::Taker {
+                // Market impact composes after the slippage adjustment and applies only to
+                // liquidity-taking L1 fills: a taker walks the book, so a larger fill moves
+                // the price further against the order than the fixed one-tick slippage.
+                let tick = self.instrument.price_increment().as_decimal();
+
+                if let Some(market_impact_model) = self.market_impact_model.as_mut() {
+                    let increments = market_impact_model.impact_increments(fill_qty)?;
+
+                    if increments > 0 {
+                        let offset = tick * Decimal::from(increments);
+                        let adjusted = match order.order_side() {
+                            OrderSide::Buy => fill_px.as_decimal() + offset,
+                            OrderSide::Sell => fill_px.as_decimal() - offset,
+                        };
+
+                        fill_px = Price::from_decimal(adjusted).map_err(|e| {
+                            anyhow::anyhow!(
+                                "Market impact fill price invalid for {}: {e}",
+                                order.instrument_id()
+                            )
+                        })?;
+                    }
+                }
+            }
+
             let mut effective_fill_qty = fill_qty;
 
             if let Some(remaining) = reduce_only_remaining {
@@ -7194,6 +7233,7 @@ mod tests {
         models::{
             fee::{FeeModel, FeeModelAny, FeeModelHandle, MakerTakerFeeModel},
             fill::{FillModel, FillModelHandle},
+            market_impact::{LinearMarketImpactModel, MarketImpactModelHandle},
         },
     };
 
@@ -12061,5 +12101,94 @@ mod tests {
 
         assert!(rested >= 5, "replay must exercise resting orders");
         assert!(trades >= 50, "replay must exercise trade interleavings");
+    }
+
+    /// Runs a taker market order against a wide L1 ask, optionally with a market impact model.
+    ///
+    /// Returns the fill price of the resulting `OrderFilled` event, if one occurred.
+    fn taker_market_fill_price(
+        market_impact_model: Option<MarketImpactModelHandle>,
+    ) -> Option<Price> {
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt());
+        let instrument_id = instrument.id();
+        let cache = Rc::new(RefCell::new(Cache::default()));
+        let mut engine = OrderMatchingEngine::new(
+            instrument,
+            1,
+            FillModelHandle::default(),
+            FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into(),
+            BookType::L1_MBP,
+            OmsType::Netting,
+            AccountType::Margin,
+            Rc::new(RefCell::new(VirtualClock::new())),
+            Rc::clone(&cache),
+            Default::default(),
+        );
+
+        if let Some(model) = market_impact_model {
+            engine.set_market_impact_model(model);
+        }
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let events_handler = Rc::clone(&events);
+        engine.set_event_handler(Rc::new(move |event| {
+            events_handler.borrow_mut().push(event);
+        }));
+
+        let quote = QuoteTick::new(
+            instrument_id,
+            Price::from("1499.00"),
+            Price::from("1500.00"),
+            Quantity::from("100.000"),
+            Quantity::from("100.000"),
+            UnixNanos::default(),
+            UnixNanos::default(),
+        );
+        engine.process_quote_tick(&quote);
+
+        let mut order = OrderTestBuilder::new(OrderType::Market)
+            .instrument_id(instrument_id)
+            .client_order_id(ClientOrderId::from("O-IMPACT"))
+            .side(OrderSide::Buy)
+            .quantity(Quantity::from("30.000"))
+            .submit(true)
+            .build();
+        process_cached_order(&mut engine, &mut order, AccountId::from("ACCOUNT-001"));
+
+        events.borrow().iter().find_map(|event| match event {
+            OrderEventAny::Filled(fill) => Some(fill.last_px),
+            _ => None,
+        })
+    }
+
+    #[rstest]
+    fn test_market_impact_absent_leaves_taker_fill_price_unchanged() {
+        // The default path: no market impact model, so the taker fills at the best ask.
+        assert_eq!(taker_market_fill_price(None), Some(Price::from("1500.00")));
+    }
+
+    #[rstest]
+    fn test_market_impact_moves_taker_fill_by_size() {
+        // 30 units with one increment per 10 units is three increments above the ask.
+        let model = MarketImpactModelHandle::new(
+            LinearMarketImpactModel::new(Quantity::from("10.000"), 5).unwrap(),
+        );
+
+        assert_eq!(
+            taker_market_fill_price(Some(model)),
+            Some(Price::from("1500.03")),
+        );
+    }
+
+    #[rstest]
+    fn test_market_impact_reproduces_across_runs() {
+        let first = taker_market_fill_price(Some(MarketImpactModelHandle::new(
+            LinearMarketImpactModel::new(Quantity::from("10.000"), 5).unwrap(),
+        )));
+        let second = taker_market_fill_price(Some(MarketImpactModelHandle::new(
+            LinearMarketImpactModel::new(Quantity::from("10.000"), 5).unwrap(),
+        )));
+
+        assert_eq!(first, second);
     }
 }

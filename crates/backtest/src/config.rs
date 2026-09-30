@@ -33,6 +33,7 @@ use nautilus_execution::{
         fee::{FeeModelAny, FeeModelHandle},
         fill::{FillModelAny, FillModelHandle},
         latency::{LatencyModelAny, LatencyModelHandle},
+        market_impact::{MarketImpactModelAny, MarketImpactModelHandle},
         slippage::{SlippageModelAny, SlippageModelHandle},
     },
 };
@@ -304,6 +305,12 @@ pub struct SimulatedVenueConfig {
     /// own slippage is not consulted. When unset, the fill model decides, which is the default
     /// behavior.
     pub slippage_model: Option<SlippageModelHandle>,
+    /// The optional model used to simulate market impact for liquidity-taking L1 fills.
+    ///
+    /// When set, it moves the fill price of a taker fill against the order direction by the
+    /// number of increments it returns, after the slippage adjustment. When unset, no market
+    /// impact adjustment is applied, which is the default behavior.
+    pub market_impact_model: Option<MarketImpactModelHandle>,
     /// The model used to calculate trading fees.
     ///
     /// Must be configured explicitly, including an explicit zero-fee model.
@@ -551,6 +558,12 @@ pub struct BacktestVenueConfig {
     /// model's own slippage is not consulted. When unset, the fill model decides, which is
     /// the default behavior.
     slippage_model: Option<SlippageModelAny>,
+    /// The optional independent market impact model for the venue.
+    ///
+    /// When set, it moves the fill price of a liquidity-taking L1 fill against the order
+    /// direction by the number of increments it returns, after the slippage adjustment.
+    /// When unset, no market impact adjustment is applied, which is the default behavior.
+    market_impact_model: Option<MarketImpactModelAny>,
     /// The latency model for the venue.
     latency_model: Option<LatencyModelAny>,
     /// The fee model for the venue.
@@ -794,6 +807,11 @@ impl BacktestVenueConfig {
     #[must_use]
     pub fn slippage_model(&self) -> Option<&SlippageModelAny> {
         self.slippage_model.as_ref()
+    }
+
+    #[must_use]
+    pub fn market_impact_model(&self) -> Option<&MarketImpactModelAny> {
+        self.market_impact_model.as_ref()
     }
 
     #[must_use]

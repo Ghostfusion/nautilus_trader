@@ -17,12 +17,14 @@
 
 use nautilus_execution::{
     models::{
-        fee::FeeModelAny, fill::FillModelAny, latency::LatencyModelAny, slippage::SlippageModelAny,
+        fee::FeeModelAny, fill::FillModelAny, latency::LatencyModelAny,
+        market_impact::MarketImpactModelAny, slippage::SlippageModelAny,
     },
     python::{
         fee::{fee_model_any_to_pyobject, pyobject_to_fee_model_any},
         fill::{fill_model_any_to_pyobject, pyobject_to_fill_model_any},
         latency::{latency_model_any_to_pyobject, pyobject_to_latency_model_any},
+        market_impact::{market_impact_model_any_to_pyobject, pyobject_to_market_impact_model_any},
         slippage::{pyobject_to_slippage_model_any, slippage_model_any_to_pyobject},
     },
 };
@@ -41,7 +43,7 @@ use crate::config::SandboxExecutionClientConfig;
 impl SandboxExecutionClientConfig {
     /// Configuration for `SandboxExecutionClient` instances.
     #[new]
-    #[pyo3(signature = (venue, starting_balances, account_id=None, base_currency=None, oms_type=None, account_type=None, default_leverage=None, book_type=None, frozen_account=false, bar_execution=true, trade_execution=true, reject_stop_orders=true, support_gtd_orders=true, support_contingent_orders=true, use_position_ids=true, use_random_ids=false, use_reduce_only=true, fee_model=None, fill_model=None, queue_position=false, liquidity_consumption=false, bar_adaptive_high_low_ordering=false, use_market_order_acks=false, oto_full_trigger=false, price_protection_points=None, latency_model=None, instrument_fill_models=None, slippage_model=None))]
+    #[pyo3(signature = (venue, starting_balances, account_id=None, base_currency=None, oms_type=None, account_type=None, default_leverage=None, book_type=None, frozen_account=false, bar_execution=true, trade_execution=true, reject_stop_orders=true, support_gtd_orders=true, support_contingent_orders=true, use_position_ids=true, use_random_ids=false, use_reduce_only=true, fee_model=None, fill_model=None, queue_position=false, liquidity_consumption=false, bar_adaptive_high_low_ordering=false, use_market_order_acks=false, oto_full_trigger=false, price_protection_points=None, latency_model=None, instrument_fill_models=None, slippage_model=None, market_impact_model=None))]
     #[expect(clippy::too_many_arguments)]
     fn py_new(
         venue: Venue,
@@ -72,6 +74,7 @@ impl SandboxExecutionClientConfig {
         latency_model: Option<Py<PyAny>>,
         instrument_fill_models: Option<std::collections::HashMap<InstrumentId, Py<PyAny>>>,
         slippage_model: Option<Py<PyAny>>,
+        market_impact_model: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         // Generate the default account ID from the venue
         let account_id =
@@ -101,6 +104,9 @@ impl SandboxExecutionClientConfig {
         let slippage_model: Option<SlippageModelAny> = slippage_model
             .map(|obj| Python::attach(|py| pyobject_to_slippage_model_any(obj.bind(py))))
             .transpose()?;
+        let market_impact_model: Option<MarketImpactModelAny> = market_impact_model
+            .map(|obj| Python::attach(|py| pyobject_to_market_impact_model_any(obj.bind(py))))
+            .transpose()?;
 
         Ok(Self {
             account_id,
@@ -117,6 +123,7 @@ impl SandboxExecutionClientConfig {
             instrument_fill_models,
             latency_model,
             slippage_model,
+            market_impact_model,
             frozen_account,
             bar_execution,
             trade_execution,
@@ -217,6 +224,14 @@ impl SandboxExecutionClientConfig {
         self.slippage_model
             .as_ref()
             .map(|model| slippage_model_any_to_pyobject(py, model))
+            .transpose()
+    }
+
+    #[getter]
+    fn market_impact_model(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        self.market_impact_model
+            .as_ref()
+            .map(|model| market_impact_model_any_to_pyobject(py, model))
             .transpose()
     }
 

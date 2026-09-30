@@ -20,6 +20,7 @@ use std::{collections::BTreeMap, iter::Peekable};
 use ahash::{AHashMap, AHashSet};
 use nautilus_core::{Params, UnixNanos};
 use nautilus_execution::models::fill::FillModelHandle;
+use nautilus_execution::models::market_impact::MarketImpactModelHandle;
 use nautilus_execution::models::slippage::SlippageModelHandle;
 use nautilus_model::{
     data::{CorporateAction, Data, HasTsInit, NautilusDataType},
@@ -289,6 +290,8 @@ fn build_engine(config: &BacktestRunConfig) -> anyhow::Result<BacktestEngine> {
         let latency_model = venue_config.latency_model().cloned().map(Into::into);
         let slippage_model: Option<SlippageModelHandle> =
             venue_config.slippage_model().cloned().map(Into::into);
+        let market_impact_model: Option<MarketImpactModelHandle> =
+            venue_config.market_impact_model().cloned().map(Into::into);
         let sim_config = SimulatedVenueConfig::builder()
             .venue(Venue::from(venue_config.name().as_str()))
             .oms_type(venue_config.oms_type())
@@ -303,6 +306,7 @@ fn build_engine(config: &BacktestRunConfig) -> anyhow::Result<BacktestEngine> {
             .fill_model(fill_model)
             .instrument_fill_models(instrument_fill_models)
             .maybe_slippage_model(slippage_model)
+            .maybe_market_impact_model(market_impact_model)
             .fee_model(fee_model)
             .maybe_latency_model(latency_model)
             .routing(venue_config.routing())

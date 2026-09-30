@@ -19,6 +19,7 @@ __all__ = [
     "FillModelKind",
     "FixedFeeModel",
     "LimitOrderPartialFillModel",
+    "LinearMarketImpactModel",
     "MakerTakerFeeModel",
     "MarketHoursFillModel",
     "OneTickSlippageFillModel",
@@ -210,6 +211,10 @@ class LimitOrderPartialFillModel:
     def __init__(
         self, prob_fill_on_limit: float, prob_slippage: float, random_seed: int | None = ...
     ) -> None: ...
+
+@typing.final
+class LinearMarketImpactModel:
+    def __init__(self, quantity_per_increment: model.Quantity, max_increments: int) -> None: ...
 
 @typing.final
 class MakerTakerFeeModel(FeeModel):

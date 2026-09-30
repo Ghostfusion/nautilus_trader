@@ -486,6 +486,58 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
    so the draws are not vacuous. The reproduction holds for a composite whose fill decision is
    deterministic; the limitation below records the boundary.
 
+8. Steps 5 and 6, the optional model additions. Each candidate the design names was evaluated on its
+   own merits and on its own seam, and one was adopted: market impact.
+   `crates/execution/src/models/market_impact.rs` introduces the `MarketImpactModel` concern, whose
+   `impact_increments(fill_quantity)` returns the number of price increments a fill moves against
+   the order direction (`market_impact.rs:45-54`), a shared `MarketImpactModelHandle`
+   (`market_impact.rs:58-90`), and the built-in `LinearMarketImpactModel`
+   (`market_impact.rs:110-160`). The model moves the price one increment for every
+   `quantity_per_increment` units filled, capped at `max_increments`, using exact decimal division
+   and a floor, so it is deterministic and takes no random seed: no second random state is
+   introduced and `ProbabilisticFillState` is untouched. The matching engine carries an optional
+   model (`crates/execution/src/matching_engine/mod.rs:118`), set with `set_market_impact_model`
+   (`mod.rs:566-574`), and applies it to a liquidity-taking L1 fill after the slippage adjustment
+   (`mod.rs:5157-5190`); an L2/L3 fill, a resting maker fill, or a model that returns zero leaves
+   the price unchanged. It is configured through `market_impact_model` on `SimulatedVenueConfig`
+   (`crates/backtest/src/config.rs:313`), `BacktestVenueConfig` (`config.rs:566`, accessor
+   `config.rs:813-815`), `BacktestEngine.add_venue`, and `SandboxExecutionClientConfig`
+   (`crates/adapters/sandbox/src/config.rs:118-127`), mapped on the node path
+   (`crates/backtest/src/node.rs:293-295,309`) and set on each sandbox matching engine
+   (`crates/adapters/sandbox/src/execution.rs:166-168,179,919,1043-1045`), so backtest and sandbox
+   stay at parity. `LinearMarketImpactModel` is exposed through `nautilus_trader.execution`
+   (`crates/execution/src/python/mod.rs:59`). The field is absent by default, so a venue that sets
+   none adjusts no fill price for size.
+
+   The four candidates not adopted, each for a specific reason:
+
+   - Spread. The synthetic spread belongs to the fill model: the models that supply or widen it
+     (`MarketHoursFillModel`'s normal or one-tick-wider book, `BestPriceFillModel`,
+     `OneTickSlippageFillModel`) build the synthetic book the engine fills against, so a separate
+     spread model would be a second owner of that book and would duplicate those models rather than
+     add a capability.
+   - Partial-fill policy. Fill quantity is the fill model's concern in the documented ordering, and
+     partial fills already arise from finite synthetic level sizes (`TwoTierFillModel`,
+     `ThreeTierFillModel`, `LimitOrderPartialFillModel`, `SizeAwareFillModel`,
+     `CompetitionAwareFillModel`, `VolumeSensitiveFillModel`, `MarketHoursFillModel`) and from queue
+     position. A separate policy would be a second owner of fill quantity, not a new capability.
+   - Borrow and locate availability for short selling. The simulated path has no locate data source
+     and no seam: the only borrow concept is the `CashAccount::allow_borrowing` flag, and a margin
+     account's short capacity is derived from the margin model, which exposes no availability hook.
+     A locate model would have to invent a per-instrument borrow source and consumption accounting
+     across the account layer, which is a new capability rather than an opt-in model with an
+     existing seam.
+   - Auction and halt policy. Halt is already a `MarketStatus` transition in
+     `OrderMatchingEngine::process_status`, so a halt policy would duplicate it, and the matching
+     engine has no auction or uncrossing routine for an auction policy to hook into. Auction
+     behaviour is an engine capability, not an opt-in execution model.
+
+   Step 6 for the adopted model: it is deterministic (no seed is required), opt-in (absent by
+   default), and unit tested for exactness, capping, and repeatability
+   (`market_impact.rs:214-280`), with the engine hook covered by
+   `matching_engine/mod.rs:12174-12202`: the default path fills at the best ask and a configured
+   model of one increment per 10 units fills three increments above it, reproducibly.
+
 **Not implemented yet.**
 
 - The decomposition boundary for a stochastic composite. A composite fill model draws its
@@ -504,10 +556,9 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
   declare and nothing the engine could inherit from: the level would be a setting with no effect
   unless the order path itself changed. The delivered chain therefore ends at the per-instrument
   override.
-- Step 5, the optional model additions: market impact, spread, partial-fill policy, borrow and locate
-  availability for short selling, and auction and halt policy.
-- Steps 6 and 7 apply to those additions: each must be deterministic, taking an explicit seed where
-  randomness is involved, and each added model needs a golden scenario.
+- Step 7, the golden scenario for the adopted market impact model. Step 5 evaluated the candidate
+  additions and step 6 implemented market impact; step 7 pins its canonical document in a declared
+  regression scenario and is not part of this change.
 
 **Boundary.** Engine and research. Models are used by both backtest and sandbox execution.
 
@@ -522,7 +573,9 @@ with matching canonical digests; the decomposition boundary above records where 
 stops. Each new model is independently selectable and leaves the default path byte-identical,
 seeded models reproduce across runs, and existing fill variants continue to pass their tests
 unchanged. The `slippage_model` field is absent by default, so a venue that sets none resolves
-slippage exactly as before.
+slippage exactly as before. Steps 5 and 6 are separately complete when every candidate addition has
+a recorded decision with its reason, the adopted market impact model is deterministic and opt-in,
+and the `market_impact_model` field is absent by default so the default path stays byte-identical.
 
 **Node path.** `python/tests/integration/test_backtest_node_bar_fills.py` runs a node over a
 synthetic bar catalog with a strategy that submits a market order from `on_bar` and asserts that the
@@ -531,8 +584,8 @@ differs from the same run without the order. The bar establishes the market befo
 it, so a fill needs no quote or trade data. The same test configures the venue with a
 `OneTickSlippage` configuration and asserts the canonical document differs from the default one, so
 the configuration layer reaches the matching engine on the node path, which is the path a later step
-needs for a golden scenario over a new model. The venue-level `slippage_model` field is mapped on
-the same path.
+needs for a golden scenario over a new model. The venue-level `slippage_model` and
+`market_impact_model` fields are mapped on the same path.
 
 **Migration invariant.** Separating an abstraction must not automatically change simulation
 semantics. This is the acceptance criterion that makes the staged migration safe.

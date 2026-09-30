@@ -105,6 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fill_model: None,
         instrument_fill_models: ahash::AHashMap::new(),
         slippage_model: None,
+        market_impact_model: None,
         latency_model: None,
         frozen_account: false,
         bar_execution: true,

@@ -272,10 +272,64 @@ The concerns compose in one order, and it is the order the matching engine appli
    determines how much fills and at what base price.
 3. Slippage adjustment: the slippage model decides whether the base fill price moves one price
    increment against the order direction (BUY up, SELL down) on an L1 book.
-4. Final fill price: the adjusted price is the price recorded on the fill event.
-5. Fee: the fee model is charged on the final fill price and the fill quantity.
+4. Market impact adjustment: the market impact model, when a venue sets one, moves the price of
+   a liquidity-taking L1 fill by a size-dependent number of increments against the order
+   direction.
+5. Final fill price: the adjusted price is the price recorded on the fill event.
+6. Fee: the fee model is charged on the final fill price and the fill quantity.
 
-Slippage therefore changes the price the fee model sees, and never changes eligibility or quantity.
+Slippage therefore changes the price the fee model sees, and never changes eligibility or
+quantity. Market impact composes after slippage and never changes eligibility or quantity.
+
+### Independent market impact
+
+Fill and slippage are configured independently of market impact. A venue can set a market impact
+model so that a large liquidity-taking order is filled further through the book than a small one:
+
+```python
+from decimal import Decimal
+
+from nautilus_trader.config import BacktestVenueConfig
+from nautilus_trader.execution import DefaultFillModel
+from nautilus_trader.execution import LinearMarketImpactModel
+from nautilus_trader.execution import MakerTakerFeeModel
+from nautilus_trader.model import AccountType
+from nautilus_trader.model import BookType
+from nautilus_trader.model import OmsType
+from nautilus_trader.model import Quantity
+
+venue = BacktestVenueConfig(
+    name="SIM",
+    oms_type=OmsType.NETTING,
+    account_type=AccountType.CASH,
+    book_type=BookType.L1_MBP,
+    starting_balances=["100_000 USD"],
+    fill_model=DefaultFillModel(prob_fill_on_limit=1.0, prob_slippage=0.0),
+    market_impact_model=LinearMarketImpactModel(
+        quantity_per_increment=Quantity.from_str("10.000"),
+        max_increments=5,
+    ),
+    fee_model=MakerTakerFeeModel(
+        maker_rate=Decimal("0"),
+        taker_rate=Decimal("0"),
+    ),
+)
+```
+
+`LinearMarketImpactModel` moves the fill price of a liquidity-taking (taker) L1 fill against the
+order direction by one price increment for every `quantity_per_increment` units filled, capped at
+`max_increments`. A fill smaller than one increment quantity is unchanged. The adjustment is
+computed with exact decimal arithmetic on the fill quantity, so it is deterministic and takes no
+random seed.
+
+It is accepted wherever a venue is configured: `BacktestVenueConfig`,
+`BacktestEngine.add_venue`, and `SandboxExecutionClientConfig`. The field is optional and defaults
+to no model: a venue that sets none does not adjust a fill price for size, which is the default
+behavior.
+
+Market impact applies only to liquidity-taking fills on an L1 book. On L2 or L3 books the recorded
+book already determines how far an order walks, and a resting (maker) fill does not move the price
+against itself.
 
 ### Custom fill models
 
@@ -339,7 +393,7 @@ must represent any desired consumption behavior in the books it returns.
 
 ## Execution realism inventory
 
-This section describes the execution-realism code as it exists at the time of writing, based on a direct read of the Rust sources. The model traits and all built-in model implementations live in `crates/execution/src/models/` (fee.rs, fill.rs, latency.rs); the matching engine that applies them lives in `crates/execution/src/matching_engine/` (mod.rs and config.rs); and the backtest wiring that lets a venue select and inject them lives in `crates/backtest/src/` (config.rs, node.rs, exchange.rs). The sandbox adapter mirrors the same wiring in `crates/adapters/sandbox/src/`. Every claim below is cited to the source line(s) that actually run.
+This section describes the execution-realism code as it exists at the time of writing, based on a direct read of the Rust sources. The model traits and all built-in model implementations live in `crates/execution/src/models/` (fee.rs, fill.rs, latency.rs, slippage.rs, market_impact.rs); the matching engine that applies them lives in `crates/execution/src/matching_engine/` (mod.rs and config.rs); and the backtest wiring that lets a venue select and inject them lives in `crates/backtest/src/` (config.rs, node.rs, exchange.rs). The sandbox adapter mirrors the same wiring in `crates/adapters/sandbox/src/`. Every claim below is cited to the source line(s) that actually run.
 
 ### 1. Fee models
 
@@ -468,7 +522,20 @@ Slippage is its own concern, separate from the fill model and the fee model:
 - `SimulatedExchange` stores it (`exchange.rs:165`) and passes it to each matching engine it creates (`exchange.rs:256,541-543`). The sandbox client does the same (`crates/adapters/sandbox/src/execution.rs:164,173,912,1033-1035`), and its config field is runtime-only in serialization (`crates/adapters/sandbox/src/config.rs:101-114`).
 - `ProbabilisticSlippageModel` is exposed through `nautilus_trader.execution` (`crates/execution/src/python/mod.rs:57`), and `pyobject_to_slippage_model_any` converts it at the Python boundary (`crates/execution/src/python/slippage.rs:47-70`).
 
-The ordering the engine applies is: fill eligibility, then fill quantity, then base fill price, then the slippage adjustment, then the final fill price, then the fee. Slippage adjusts the base fill price by one price increment against the order direction on an L1 book, and the fee model is charged last, on the adjusted price and the fill quantity.
+The ordering the engine applies is: fill eligibility, then fill quantity, then base fill price, then the slippage adjustment, then the market impact adjustment, then the final fill price, then the fee. Slippage adjusts the base fill price by one price increment against the order direction on an L1 book, and the fee model is charged last, on the adjusted price and the fill quantity. Market impact is a separate, later addition and is documented in [section 9](#9-market-impact-models).
+
+### 9. Market impact models
+
+Market impact is its own concern, separate from the fill model, the slippage model, and the fee model. It is a later addition than those concerns, so the section is numbered last.
+
+- The `MarketImpactModel` trait has one method, `impact_increments(fill_quantity)`, which returns the number of price increments the fill price moves against the order direction (`crates/execution/src/models/market_impact.rs:45-54`). `MarketImpactModelHandle` is the shared runtime handle (`market_impact.rs:58-90`).
+- `LinearMarketImpactModel` is the built-in implementation (`market_impact.rs:110-160`). It moves the price one increment for every `quantity_per_increment` units filled, capped at `max_increments`, using exact decimal division and a floor. It is deterministic and takes no random seed. `MarketImpactModelAny` is the runtime enum with that one variant (`market_impact.rs:171-183`).
+- The matching engine holds `Option<MarketImpactModelHandle>` next to the fill and fee models (`crates/execution/src/matching_engine/mod.rs:118`) and `set_market_impact_model` replaces it (`mod.rs:566-574`). `apply_fills` applies it to a liquidity-taking L1 fill after the slippage adjustment (`mod.rs:5157-5190`): it computes `increments * price_increment` with checked arithmetic and adds the offset for a BUY or subtracts it for a SELL. A model that returns zero, a fill on an L2 or L3 book, or a resting (maker) fill leaves the price unchanged.
+- `SimulatedVenueConfig.market_impact_model` is `Option<MarketImpactModelHandle>` (`crates/backtest/src/config.rs:313`) and `BacktestVenueConfig.market_impact_model` is `Option<MarketImpactModelAny>` (`config.rs:566`, accessor `config.rs:813-815`); `BacktestNode` maps it to a handle (`crates/backtest/src/node.rs:293-295,309`).
+- `SimulatedExchange` stores it (`crates/backtest/src/exchange.rs:167`) and passes it to each matching engine it creates (`exchange.rs:547-549`). The sandbox client does the same (`crates/adapters/sandbox/src/execution.rs:166-168,179,919,1043-1045`), and its config field is runtime-only in serialization (`crates/adapters/sandbox/src/config.rs:118-127,357-385`).
+- `LinearMarketImpactModel` is exposed through `nautilus_trader.execution` (`crates/execution/src/python/mod.rs:59`), and `pyobject_to_market_impact_model_any` converts it at the Python boundary (`crates/execution/src/python/market_impact.rs:48-61`).
+
+Unlike the fill and slippage models, market impact involves no randomness, so it has no seed. The field is absent by default, so the default path adjusts no fill price for size.
 
 ### Determinism and seeds
 
@@ -478,6 +545,7 @@ All randomness is confined to the fill and slippage models; latency, fees, and t
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | Limit-fill decision `is_limit_filled` | all eleven fill models, via `ProbabilisticFillState::is_limit_filled`                                 | `random_seed: Option<u64>` on each model constructor; fully deterministic when `prob_fill_on_limit` is `0.0`/`1.0` due to short-circuit | `fill.rs:179-214,294-296` (defaults)                                                               |
 | Slippage decision `is_slipped`        | all eleven fill models, or `ProbabilisticSlippageModel` when one is configured                        | same `random_seed`; default `prob_slippage=0.0` is deterministic                                                                        | `fill.rs:202-208,294-296`; `slippage.rs:83-134`                                                    |
+| Market impact adjustment              | `apply_fills` via the venue market impact model                                                       | none; exact function of the fill quantity                                                                                               | `mod.rs:5157-5190`; `market_impact.rs:110-160`                                                     |
 | One-tick-vs-best coin flip            | `ProbabilisticFillModel::get_orderbook_for_fill_simulation` (`random_bool(0.5)`)                      | same `random_seed`                                                                                                                      | `fill.rs:575-612`                                                                                  |
 | Seeded RNG                            | `StdRng::seed_from_u64(seed)` when a seed is supplied                                                 | explicit seed honored                                                                                                                   | `fill.rs:189-192`                                                                                  |
 | Unseeded RNG                          | `default_std_rng`: madsim `thread_rng` under a madsim runtime, otherwise `rand::rng()` (host entropy) | none -> not reproducible across runs                                                                                                    | `fill.rs:250-263`                                                                                  |

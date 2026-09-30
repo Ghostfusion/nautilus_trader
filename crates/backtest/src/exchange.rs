@@ -44,6 +44,7 @@ use nautilus_execution::{
         fee::FeeModelHandle,
         fill::{FillModelHandle, FillModelSelection},
         latency::{LatencyModel, LatencyModelHandle},
+        market_impact::MarketImpactModelHandle,
         slippage::SlippageModelHandle,
     },
 };
@@ -163,6 +164,7 @@ pub struct SimulatedExchange {
     fee_model: FeeModelHandle,
     fill_models: FillModelSelection,
     slippage_model: Option<SlippageModelHandle>,
+    market_impact_model: Option<MarketImpactModelHandle>,
     latency_model: Option<LatencyModelHandle>,
     instruments: AHashMap<InstrumentId, InstrumentAny>,
     matching_engines: IndexMap<InstrumentId, OrderMatchingEngine>,
@@ -254,6 +256,7 @@ impl SimulatedExchange {
             fee_model: config.fee_model,
             fill_models: FillModelSelection::new(config.fill_model, config.instrument_fill_models),
             slippage_model: config.slippage_model,
+            market_impact_model: config.market_impact_model,
             latency_model: config.latency_model,
             instruments: AHashMap::new(),
             matching_engines: IndexMap::new(),
@@ -540,6 +543,9 @@ impl SimulatedExchange {
         }
         if let Some(slippage_model) = self.slippage_model.as_ref() {
             matching_engine.set_slippage_model(slippage_model.clone());
+        }
+        if let Some(market_impact_model) = self.market_impact_model.as_ref() {
+            matching_engine.set_market_impact_model(market_impact_model.clone());
         }
         self.instruments.insert(instrument_id, instrument);
         matching_engine.set_inflight_orders(self.inflight_orders.clone());
