@@ -135,6 +135,10 @@ engine.add_universe(Universe(definition))
 A rule may also be any object implementing `select(ts_ns)`, so a universe can be driven by a
 research screen rather than by a declared schedule.
 
+A universe is registered with a run through `add_universe`, which the backtest engine, the backtest
+node, and the live node all provide. The run then drives the component's lifecycle: its selection
+step and its subscription claims start and stop with the run.
+
 ## What a universe is not
 
 - It is not a data subscription for the strategy. The universe holds the claims its definition

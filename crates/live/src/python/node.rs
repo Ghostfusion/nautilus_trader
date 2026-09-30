@@ -73,7 +73,9 @@ use nautilus_trading::examples::{
 };
 use nautilus_trading::{
     ImportableControllerConfig, ImportableExecutionAlgorithmConfig, ImportableStrategyConfig,
-    python::{algorithm::PyExecutionAlgorithm, strategy::PyStrategy},
+    python::{
+        algorithm::PyExecutionAlgorithm, strategy::PyStrategy, universe::PyUniverse,
+    },
 };
 use parking_lot::{Condvar, Mutex};
 use pyo3::{
@@ -1252,6 +1254,35 @@ impl PyLiveNode {
         self.register_python_actor(&actor, actor_id)
     }
 
+    /// Adds a constructed Python universe component to the trader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node is running, the universe is invalid, or registration fails.
+    #[pyo3(name = "add_universe")]
+    fn py_add_universe(&self, universe: &Bound<'_, PyAny>) -> PyResult<()> {
+        if self.node()?.state() != NodeState::Idle {
+            return Err(to_pyruntime_err(
+                "Cannot add universe while node is running, add universes before running the node",
+            ));
+        }
+
+        log::debug!("`add_universe` with a constructed instance");
+
+        let universe = universe.clone().unbind();
+
+        let actor_id = Python::attach(|py| -> PyResult<ActorId> {
+            let py_universe = universe
+                .bind(py)
+                .extract::<PyRef<PyUniverse>>()
+                .map_err(Into::<PyErr>::into)?;
+
+            Ok(py_universe.actor_id())
+        })?;
+
+        self.register_python_universe(&universe, actor_id)
+    }
+
     #[pyo3(name = "add_actor_from_config")]
     #[expect(clippy::needless_pass_by_value)]
     fn py_add_actor_from_config(&self, _py: Python, config: ImportableActorConfig) -> PyResult<()> {
@@ -1827,6 +1858,31 @@ impl PyLiveNode {
             .map_err(to_pyruntime_err)?;
 
         log::info!("Registered Python actor {actor_id}");
+        Ok(())
+    }
+
+    fn register_python_universe(&self, universe: &Py<PyAny>, actor_id: ActorId) -> PyResult<()> {
+        if self
+            .node()?
+            .kernel()
+            .trader
+            .borrow()
+            .actor_ids()
+            .contains(&actor_id)
+        {
+            return Err(to_pyruntime_err(format!(
+                "Universe '{actor_id}' is already registered"
+            )));
+        }
+
+        self.node_mut()?
+            .kernel_mut()
+            .trader
+            .borrow_mut()
+            .add_python_universe_instance(universe, actor_id)
+            .map_err(to_pyruntime_err)?;
+
+        log::info!("Registered Python universe {actor_id}");
         Ok(())
     }
 }

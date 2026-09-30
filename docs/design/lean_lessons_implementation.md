@@ -353,8 +353,10 @@ through the existing subscription machinery.
 
 **Not implemented yet.**
 
-- The live node does not expose `add_universe` to Python. The live path uses the same data command
-  path the unit tests exercise, but the binding itself is outstanding.
+- The live sandbox subscription-leak run. The live node accepts a universe (`add_universe` on both
+  the backtest node and the live node) and the live path uses the same data command path the unit
+  tests exercise, so the remaining work is a live-path test with a mock data client rather than an
+  unverified code path.
 - The per-event cost comparison for an unused universe is not measured. What is asserted is that an
   unconfigured universe holds no claims and arms no timer, and that the existing scenarios keep
   their digests unchanged.
