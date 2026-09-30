@@ -265,6 +265,18 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
   "PLR0913",
   "PLR0917",
 ]
+"python/nautilus_trader/analysis/research.py" = [
+  "ANN401",
+  "PLR0913",
+  "PLR0917",
+  "TC003",
+] # Thin catalog view mirrors the loosely typed catalog and query_catalog surfaces
+"nautilus_trader/analysis/research.py" = [
+  "ANN401",
+  "PLR0913",
+  "PLR0917",
+  "TC003",
+] # Root-relative form used by repository-wide checks
 "nautilus_trader/**/*.pyi" = [
   "A002",
   "ANN401",
