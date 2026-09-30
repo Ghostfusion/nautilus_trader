@@ -296,11 +296,15 @@ inert for assets where a corporate action cannot occur.
 - Declared regression scenarios for a mid-series rename and a delisting close. Both behaviours are
   implemented and unit tested, but no declared scenario pins them.
 - A declared regression scenario for the adjustment stage. `BacktestNode.get_engine_canonical_result`
-  now exposes the canonical document of a catalog-driven run, but a scenario of the stage needs an
-  order in that document, and a market order submitted by a strategy in a node run over catalog bars
-  does not fill: the canonical document of such a run has no orders, fills, or positions, and its
-  digest does not move with the prices. That is the blocker to record, and it is worth its own
-  investigation before the stage can be pinned by a scenario.
+  exposes the canonical document of a catalog-driven run, and a node run over catalog bars does fill
+  an order: the bar establishes the market before the strategy sees it, so a market order for a
+  lot-size multiple submitted from `on_bar` is matched against that book and appears as an order, a
+  fill, and a position in the run's reports and canonical document, which
+  `python/tests/integration/test_backtest_node_bar_fills.py` asserts. An earlier note in this section
+  that such an order never fills was wrong. An empty `orders` array cannot come from a venue rejection,
+  because every submitted order enters the execution cache before the venue processes it, so the
+  earlier observation came from a run in which no order was submitted at all. What remains is the
+  scenario itself.
 
 **Boundary.** Engine and research. File formats are the data contract (L9A).
 
@@ -317,14 +321,16 @@ synthetic catalog holding a 4:1 split and a dividend and asserts the converted s
 conversion, an unconfigured run passing raw prices through while replaying no action record, and
 that each action record is processed at its effective instant rather than at its announcement.
 `BacktestNode.get_engine_canonical_result` exposes the canonical document of a catalog-driven run,
-so a declared scenario could pin the stage once the fill blocker above is resolved. The unchanged
-default path is asserted by every scenario that predates the stage keeping its committed digest.
+so a declared scenario could pin the stage using the shape that
+`python/tests/integration/test_backtest_node_bar_fills.py` establishes for a node run over bars. The
+unchanged default path is asserted by every scenario that predates the stage keeping its committed
+digest.
 
 **Risks.** Mixed adjusted and raw semantics inside one strategy is the classic silent error.
 Mitigation: raw data immutable, adjustment opt-in per data configuration, and a representation
 recorded per run in the canonical document. The residual risk is that an action cannot reach a
 Python component, that a mid-series rename and a delisting close have no declared scenario, and that
-the stage cannot yet be pinned by a scenario because a node-path order does not fill.
+the stage has no declared scenario yet.
 
 ## 7. W5: universe definition, selection, and membership (L2)
 
@@ -450,6 +456,15 @@ resolves as before. Stage B is complete only when independently configured slipp
 composite behaviour it replaces. Each new model is independently selectable and leaves the default
 path byte-identical, seeded models reproduce across runs, and existing fill variants continue to
 pass their tests unchanged.
+
+**Node path.** `python/tests/integration/test_backtest_node_bar_fills.py` runs a node over a
+synthetic bar catalog with a strategy that submits a market order from `on_bar` and asserts that the
+order, the fill, and the position appear in the node's reports and that the canonical document
+differs from the same run without the order. The bar establishes the market before the strategy sees
+it, so a fill needs no quote or trade data. The same test configures the venue with a
+`OneTickSlippage` configuration and asserts the canonical document differs from the default one, so
+the configuration layer reaches the matching engine on the node path, which is the path a later step
+needs for a golden scenario over a new model.
 
 **Migration invariant.** Separating an abstraction must not automatically change simulation
 semantics. This is the acceptance criterion that makes the staged migration safe.
