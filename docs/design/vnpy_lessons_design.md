@@ -1,8 +1,10 @@
 # VeighNa capability review: harvesting trading-system capabilities
 
-Companion to [`vnpy_lessons_implementation.md`](vnpy_lessons_implementation.md). Throughout, the
-framework is called VeighNa (vn.py); the former name appears only where a path or the original
-request refers to it.
+Companion to [`vnpy_lessons_implementation.md`](vnpy_lessons_implementation.md). The later
+[`vectorbt_lessons_design.md`](vectorbt_lessons_design.md) extends the Feature, Label and Dataset
+candidate below (D5 and D13) with concrete label policies, and records where the two reviews agree
+and where they diverge. Throughout, the framework is called VeighNa (vn.py); the former name appears
+only where a path or the original request refers to it.
 
 **Primary invariant.** VeighNa contributes capabilities to the components of this architecture; it
 does not dictate the architecture of those components. Every item below is stated as a capability
