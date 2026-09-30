@@ -54,6 +54,7 @@ nautilus-core = { workspace = true }
 nautilus-execution = { workspace = true }
 nautilus-model = { workspace = true }
 nautilus-portfolio = { workspace = true }
+nautilus-risk = { workspace = true }
 
 ahash = { workspace = true }
 anyhow = { workspace = true }

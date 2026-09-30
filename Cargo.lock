@@ -6984,6 +6984,7 @@ dependencies = [
  "nautilus-indicators",
  "nautilus-model",
  "nautilus-portfolio",
+ "nautilus-risk",
  "pyo3",
  "pyo3-stub-gen",
  "rstest",
