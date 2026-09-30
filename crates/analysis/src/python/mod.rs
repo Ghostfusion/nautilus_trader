@@ -21,6 +21,7 @@
 )]
 
 pub mod analyzer;
+pub mod objective;
 pub mod snapshot;
 pub mod statistic;
 pub mod statistics;
@@ -38,6 +39,13 @@ use pyo3::{prelude::*, pymodule};
 pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::analyzer::PortfolioAnalyzer>()?;
     m.add_class::<crate::snapshot::PortfolioStatistics>()?;
+
+    // Optimization objective and constraints
+    m.add_class::<crate::objective::ObjectiveDirection>()?;
+    m.add_class::<crate::objective::ConstraintComparison>()?;
+    m.add_class::<crate::objective::ObjectiveTerm>()?;
+    m.add_class::<crate::objective::Objective>()?;
+    m.add_class::<crate::objective::Constraint>()?;
 
     // Statistics - Returns-based
     m.add_class::<crate::statistics::cagr::CAGR>()?;
