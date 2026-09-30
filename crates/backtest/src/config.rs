@@ -55,6 +55,7 @@ use nautilus_system::config::NautilusKernelConfig;
 use nautilus_system::config::StreamingConfig;
 use nautilus_trading::ImportableControllerConfig;
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
 use crate::modules::{SimulationModuleAny, SimulationModuleHandle};
@@ -62,6 +63,10 @@ use crate::modules::{SimulationModuleAny, SimulationModuleHandle};
 pub(crate) const MAX_BACKTEST_CHUNK_SIZE: usize = 1_000_000;
 
 /// Configuration for ``BacktestEngine`` instances.
+///
+/// The `Serialize`/`Deserialize` implementations are the optional file schema for this
+/// configuration; the typed builder remains the canonical API. Missing keys take the built-in
+/// defaults and unknown keys are rejected.
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(module = "nautilus_trader.backtest", from_py_object, unsendable)
@@ -74,7 +79,15 @@ pub(crate) const MAX_BACKTEST_CHUNK_SIZE: usize = 1_000_000;
     clippy::struct_excessive_bools,
     reason = "config fields mirror the existing Rust and Python backtest engine surfaces"
 )]
-#[derive(Debug, Clone, bon::Builder)]
+#[cfg_attr(
+    feature = "python",
+    expect(
+        clippy::unsafe_derive_deserialize,
+        reason = "config deserializes plain fields; unsafe methods come from generated PyO3 integration"
+    )
+)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+#[serde(default, deny_unknown_fields)]
 pub struct BacktestEngineConfig {
     /// The kernel environment context.
     #[builder(default = Environment::Backtest)]
@@ -1350,7 +1363,10 @@ impl BacktestRunConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use nautilus_execution::models::fee::MakerTakerFeeModel;
+    use nautilus_system::config_file::{load_config, save_config};
     use rstest::rstest;
 
     use super::*;
@@ -1880,5 +1896,100 @@ mod tests {
             panic!("expected ConfigError::Multiple");
         };
         assert_eq!(errors.len(), 2);
+    }
+
+    /// Pins the file schema key set for `BacktestEngineConfig`.
+    ///
+    /// Adding a field to `BacktestEngineConfig` (and therefore to the serialized schema) without
+    /// reviewing and updating this list fails the test, which is the schema-drift guard.
+    #[rstest]
+    fn test_backtest_engine_config_file_schema_keys() {
+        let mut expected: BTreeSet<String> = [
+            "bypass_logging",
+            "cache",
+            "controller",
+            "data_engine",
+            "delay_post_stop",
+            "environment",
+            "exec_engine",
+            "instance_id",
+            "load_state",
+            "logging",
+            "msgbus",
+            "portfolio",
+            "risk_engine",
+            "run_analysis",
+            "save_state",
+            "shutdown_on_error",
+            "timeout_connection",
+            "timeout_disconnection",
+            "timeout_portfolio",
+            "timeout_reconciliation",
+            "timeout_shutdown",
+            "trader_id",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+
+        if cfg!(feature = "streaming") {
+            expected.insert("catalogs".to_string());
+            expected.insert("streaming".to_string());
+        }
+
+        let value = serde_json::to_value(BacktestEngineConfig::default()).unwrap();
+        let actual: BTreeSet<String> = value.as_object().unwrap().keys().cloned().collect();
+
+        assert_eq!(actual, expected, "BacktestEngineConfig file schema drifted");
+    }
+
+    #[rstest]
+    fn test_backtest_engine_config_file_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backtest.json");
+
+        let config = BacktestEngineConfig::default();
+        save_config(&path, &config).unwrap();
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents, serde_json::to_string_pretty(&config).unwrap());
+
+        let loaded: BacktestEngineConfig = load_config(&path, None).unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&loaded).unwrap(),
+            serde_json::to_value(&config).unwrap(),
+        );
+        assert_eq!(loaded.trader_id(), config.trader_id());
+        assert_eq!(loaded.environment(), config.environment());
+        assert_eq!(loaded.timeout_connection(), config.timeout_connection());
+        assert_eq!(loaded.run_analysis, config.run_analysis);
+    }
+
+    #[rstest]
+    fn test_backtest_engine_config_file_rejects_unknown_key() {
+        let error = serde_json::from_str::<BacktestEngineConfig>(
+            r#"{"run_analysis": true, "unexpected_key": true}"#,
+        )
+        .unwrap_err();
+        let message = error.to_string();
+
+        assert!(
+            message.contains("unknown field `unexpected_key`"),
+            "unexpected message: {message}"
+        );
+    }
+
+    #[rstest]
+    fn test_backtest_engine_config_file_layers_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backtest.json");
+        std::fs::write(&path, r#"{"run_analysis": false}"#).unwrap();
+
+        let loaded: BacktestEngineConfig =
+            load_config(&path, Some(&serde_json::json!({ "run_analysis": true }))).unwrap();
+
+        assert!(loaded.run_analysis);
+        assert_eq!(loaded.timeout_shutdown, Duration::from_secs(5));
     }
 }

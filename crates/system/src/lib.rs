@@ -62,6 +62,7 @@
 pub mod builder;
 pub mod clock_factory;
 pub mod config;
+pub mod config_file;
 pub mod controller;
 pub mod event_store;
 pub mod kernel;

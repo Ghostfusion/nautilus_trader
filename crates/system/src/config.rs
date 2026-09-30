@@ -26,6 +26,7 @@ use nautilus_model::identifiers::TraderId;
 pub use nautilus_persistence::config::{DataCatalogConfig, RotationConfig, StreamingConfig};
 use nautilus_portfolio::config::PortfolioConfig;
 use nautilus_risk::engine::config::RiskEngineConfig;
+use serde::{Deserialize, Serialize};
 
 /// Configuration trait for a `NautilusKernel` core system instance.
 pub trait NautilusKernelConfig: Debug {
@@ -82,7 +83,12 @@ pub trait NautilusKernelConfig: Debug {
 }
 
 /// Basic implementation of `NautilusKernelConfig` for builder and testing.
-#[derive(Debug, Clone, bon::Builder)]
+///
+/// The `Serialize`/`Deserialize` implementations are the optional file schema for a kernel
+/// configuration; the typed builder remains the canonical API. Missing keys take the built-in
+/// defaults and unknown keys are rejected.
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+#[serde(default, deny_unknown_fields)]
 pub struct KernelConfig {
     /// The kernel environment context.
     #[builder(default = Environment::Backtest)]
@@ -241,15 +247,140 @@ impl Default for KernelConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use rstest::rstest;
 
     use super::*;
+    use crate::config_file::{load_config, save_config};
 
     #[rstest]
     fn test_kernel_config_default_connection_timeout() {
         let config = KernelConfig::default();
 
         assert_eq!(config.timeout_connection, Duration::from_mins(1));
+    }
+
+    /// Pins the file schema key set for `KernelConfig`.
+    ///
+    /// Adding a field to `KernelConfig` (and therefore to the serialized schema) without reviewing
+    /// and updating this list fails the test, which is the schema-drift guard for the file format.
+    #[rstest]
+    fn test_kernel_config_file_schema_keys() {
+        let mut expected: BTreeSet<String> = [
+            "cache",
+            "data_engine",
+            "delay_post_stop",
+            "environment",
+            "exec_engine",
+            "instance_id",
+            "load_state",
+            "logging",
+            "msgbus",
+            "portfolio",
+            "risk_engine",
+            "save_state",
+            "shutdown_on_error",
+            "timeout_connection",
+            "timeout_disconnection",
+            "timeout_portfolio",
+            "timeout_reconciliation",
+            "timeout_shutdown",
+            "trader_id",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+
+        if cfg!(feature = "streaming") {
+            expected.insert("catalogs".to_string());
+            expected.insert("streaming".to_string());
+        }
+
+        let value = serde_json::to_value(KernelConfig::default()).unwrap();
+        let actual: BTreeSet<String> = value.as_object().unwrap().keys().cloned().collect();
+
+        assert_eq!(actual, expected, "KernelConfig file schema drifted");
+    }
+
+    #[rstest]
+    fn test_kernel_config_file_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kernel.json");
+
+        let config = KernelConfig::default();
+        save_config(&path, &config).unwrap();
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents, serde_json::to_string_pretty(&config).unwrap());
+
+        let loaded: KernelConfig = load_config(&path, None).unwrap();
+
+        // The complete serialized surface is the schema, so equal serializations are an equality
+        // assertion over every field.
+        assert_eq!(
+            serde_json::to_value(&loaded).unwrap(),
+            serde_json::to_value(&config).unwrap(),
+        );
+        assert_eq!(loaded.trader_id(), config.trader_id());
+        assert_eq!(loaded.environment(), config.environment());
+        assert_eq!(loaded.timeout_connection(), config.timeout_connection());
+        assert_eq!(loaded.timeout_shutdown(), config.timeout_shutdown());
+    }
+
+    #[rstest]
+    fn test_kernel_config_file_layers_defaults_then_file_then_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kernel.json");
+        std::fs::write(&path, r#"{"trader_id": "FILE-001"}"#).unwrap();
+
+        let loaded: KernelConfig = load_config(
+            &path,
+            Some(&serde_json::json!({ "load_state": true, "timeout_portfolio": { "secs": 42, "nanos": 0 } })),
+        )
+        .unwrap();
+
+        // From the file.
+        assert_eq!(loaded.trader_id(), TraderId::from("FILE-001"));
+        // From the explicit overrides.
+        assert!(loaded.load_state());
+        assert_eq!(loaded.timeout_portfolio(), Duration::from_secs(42));
+        // From the built-in defaults.
+        assert_eq!(loaded.timeout_connection(), Duration::from_mins(1));
+    }
+
+    #[rstest]
+    fn test_kernel_config_file_rejects_unknown_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kernel.json");
+        std::fs::write(&path, r#"{"unexpected_key": true}"#).unwrap();
+
+        let error = load_config::<KernelConfig, _>(&path, None).unwrap_err();
+        let message = error.to_string();
+
+        assert!(
+            message.contains("unknown field `unexpected_key`"),
+            "unexpected message: {message}"
+        );
+    }
+
+    #[rstest]
+    fn test_kernel_config_file_rejects_unknown_override_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kernel.json");
+        std::fs::write(&path, "{}").unwrap();
+
+        let error = load_config::<KernelConfig, _>(
+            &path,
+            Some(&serde_json::json!({ "unexpected_key": true })),
+        )
+        .unwrap_err();
+        let message = error.to_string();
+
+        assert!(
+            message.contains("unknown field `unexpected_key`"),
+            "unexpected message: {message}"
+        );
     }
 }
 

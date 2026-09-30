@@ -1171,8 +1171,11 @@ impl NautilusKernelConfig for LiveNodeConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     #[cfg(feature = "streaming")]
     use nautilus_system::config::RotationConfig;
+    use nautilus_system::config_file::{load_config, save_config};
     use rstest::rstest;
 
     use super::*;
@@ -2321,5 +2324,99 @@ config = { strategy_id = "ExampleStrategy-001", threshold = 10 }
     fn live_node_config_default_has_no_event_store() {
         let config = LiveNodeConfig::default();
         assert!(config.event_store.is_none());
+    }
+
+    /// Pins the file schema key set for `LiveNodeConfig`.
+    ///
+    /// Adding a field to `LiveNodeConfig` (and therefore to the serialized schema) without
+    /// reviewing and updating this list fails the test, which is the schema-drift guard.
+    #[rstest]
+    fn live_node_config_file_schema_keys() {
+        let mut expected: BTreeSet<String> = [
+            "cache",
+            "controller",
+            "data_clients",
+            "data_engine",
+            "delay_post_stop",
+            "emulator",
+            "environment",
+            "event_store",
+            "exec_clients",
+            "exec_engine",
+            "instance_id",
+            "load_state",
+            "logging",
+            "loop_debug",
+            "msgbus",
+            "plugins",
+            "portfolio",
+            "queue_monitor",
+            "risk_engine",
+            "save_state",
+            "shutdown_on_error",
+            "timeout_connection",
+            "timeout_disconnection",
+            "timeout_portfolio",
+            "timeout_reconciliation",
+            "timeout_shutdown",
+            "trader_id",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+
+        if cfg!(feature = "streaming") {
+            expected.insert("catalogs".to_string());
+            expected.insert("streaming".to_string());
+        }
+
+        let value = serde_json::to_value(LiveNodeConfig::default()).unwrap();
+        let actual: BTreeSet<String> = value.as_object().unwrap().keys().cloned().collect();
+
+        assert_eq!(actual, expected, "LiveNodeConfig file schema drifted");
+    }
+
+    #[rstest]
+    fn live_node_config_file_roundtrip() {
+        let path = std::env::temp_dir().join(format!(
+            "nautilus_live_node_config_{}.json",
+            std::process::id()
+        ));
+
+        let config = LiveNodeConfig {
+            trader_id: TraderId::from("ROUNDTRIP-001"),
+            load_state: true,
+            timeout_portfolio: Duration::from_secs(7),
+            ..Default::default()
+        };
+        save_config(&path, &config).unwrap();
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents, serde_json::to_string_pretty(&config).unwrap());
+
+        let loaded: LiveNodeConfig = load_config(&path, None).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        // The complete serialized surface is the schema, so equal serializations are an equality
+        // assertion over every field.
+        assert_eq!(
+            serde_json::to_value(&loaded).unwrap(),
+            serde_json::to_value(&config).unwrap(),
+        );
+        assert_eq!(loaded.trader_id, TraderId::from("ROUNDTRIP-001"));
+        assert!(loaded.load_state);
+        assert_eq!(loaded.timeout_portfolio, Duration::from_secs(7));
+    }
+
+    #[rstest]
+    fn live_node_config_file_rejects_unknown_key() {
+        let error =
+            serde_json::from_str::<LiveNodeConfig>(r#"{"unexpected_key": true}"#).unwrap_err();
+        let message = error.to_string();
+
+        assert!(
+            message.contains("unknown field `unexpected_key`"),
+            "unexpected message: {message}"
+        );
     }
 }

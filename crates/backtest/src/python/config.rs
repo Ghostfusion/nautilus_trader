@@ -70,6 +70,10 @@ use crate::config::{
 #[pyo3::pymethods]
 impl BacktestEngineConfig {
     /// Configuration for ``BacktestEngine`` instances.
+    ///
+    /// The `Serialize`/`Deserialize` implementations are the optional file schema for this
+    /// configuration; the typed builder remains the canonical API. Missing keys take the built-in
+    /// defaults and unknown keys are rejected.
     #[new]
     #[pyo3(signature = (
         trader_id = None,
