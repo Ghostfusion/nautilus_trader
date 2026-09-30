@@ -152,6 +152,8 @@ pub fn model(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::data::close::InstrumentClose>()?;
     m.add_class::<crate::data::corporate_action::CorporateAction>()?;
     m.add_class::<crate::data::corporate_action::CorporateActionType>()?;
+    m.add_class::<crate::data::adjustment::AdjustmentSeries>()?;
+    m.add_class::<crate::data::adjustment::PriceRepresentation>()?;
     m.add_class::<crate::data::funding::FundingRateUpdate>()?;
     m.add_class::<crate::data::greeks::OptionGreekValues>()?;
     m.add_class::<crate::data::greeks::BlackScholesGreeksResult>()?;

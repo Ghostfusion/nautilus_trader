@@ -149,6 +149,148 @@ trades = catalog.query_trade_ticks(
 )
 ```
 
+## Corporate actions
+
+A corporate action is an event that changes the economic meaning of an instrument's existing
+prices or its identity: a share split or consolidation, a cash dividend, a venue symbol change, or
+a delisting. It is auxiliary data, not a price series. It carries no traded price or size, and it
+does not describe a market event a matching engine resolves; it changes how the prices around it
+must be read.
+
+One `CorporateAction` type carries every kind, discriminated by `CorporateActionType`, so the
+catalog, the message bus, and the Python surface have one path rather than four. The type is
+instrument scoped and is delivered as data, so a strategy can react to it, and it is the raw input
+an adjustment stage consumes.
+
+### Representations
+
+Three representations of the same instrument are never interchangeable:
+
+- **Raw**: the prices the venue printed, an immutable input and the default for a run.
+- **Adjusted**: a derived series that back-propagates corporate actions so a historical series is
+  continuous across a split or a dividend. Produced on demand, never stored as the raw input.
+- **Trading events**: the corporate actions themselves, delivered as data.
+
+Mixing representations inside one strategy is a silent error. The raw data is never mutated, and
+adjustment is opt-in.
+
+### Fields
+
+`CorporateAction` is defined in `crates/model/src/data/corporate_action.rs`:
+
+| Field           | Type                  | Meaning                                                                |
+| --------------- | --------------------- | ---------------------------------------------------------------------- |
+| `instrument_id` | `InstrumentId`        | The instrument the action applies to.                                  |
+| `action`        | `CorporateActionType` | The kind: `SPLIT`, `DIVIDEND`, `SYMBOL_CHANGE`, or `DELISTING`.        |
+| `value`         | Decimal               | The action value, interpreted per kind.                                |
+| `new_symbol`    | `Symbol` or `None`    | The new venue symbol, for a symbol change.                             |
+| `effective_ns`  | UNIX nanoseconds      | When the action takes effect at the venue, such as a dividend ex-date. |
+| `ts_event`      | UNIX nanoseconds      | When the action event occurred.                                        |
+| `ts_init`       | UNIX nanoseconds      | When the instance was created.                                         |
+
+The per-kind meaning of `value` and `new_symbol`:
+
+| Kind            | `value`                                | `new_symbol`         |
+| --------------- | -------------------------------------- | -------------------- |
+| `SPLIT`         | The number of new shares per old share | Absent               |
+| `DIVIDEND`      | The cash amount per share              | Absent               |
+| `SYMBOL_CHANGE` | Zero                                   | The new venue symbol |
+| `DELISTING`     | Zero                                   | Absent               |
+
+`value` is a decimal, so a split ratio and a dividend amount stay exact.
+
+### Catalog and Arrow schema
+
+The type registers the catalog path prefix `corporate_actions`, so it is written under
+`data/corporate_actions/{instrument_id}/` with the usual timestamp-ranged Parquet file names. Write
+with `catalog.write_corporate_actions(...)`; read with
+`catalog.query(data_type=NautilusDataType.CorporateAction, identifiers=[...], start=..., end=...)`,
+or the Rust `CatalogReader::corporate_actions`.
+
+`crates/serialization/src/arrow/corporate_action.rs` defines the Arrow schema:
+
+| Field          | Arrow type                     | Nullable | Content                              |
+| -------------- | ------------------------------ | -------- | ------------------------------------ |
+| `action`       | `Dictionary(Int8, Utf8)`       | No       | The kind name, SCREAMING_SNAKE_CASE. |
+| `value`        | `Utf8`                         | No       | The decimal as a string.             |
+| `new_symbol`   | `Utf8`                         | Yes      | The new symbol, when present.        |
+| `effective_ns` | `Timestamp(Nanosecond, "UTC")` | No       | Effect instant.                      |
+| `ts_event`     | `Timestamp(Nanosecond, "UTC")` | No       | Event instant.                       |
+| `ts_init`      | `Timestamp(Nanosecond, "UTC")` | No       | Init instant.                        |
+| `identifier`   | `Utf8`                         | Yes      | The instrument ID row identifier.    |
+
+The batch schema metadata carries `type_name` (`CorporateAction`) and `instrument_id`.
+
+### Message bus topic
+
+A corporate action is published to `data.corporate_actions.{venue}.{symbol}`, for example
+`data.corporate_actions.XNYS.AAPL` for `AAPL.XNYS`. `crates/common/src/msgbus/switchboard.rs`
+builds the live topic and the `data.pipeline.corporate_actions.{venue}.{symbol}` pipeline topic.
+
+### Adjustment convention
+
+`crates/model/src/data/adjustment.rs` defines `PriceRepresentation` (`RAW`, `ADJUSTED`) and
+`AdjustmentSeries`, the adjustment math for one instrument. Actions are sorted by effect time, then
+by event time, so the series is canonical regardless of arrival order; an action for another
+instrument or a non-positive split ratio is rejected.
+
+For every action whose `effective_ns` is after the price instant:
+
+- a split with ratio `r` (new shares per old share) scales the price by `1 / r`;
+- a dividend of `d` per share subtracts `d` from the price.
+
+So, with the cumulative `split_factor` and `dividends` over the actions in effect after the
+instant:
+
+```text
+adjusted = raw * split_factor - dividends
+raw = (adjusted + dividends) / split_factor
+```
+
+Only splits and dividends participate in the math; a symbol change and a delisting are delivered as
+events but do not scale a price. The arithmetic is decimal and no rounding is applied in the
+conversion: the resulting scale is the scale of the decimal operation.
+
+### Adjusting a price in Python
+
+```python
+from decimal import Decimal
+
+from nautilus_trader.model import AdjustmentSeries
+from nautilus_trader.model import CorporateAction
+from nautilus_trader.model import CorporateActionType
+from nautilus_trader.model import InstrumentId
+from nautilus_trader.model import Price
+from nautilus_trader.model import PriceRepresentation
+
+instrument_id = InstrumentId.from_str("AAPL.XNYS")
+split_ns = 1_700_000_000_000_000_000  # effect instant of the split
+before = split_ns - 1  # a price instant before the split
+
+split = CorporateAction(
+    instrument_id=instrument_id,
+    action=CorporateActionType.SPLIT,
+    value=Decimal(4),  # 4 new shares per old share
+    new_symbol=None,
+    effective_ns=split_ns,
+    ts_event=split_ns,
+    ts_init=split_ns,
+)
+
+series = AdjustmentSeries(instrument_id, [split])
+
+raw_price = Price.from_str("400.00")
+adjusted_price = series.adjust(raw_price, before)  # 100.00
+restored_price = series.unadjust(adjusted_price, before)  # 400.00
+
+adjusted_price = series.convert(
+    raw_price,
+    before,
+    PriceRepresentation.RAW,
+    PriceRepresentation.ADJUSTED,
+)
+```
+
 ## `BacktestDataConfig`: backtest data
 
 `BacktestDataConfig` defines the catalog data that a `BacktestNode` loads for one run.

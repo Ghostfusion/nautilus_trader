@@ -255,39 +255,66 @@ and expanding a schedule reads no clock.
 
 ## 6. W4: corporate actions, identity, and the data contract (L3, L9A)
 
-**Objective.** Represent and apply splits, dividends, delistings, and symbol changes, and define the
-on-disk contract for that auxiliary data.
+**Objective.** Represent a corporate action as auxiliary data with one type and an exact, opt-in
+adjustment, and define the on-disk contract for that data. The capability is class-scoped: it is
+inert for assets where a corporate action cannot occur.
 
 **Steps.**
 
-1. Define auxiliary data types in `crates/model/src/data/` and register them with the existing
-   data-type macro so catalog paths, Arrow schemas, and bus topics follow the generated convention.
-2. Persist and query them through `CatalogReader` and `CatalogWriter`; the catalog gains the new
-   type directories automatically.
-3. Keep three representations explicitly distinct and non-interchangeable: raw input (immutable),
-   derived series (adjusted prices, adjusted OHLC, total return, produced on demand), and trading
-   events (split, dividend, delisting, symbol change, delivered as data).
-4. Add an opt-in adjustment stage selected per data configuration. The default keeps raw data
-   untouched. Where enabled, the stage converts adjusted input to raw by applying the action series
-   and emits the actions as events.
-5. Model identity separately from price: a mapping from venue symbol to instrument id over time,
-   resolved before data reaches the engines, with renames emitted as events.
-6. Model delisting as a terminal instrument status whose position outcome reuses the existing
-   `InstrumentClose` path.
-7. Document the contract and the file formats, with a colocated readme, and extend
-   `docs/concepts/data/catalog.md`.
-8. Record which representation a run consumed, so a result is interpretable later.
+1. `crates/model/src/data/corporate_action.rs` defines `CorporateAction` and `CorporateActionType`
+   (`Split`, `Dividend`, `SymbolChange`, `Delisting`). One type carries every kind: `value` is a
+   decimal, the new shares per old share for a split and the cash amount per share for a dividend,
+   and zero otherwise; `new_symbol` carries the new venue symbol for a symbol change. `effective_ns`
+   is when the action takes effect at the venue, separate from the record's `ts_event` and `ts_init`.
+2. The type is registered in the `for_each_data_type!` table in `crates/model/src/data/mod.rs` with
+   the catalog path prefix `corporate_actions` and added to `Data`, `DataRef`, `DataBatch`, and
+   `NautilusDataType`, so catalog paths, the Arrow schema, and the bus topic follow one convention.
+3. `crates/serialization/src/arrow/corporate_action.rs` defines the Arrow field specs and batch
+   encode/decode, and `crates/common/src/msgbus/switchboard.rs` adds the
+   `data.corporate_actions.{venue}.{symbol}` topic with its pipeline topic.
+4. Persistence carries the type in `nautilus-persistence`: `write_corporate_actions` and the generic
+   query in the Python catalog, `CatalogReader::corporate_actions`, and the delete, consolidation,
+   and Feather session dispatch. The data directory is `data/corporate_actions/{instrument_id}/`.
+5. `crates/model/src/data/adjustment.rs` defines `PriceRepresentation` (`Raw`, `Adjusted`) and
+   `AdjustmentSeries`. The three representations stay distinct and non-interchangeable: raw input
+   (immutable, the default for a run), the derived adjusted series (produced on demand), and the
+   trading events (the actions themselves, delivered as data). The convention is exact decimal
+   arithmetic: for each action in effect after the price instant, `adjusted = raw * split_factor -
+   dividends` and `raw = (adjusted + dividends) / split_factor`, with no rounding.
+6. The type and its kind enum are exposed through
+   `crates/model/src/python/data/corporate_action.rs`, and `AdjustmentSeries` and
+   `PriceRepresentation` through `crates/model/src/python/data/adjustment.rs`.
+7. The contract is documented: the `## Corporate actions` section in
+   `docs/concepts/data/catalog.md` and the colocated file-format contract
+   `crates/persistence/src/catalog/README.md`.
+
+**Not implemented yet.**
+
+- The opt-in adjustment stage. No data configuration selects a representation, converts input, or
+  emits the actions as events; only the `AdjustmentSeries` primitive exists.
+- The symbol map. Identity is not modelled over time, so a rename does not resolve to one identity
+  and emits no event.
+- The delisting action. The `Delisting` kind exists, but it is not a terminal instrument status and
+  has no position-close behaviour through the `InstrumentClose` path.
+- Run provenance. No run records which representation it consumed.
 
 **Boundary.** Engine and research. File formats are the data contract (L9A).
 
-**Acceptance.** A synthetic series with a 4:1 split and a dividend reproduces the expected raw and
-adjusted prices; a rename mid-series resolves to one identity; a delisting closes positions through
-the existing instrument-close path; the default path leaves existing golden digests unchanged; a
-golden scenario covers split and dividend handling.
+**Acceptance.** Unit tests in `crates/model/src/data/corporate_action.rs` cover the split ratio, an
+exact dividend amount, a symbol change, `ts_init`, display, and metadata. Unit tests in
+`crates/model/src/data/adjustment.rs` cover a 4:1 split adjusting and reversing, a dividend
+subtracted, a split and dividend composed, two splits composed, a symbol change and a delisting not
+scaling a price, `convert` between representations including identity, effect-time sorting, and the
+rejection of a foreign instrument or a non-positive split. `crates/serialization/src/arrow/corporate_action.rs`
+round-trips a batch, and `crates/backtest/src/config.rs` accepts `NautilusDataType::CorporateAction`
+in the data configuration allow list. The golden scenario coverage in the design (a raw and adjusted
+series, an unchanged default-path digest, a mid-series rename, and a delisting close) is not present,
+because it depends on the steps listed as not implemented.
 
 **Risks.** Mixed adjusted and raw semantics inside one strategy is the classic silent error.
-Mitigation: raw data immutable, adjustment opt-in, representation recorded per run, and a golden
-scenario asserting the default path is unchanged.
+Mitigation: raw data immutable, adjustment opt-in at the primitive level, and a representation
+recorded per run. The recording and the stage wiring are not implemented, so this mitigation is
+currently partial; the residual risk is the unimplemented steps above.
 
 ## 7. W5: universe definition, selection, and membership (L2)
 

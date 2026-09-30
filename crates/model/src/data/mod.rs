@@ -19,6 +19,7 @@
 //! provides borrowed access to the same variants. [`DataBatch`] preserves concrete element types
 //! for homogeneous storage and exposes individual items through the borrowed representation.
 
+pub mod adjustment;
 pub mod bar;
 pub mod batch;
 pub mod bet;
@@ -63,6 +64,7 @@ use crate::{
 
 // Re-exports
 #[rustfmt::skip]  // Keep these grouped
+pub use adjustment::{AdjustmentSeries, PriceRepresentation};
 pub use bar::{Bar, BarSpecification, BarType};
 pub use black_scholes::Greeks;
 pub use close::InstrumentClose;

@@ -20,6 +20,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
+pub mod adjustment;
 pub mod bar;
 pub mod bet;
 pub mod close;
