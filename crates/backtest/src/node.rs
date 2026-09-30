@@ -19,6 +19,7 @@ use std::{collections::BTreeMap, iter::Peekable};
 
 use ahash::{AHashMap, AHashSet};
 use nautilus_core::{Params, UnixNanos};
+use nautilus_execution::models::fill::FillModelHandle;
 use nautilus_model::{
     data::{CorporateAction, Data, HasTsInit, NautilusDataType},
     enums::{BookType, OtoTriggerMode},
@@ -266,6 +267,12 @@ fn build_engine(config: &BacktestRunConfig) -> anyhow::Result<BacktestEngine> {
             .cloned()
             .unwrap_or_default()
             .into();
+        let instrument_fill_models: AHashMap<InstrumentId, FillModelHandle> = venue_config
+            .instrument_fill_models()
+            .into_iter()
+            .flat_map(|models| models.iter())
+            .map(|(instrument_id, model)| (*instrument_id, model.clone().into()))
+            .collect();
 
         let fee_model = venue_config
             .fee_model()
@@ -291,6 +298,7 @@ fn build_engine(config: &BacktestRunConfig) -> anyhow::Result<BacktestEngine> {
             .maybe_margin_model(margin_model)
             .modules(modules)
             .fill_model(fill_model)
+            .instrument_fill_models(instrument_fill_models)
             .fee_model(fee_model)
             .maybe_latency_model(latency_model)
             .routing(venue_config.routing())

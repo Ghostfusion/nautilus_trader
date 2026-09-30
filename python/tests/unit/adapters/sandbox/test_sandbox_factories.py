@@ -27,6 +27,7 @@ from nautilus_trader.adapters.binance import BinanceSpotMarketDataMode
 from nautilus_trader.adapters.sandbox import SandboxExecutionClientConfig
 from nautilus_trader.adapters.sandbox import SandboxExecutionClientFactory
 from nautilus_trader.common import Environment
+from nautilus_trader.execution import BestPriceFillModel
 from nautilus_trader.execution import DefaultFillModel
 from nautilus_trader.execution import FeeModel
 from nautilus_trader.execution import MakerTakerFeeModel
@@ -36,6 +37,7 @@ from nautilus_trader.live import LiveNode
 from nautilus_trader.live import LiveRiskEngineConfig
 from nautilus_trader.model import AccountId
 from nautilus_trader.model import Currency
+from nautilus_trader.model import InstrumentId
 from nautilus_trader.model import Money
 from nautilus_trader.model import TraderId
 from nautilus_trader.model import Venue
@@ -181,6 +183,26 @@ def test_sandbox_config_exposes_matching_knobs() -> None:
     assert config.use_market_order_acks is True
     assert config.oto_full_trigger is True
     assert config.price_protection_points == 100
+
+
+def test_sandbox_config_exposes_instrument_fill_model_overrides() -> None:
+    """
+    Test sandbox config exposes per-instrument fill model overrides.
+    """
+    instrument_id = InstrumentId.from_str("ETHUSDT-PERP.BINANCE")
+
+    config = SandboxExecutionClientConfig(
+        venue=Venue.from_str(SANDBOX),
+        starting_balances=[Money(100000.0, Currency.from_str("USD"))],
+        fill_model=DefaultFillModel(prob_fill_on_limit=0.0),
+        instrument_fill_models={
+            instrument_id: BestPriceFillModel(prob_fill_on_limit=1.0, prob_slippage=0.0),
+        },
+    )
+
+    assert isinstance(config.fill_model, DefaultFillModel)
+    assert set(config.instrument_fill_models) == {instrument_id}
+    assert isinstance(config.instrument_fill_models[instrument_id], BestPriceFillModel)
 
 
 def test_sandbox_config_accepts_custom_fee_model() -> None:

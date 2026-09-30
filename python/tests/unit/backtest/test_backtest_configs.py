@@ -486,6 +486,45 @@ def test_venue_config_rejects_a_fill_model_config_liquidity_factor_for_other_kin
         )
 
 
+def test_venue_config_accepts_instrument_fill_model_overrides() -> None:
+    """
+    Test per-instrument fill model overrides resolve over the venue fill model.
+    """
+    instrument_id = InstrumentId.from_str("ETHUSDT-PERP.BINANCE")
+
+    config = BacktestVenueConfig(
+        name="BINANCE",
+        oms_type=OmsType.NETTING,
+        account_type=AccountType.MARGIN,
+        starting_balances=["1_000_000 USDT"],
+        fill_model=DefaultFillModel(prob_fill_on_limit=0.0),
+        instrument_fill_models={
+            instrument_id: FillModelConfig(
+                kind=FillModelKind.THREE_TIER,
+                random_seed=7,
+            ),
+        },
+    )
+
+    assert isinstance(config.fill_model, DefaultFillModel)
+    assert set(config.instrument_fill_models) == {instrument_id}
+    assert isinstance(config.instrument_fill_models[instrument_id], ThreeTierFillModel)
+
+
+def test_venue_config_defaults_instrument_fill_model_overrides_to_none() -> None:
+    """
+    Test the per-instrument fill model overrides default to inheriting the venue model.
+    """
+    config = BacktestVenueConfig(
+        name="SIM",
+        oms_type=OmsType.NETTING,
+        account_type=AccountType.CASH,
+        starting_balances=["100_000 USD"],
+    )
+
+    assert config.instrument_fill_models is None
+
+
 @pytest.mark.parametrize("margin_model", [StandardMarginModel(), LeveragedMarginModel()])
 def test_venue_config_round_trips_margin_models(margin_model: object) -> None:
     """

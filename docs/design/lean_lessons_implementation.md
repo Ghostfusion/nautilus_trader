@@ -434,12 +434,34 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
    model it names, that the probabilistic parameters and the seed are forwarded, and that
    `CompetitionAware` alone consumes `liquidity_factor`. Python tests cover a venue configured by
    description and the rejection of a liquidity factor for another kind.
+6. Step 3, the selection inheritance chain. `FillModelSelection`
+   (`crates/execution/src/models/fill.rs:1643-1716`) is the single place the chain is resolved. It
+   holds the levels the venue configuration sets, from least to most specific: the venue default
+   and the per-instrument overrides. `resolve` returns the instrument's override when the
+   instrument has one and the venue default otherwise, so a level that sets no model inherits.
+   Underneath, the global level is the built-in model the venue default falls back to
+   (`FillModelHandle::default()`), and above it the matching-engine level is the handle each engine
+   holds, which `OrderMatchingEngine::set_fill_model` replaces at runtime.
+   `SimulatedExchange` and the sandbox client both carry a `FillModelSelection` and resolve it once,
+   when the matching engine for an instrument is created
+   (`crates/backtest/src/exchange.rs:322-341,528`, `crates/adapters/sandbox/src/execution.rs:143-154,1006`).
+   A venue-level `set_fill_model` replaces the venue default for every instrument without an
+   override and leaves the overrides in place (`exchange.rs:322-333`), and
+   `SimulatedExchange::fill_model_for` exposes the resolution for an instrument
+   (`exchange.rs:340-341`). The overrides are configured exactly like `leverages`:
+   `SimulatedVenueConfig.instrument_fill_models` (`crates/backtest/src/config.rs:294-299`) and
+   `BacktestVenueConfig.instrument_fill_models` (`config.rs:536-540`), mapped on the node path
+   (`crates/backtest/src/node.rs:270-275,301`) and accepted by `BacktestEngine.add_venue` and
+   `SandboxExecutionClientConfig`. The sandbox field serializes as runtime-only, like its other
+   models, and an empty map is omitted.
 
 **Not implemented yet.**
 
-- Step 3, the selection inheritance chain: global defaults, then venue defaults, then matching-engine
-  defaults, then instrument overrides, then order-specific overrides. A configuration is not yet
-  layered, and no level inherits from another.
+- Order-specific fill model overrides, the last level of the chain. An order carries no fill model
+  affiliation and the matching engine has no per-order hook, so there is nothing a caller could
+  declare and nothing the engine could inherit from: the level would be a setting with no effect
+  unless the order path itself changed. The delivered chain therefore ends at the per-instrument
+  override.
 - Step 4, Stage B independent components (D15): fill, slippage, and fee are not yet independently
   configurable.
 - Step 5, the optional model additions: market impact, spread, partial-fill policy, borrow and locate
@@ -452,7 +474,9 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
 **Acceptance.** The inventory document matches the code. Stage A is complete only when
 `old_digest == new_digest` for every existing golden scenario: the scenarios in
 `python/tests/regression` pass with their committed expectations unchanged, and the default path
-resolves as before. Stage B is complete only when independently configured slippage reproduces the
+resolves as before. The selection chain adds no default behaviour, because a venue that configures
+no instrument overrides resolves every instrument to the venue model it already used, so the same
+gate covers it. Stage B is complete only when independently configured slippage reproduces the
 composite behaviour it replaces. Each new model is independently selectable and leaves the default
 path byte-identical, seeded models reproduce across runs, and existing fill variants continue to
 pass their tests unchanged.

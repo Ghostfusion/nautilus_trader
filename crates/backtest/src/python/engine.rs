@@ -31,9 +31,12 @@ use nautilus_core::{
     UUID4, UnixNanos,
     python::{to_pyruntime_err, to_pytype_err, to_pyvalue_err},
 };
-use nautilus_execution::python::{
-    fee::pyobject_to_fee_model_handle, fill::pyobject_to_fill_model_handle,
-    latency::pyobject_to_latency_model_any,
+use nautilus_execution::{
+    models::fill::FillModelHandle,
+    python::{
+        fee::pyobject_to_fee_model_handle, fill::pyobject_to_fill_model_handle,
+        latency::pyobject_to_latency_model_any,
+    },
 };
 #[cfg(feature = "defi")]
 use nautilus_model::defi::DefiData;
@@ -166,6 +169,7 @@ impl PyBacktestEngine {
             liquidation_enabled = false,
             liquidation_trigger_ratio = None,
             liquidation_cancel_open_orders = true,
+            instrument_fill_models = None,
         )
     )]
     #[expect(
@@ -209,6 +213,7 @@ impl PyBacktestEngine {
         liquidation_enabled: bool,
         liquidation_trigger_ratio: Option<f64>,
         liquidation_cancel_open_orders: bool,
+        instrument_fill_models: Option<HashMap<InstrumentId, Py<PyAny>>>,
     ) -> PyResult<()> {
         let leverages: AHashMap<InstrumentId, Decimal> = leverages
             .map(|m| m.into_iter().collect())
@@ -221,6 +226,19 @@ impl PyBacktestEngine {
             .map(|obj| Python::attach(|py| pyobject_to_fill_model_handle(obj.bind(py))))
             .transpose()?
             .unwrap_or_default();
+        let instrument_fill_models: AHashMap<InstrumentId, FillModelHandle> =
+            instrument_fill_models
+                .map(|models| {
+                    models
+                        .into_iter()
+                        .map(|(instrument_id, obj)| {
+                            Python::attach(|py| pyobject_to_fill_model_handle(obj.bind(py)))
+                                .map(|model| (instrument_id, model))
+                        })
+                        .collect::<PyResult<_>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
         let fee_model = fee_model
             .map(|obj| Python::attach(|py| pyobject_to_fee_model_handle(obj.bind(py))))
             .transpose()?
@@ -257,6 +275,7 @@ impl PyBacktestEngine {
             .maybe_margin_model(margin_model)
             .modules(modules)
             .fill_model(fill_model)
+            .instrument_fill_models(instrument_fill_models)
             .fee_model(fee_model)
             .maybe_latency_model(latency_model)
             .routing(routing)
@@ -1852,6 +1871,7 @@ mod model_tests {
                     false,
                     None,
                     true,
+                    None,
                 )
                 .unwrap();
 

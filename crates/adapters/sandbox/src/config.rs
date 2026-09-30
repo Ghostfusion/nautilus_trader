@@ -16,6 +16,7 @@
 //! Configuration for sandbox execution client.
 
 use ahash::AHashMap;
+use nautilus_core::collections::MapLike;
 use nautilus_execution::{
     matching_engine::config::OrderMatchingEngineConfig,
     models::{fee::FeeModelAny, fill::FillModelAny, latency::LatencyModelAny},
@@ -85,6 +86,18 @@ pub struct SandboxExecutionClientConfig {
         deserialize_with = "deserialize_fill_model"
     )]
     pub fill_model: Option<FillModelAny>,
+    /// The per-instrument fill model overrides, keyed by instrument ID.
+    ///
+    /// An instrument with an override uses it instead of `fill_model`; an instrument
+    /// without one inherits the venue fill model.
+    #[builder(default)]
+    #[serde(
+        default,
+        skip_serializing_if = "instrument_fill_models_is_empty",
+        serialize_with = "serialize_instrument_fill_models",
+        deserialize_with = "deserialize_instrument_fill_models"
+    )]
+    pub instrument_fill_models: AHashMap<InstrumentId, FillModelAny>,
     /// The latency model for sandbox matching engines.
     #[serde(
         default,
@@ -234,6 +247,42 @@ where
     }
 }
 
+fn instrument_fill_models_is_empty(models: &AHashMap<InstrumentId, FillModelAny>) -> bool {
+    MapLike::is_empty(models)
+}
+
+fn serialize_instrument_fill_models<S>(
+    models: &AHashMap<InstrumentId, FillModelAny>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    if models.is_empty() {
+        serializer.serialize_none()
+    } else {
+        Err(serde::ser::Error::custom(
+            "SandboxExecutionClientConfig.instrument_fill_models is runtime-only and cannot be serialized",
+        ))
+    }
+}
+
+fn deserialize_instrument_fill_models<'de, D>(
+    deserializer: D,
+) -> Result<AHashMap<InstrumentId, FillModelAny>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<IgnoredAny>::deserialize(deserializer)?;
+
+    match value {
+        None => Ok(AHashMap::new()),
+        Some(_) => Err(de::Error::custom(
+            "SandboxExecutionClientConfig.instrument_fill_models must be configured at runtime, not deserialized",
+        )),
+    }
+}
+
 fn serialize_latency_model<S>(
     latency_model: &Option<LatencyModelAny>,
     serializer: S,
@@ -368,6 +417,37 @@ mod tests {
         let result = toml::Value::try_from(&config);
 
         assert!(result.is_err());
+    }
+
+    #[rstest]
+    fn test_exec_config_toml_rejects_instrument_fill_models_field() {
+        let result = toml::from_str::<SandboxExecutionClientConfig>(
+            "instrument_fill_models = { \"ETHUSDT-PERP.BINANCE\" = \"runtime-only\" }",
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    fn test_exec_config_toml_rejects_serializing_runtime_instrument_fill_models() {
+        let config = SandboxExecutionClientConfig {
+            instrument_fill_models: AHashMap::from_iter([(
+                InstrumentId::from("ETHUSDT-PERP.BINANCE"),
+                FillModelAny::Default(Default::default()),
+            )]),
+            ..SandboxExecutionClientConfig::default()
+        };
+
+        let result = toml::Value::try_from(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    fn test_exec_config_toml_accepts_empty_instrument_fill_models() {
+        let config: SandboxExecutionClientConfig = toml::from_str("").unwrap();
+
+        assert!(config.instrument_fill_models.is_empty());
     }
 
     #[rstest]

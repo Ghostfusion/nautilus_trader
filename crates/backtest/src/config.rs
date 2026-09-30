@@ -291,6 +291,12 @@ pub struct SimulatedVenueConfig {
     /// The model used to simulate order fills.
     #[builder(default)]
     pub fill_model: FillModelHandle,
+    /// The per-instrument fill model overrides, keyed by instrument ID.
+    ///
+    /// An instrument with an override uses it instead of the venue `fill_model`; an
+    /// instrument without one inherits the venue model.
+    #[builder(default)]
+    pub instrument_fill_models: AHashMap<InstrumentId, FillModelHandle>,
     /// The model used to calculate trading fees.
     ///
     /// Must be configured explicitly, including an explicit zero-fee model.
@@ -527,6 +533,11 @@ pub struct BacktestVenueConfig {
     modules: Vec<SimulationModuleAny>,
     /// The fill model for the venue.
     fill_model: Option<FillModelAny>,
+    /// The per-instrument fill model overrides, keyed by instrument ID.
+    ///
+    /// An instrument with an override uses it instead of the venue fill model; an
+    /// instrument without one inherits the venue fill model.
+    instrument_fill_models: Option<AHashMap<InstrumentId, FillModelAny>>,
     /// The latency model for the venue.
     latency_model: Option<LatencyModelAny>,
     /// The fee model for the venue.
@@ -760,6 +771,11 @@ impl BacktestVenueConfig {
     #[must_use]
     pub fn fill_model(&self) -> Option<&FillModelAny> {
         self.fill_model.as_ref()
+    }
+
+    #[must_use]
+    pub fn instrument_fill_models(&self) -> Option<&AHashMap<InstrumentId, FillModelAny>> {
+        self.instrument_fill_models.as_ref()
     }
 
     #[must_use]

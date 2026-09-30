@@ -44,7 +44,11 @@ use nautilus_core::{DurationNanos, Params, UUID4, UnixNanos, WeakCell};
 use nautilus_execution::{
     client::core::ExecutionClientCore,
     matching_engine::{OrderMatchingEngine, inflight::InflightOrders},
-    models::{fee::FeeModelHandle, fill::FillModelHandle, latency::LatencyModel},
+    models::{
+        fee::FeeModelHandle,
+        fill::{FillModelHandle, FillModelSelection},
+        latency::LatencyModel,
+    },
 };
 use nautilus_model::{
     accounts::AccountAny,
@@ -136,11 +140,20 @@ impl SandboxExecutionClient {
             balances.insert(money.currency.code.to_string(), *money);
         }
 
-        let fill_model = config
-            .fill_model
-            .clone()
-            .map(FillModelHandle::from)
-            .unwrap_or_default();
+        let fill_models = FillModelSelection::new(
+            config
+                .fill_model
+                .clone()
+                .map(FillModelHandle::from)
+                .unwrap_or_default(),
+            config
+                .instrument_fill_models
+                .iter()
+                .map(|(instrument_id, model)| {
+                    (*instrument_id, FillModelHandle::from(model.clone()))
+                })
+                .collect(),
+        );
 
         let fee_model = config.fee_model.clone().map(FeeModelHandle::from).ok_or_else(|| {
             anyhow::anyhow!(
@@ -153,7 +166,7 @@ impl SandboxExecutionClient {
                 clock: clock.clone(),
                 cache: cache.clone(),
                 config: config.clone(),
-                fill_model,
+                fill_models,
                 fee_model,
                 matching_engines: AHashMap::new(),
                 next_engine_raw_id: 0,
@@ -891,7 +904,7 @@ struct SandboxInner {
     clock: Rc<RefCell<dyn Clock>>,
     cache: Rc<RefCell<Cache>>,
     config: SandboxExecutionClientConfig,
-    fill_model: FillModelHandle,
+    fill_models: FillModelSelection,
     fee_model: FeeModelHandle,
     matching_engines: AHashMap<InstrumentId, OrderMatchingEngine>,
     next_engine_raw_id: u32,
@@ -992,7 +1005,7 @@ impl SandboxInner {
 
         if !self.matching_engines.contains_key(&instrument_id) {
             let engine_config = self.config.to_matching_engine_config();
-            let fill_model = self.fill_model.clone();
+            let fill_model = self.fill_models.resolve(&instrument_id);
             let fee_model = self.fee_model.clone();
             let raw_id = self.next_engine_raw_id;
             self.next_engine_raw_id = self.next_engine_raw_id.wrapping_add(1);

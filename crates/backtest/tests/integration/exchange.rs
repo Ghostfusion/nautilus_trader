@@ -51,6 +51,9 @@ use nautilus_common::{
 use nautilus_core::{DurationNanos, UUID4, UnixNanos, datetime::get_timezone};
 use nautilus_execution::models::{
     fee::{FeeModelAny, MakerTakerFeeModel},
+    fill::{
+        BestPriceFillModel, DefaultFillModel, FillModel, FillModelHandle, OneTickSlippageFillModel,
+    },
     latency::{LatencyModelHandle, StaticLatencyModel},
 };
 use nautilus_model::{
@@ -435,6 +438,201 @@ fn test_append_only_matching_engine_raw_ids_start_at_one_and_increment(
     );
 }
 
+/// Builds an exchange whose venue fill model and per-instrument overrides are explicit.
+fn get_exchange_with_fill_models(
+    fill_model: FillModelHandle,
+    instrument_fill_models: AHashMap<InstrumentId, FillModelHandle>,
+    cache: Rc<RefCell<Cache>>,
+) -> Rc<RefCell<SimulatedExchange>> {
+    let clock = Rc::new(RefCell::new(VirtualClock::new()));
+    let config = SimulatedVenueConfig::builder()
+        .venue(Venue::new("BINANCE"))
+        .oms_type(OmsType::Netting)
+        .account_type(AccountType::Margin)
+        .book_type(BookType::L1_MBP)
+        .starting_balances(vec![Money::new(1_000_000.0, Currency::USD())])
+        .default_leverage(Decimal::ONE)
+        .fee_model(FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into())
+        .fill_model(fill_model)
+        .instrument_fill_models(instrument_fill_models)
+        .build()
+        .unwrap();
+    let exchange = Rc::new(RefCell::new(
+        SimulatedExchange::new(config, cache.clone(), clock).unwrap(),
+    ));
+    SimulatedExchange::register_spread_quote_endpoint(&exchange);
+
+    let clock = VirtualClock::new();
+    let execution_client = BacktestExecutionClient::new(
+        TraderId::test_default(),
+        AccountId::test_default(),
+        &exchange,
+        cache,
+        Rc::new(RefCell::new(clock)),
+        None,
+        None,
+    );
+    exchange
+        .borrow_mut()
+        .register_client(Rc::new(execution_client));
+    exchange
+}
+
+/// Returns a second perpetual on the same venue, distinct from the `ETHUSDT` fixture.
+fn second_perpetual(crypto_perpetual_ethusdt: &CryptoPerpetual) -> InstrumentAny {
+    let mut second = crypto_perpetual_ethusdt.clone();
+    second.id = InstrumentId::from("BTCUSDT-PERP.BINANCE");
+    second.raw_symbol = Symbol::from("BTCUSDT");
+    second.base_currency = Currency::from("BTC");
+    InstrumentAny::CryptoPerpetual(second)
+}
+
+#[rstest]
+fn test_instrument_fill_model_override_wins_over_the_venue_fill_model(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let first_instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
+    let second_instrument = second_perpetual(&crypto_perpetual_ethusdt);
+    let exchange = get_exchange_with_fill_models(
+        FillModelHandle::new(DefaultFillModel::default()),
+        AHashMap::from_iter([(
+            first_instrument.id(),
+            FillModelHandle::new(BestPriceFillModel::new(1.0, 0.0, None).unwrap()),
+        )]),
+        Rc::new(RefCell::new(Cache::default())),
+    );
+
+    exchange
+        .borrow_mut()
+        .add_instrument(first_instrument.clone())
+        .unwrap();
+    exchange
+        .borrow_mut()
+        .add_instrument(second_instrument.clone())
+        .unwrap();
+
+    let exchange = exchange.borrow();
+
+    assert!(
+        exchange
+            .fill_model_for(&first_instrument.id())
+            .fill_limit_inside_spread()
+            .unwrap(),
+        "the override must resolve for its own instrument"
+    );
+    assert!(
+        !exchange
+            .fill_model_for(&second_instrument.id())
+            .fill_limit_inside_spread()
+            .unwrap(),
+        "another instrument must inherit the venue fill model"
+    );
+}
+
+#[rstest]
+fn test_venue_fill_model_change_keeps_instrument_overrides(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let first_instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
+    let second_instrument = second_perpetual(&crypto_perpetual_ethusdt);
+    let exchange = get_exchange_with_fill_models(
+        FillModelHandle::new(DefaultFillModel::default()),
+        AHashMap::from_iter([(
+            first_instrument.id(),
+            FillModelHandle::new(DefaultFillModel::default()),
+        )]),
+        Rc::new(RefCell::new(Cache::default())),
+    );
+    exchange
+        .borrow_mut()
+        .add_instrument(first_instrument.clone())
+        .unwrap();
+    exchange
+        .borrow_mut()
+        .add_instrument(second_instrument.clone())
+        .unwrap();
+
+    exchange.borrow_mut().set_fill_model(FillModelHandle::new(
+        BestPriceFillModel::new(1.0, 0.0, None).unwrap(),
+    ));
+
+    let exchange = exchange.borrow();
+
+    assert!(
+        exchange
+            .fill_model_for(&second_instrument.id())
+            .fill_limit_inside_spread()
+            .unwrap(),
+        "an instrument without an override must follow the new venue fill model"
+    );
+    assert!(
+        !exchange
+            .fill_model_for(&first_instrument.id())
+            .fill_limit_inside_spread()
+            .unwrap(),
+        "the override must be left in place by a venue-level change"
+    );
+}
+
+#[rstest]
+fn test_instrument_fill_model_override_decides_the_matching_engine_fill_price(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let first_instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt.clone());
+    let second_instrument = second_perpetual(&crypto_perpetual_ethusdt);
+    let saving_handler = register_order_event_saving_handler();
+    let cache = Rc::new(RefCell::new(Cache::default()));
+    let exchange = get_exchange_with_fill_models(
+        FillModelHandle::new(OneTickSlippageFillModel::new(1.0, 0.0, None).unwrap()),
+        AHashMap::from_iter([(
+            first_instrument.id(),
+            FillModelHandle::new(DefaultFillModel::default()),
+        )]),
+        cache.clone(),
+    );
+    exchange
+        .borrow_mut()
+        .add_instrument(first_instrument.clone())
+        .unwrap();
+    exchange
+        .borrow_mut()
+        .add_instrument(second_instrument.clone())
+        .unwrap();
+
+    for instrument_id in [first_instrument.id(), second_instrument.id()] {
+        let quote = QuoteTick::new(
+            instrument_id,
+            Price::from("1000.00"),
+            Price::from("1001.00"),
+            Quantity::from("1.000"),
+            Quantity::from("1.000"),
+            UnixNanos::from(1),
+            UnixNanos::from(1),
+        );
+        exchange.borrow_mut().process_quote_tick(&quote).unwrap();
+    }
+
+    let first_order = market_buy_order(first_instrument.id(), "O-FILL-MODEL-FIRST");
+    let second_order = market_buy_order(second_instrument.id(), "O-FILL-MODEL-SECOND");
+    submit_order_and_process(&exchange, &cache, &first_order, UnixNanos::from(2));
+    submit_order_and_process(&exchange, &cache, &second_order, UnixNanos::from(3));
+
+    let messages = saving_handler.get_messages();
+    let first_fill = find_order_fill(&messages, first_order.client_order_id());
+    let second_fill = find_order_fill(&messages, second_order.client_order_id());
+
+    assert_eq!(
+        first_fill.last_px,
+        Price::from("1001.00"),
+        "the overridden instrument must fill from the recorded book"
+    );
+    assert_eq!(
+        second_fill.last_px,
+        Price::from("1001.01"),
+        "the other instrument must inherit the venue one-tick model"
+    );
+}
+
 #[rstest]
 fn test_readded_instrument_does_not_collide_generated_fill_ids(
     crypto_perpetual_ethusdt: CryptoPerpetual,
@@ -484,7 +682,7 @@ fn test_readded_instrument_does_not_collide_generated_fill_ids(
         .quantity(Quantity::from("1.000"))
         .price(Price::from("1001.00"))
         .build();
-    submit_matching_option_limit(&exchange, &cache, &pre_readd_order, fill_timestamp);
+    submit_order_and_process(&exchange, &cache, &pre_readd_order, fill_timestamp);
 
     exchange
         .borrow_mut()
@@ -521,13 +719,13 @@ fn test_readded_instrument_does_not_collide_generated_fill_ids(
         .price(Price::from("1001.00"))
         .build();
 
-    submit_matching_option_limit(&exchange, &cache, &first_order, fill_timestamp);
-    submit_matching_option_limit(&exchange, &cache, &second_order, fill_timestamp);
+    submit_order_and_process(&exchange, &cache, &first_order, fill_timestamp);
+    submit_order_and_process(&exchange, &cache, &second_order, fill_timestamp);
 
     let messages = saving_handler.get_messages();
-    let pre_readd_fill = matching_option_fill(&messages, pre_readd_order.client_order_id());
-    let first_fill = matching_option_fill(&messages, first_order.client_order_id());
-    let second_fill = matching_option_fill(&messages, second_order.client_order_id());
+    let pre_readd_fill = find_order_fill(&messages, pre_readd_order.client_order_id());
+    let first_fill = find_order_fill(&messages, first_order.client_order_id());
+    let second_fill = find_order_fill(&messages, second_order.client_order_id());
     assert_eq!(pre_readd_fill.ts_event, first_fill.ts_event);
     assert_ne!(pre_readd_fill.venue_order_id, first_fill.venue_order_id);
     assert_ne!(pre_readd_fill.trade_id, first_fill.trade_id);
@@ -588,7 +786,7 @@ fn test_same_timestamp_fills_follow_matching_engine_registration_order(
                 .quantity(Quantity::from("1.000"))
                 .price(Price::from("1000.00"))
                 .build();
-            submit_matching_option_limit(&exchange, &cache, &order, UnixNanos::from(2));
+            submit_order_and_process(&exchange, &cache, &order, UnixNanos::from(2));
 
             let closed = InstrumentStatus::new(
                 instrument.id(),
@@ -822,10 +1020,10 @@ fn test_option_limit_order_crossing_bbo_fills_as_taker(
         matching_option_quantity(&instrument),
         limit_price,
     );
-    submit_matching_option_limit(&exchange, &cache, &order, UnixNanos::from(2));
+    submit_order_and_process(&exchange, &cache, &order, UnixNanos::from(2));
 
     let messages = saving_handler.get_messages();
-    let fill = matching_option_fill(&messages, order.client_order_id());
+    let fill = find_order_fill(&messages, order.client_order_id());
     assert_eq!(fill.instrument_id, instrument.id());
     assert_eq!(fill.order_side, side);
     assert_eq!(fill.last_px, expected_fill_price);
@@ -1042,8 +1240,8 @@ fn test_open_order_accessors_filter_by_instrument_id(crypto_perpetual_ethusdt: C
         .price(Price::from("210.00"))
         .quantity(Quantity::from("1.000"))
         .build();
-    submit_matching_option_limit(&exchange, &cache, &eth_bid, UnixNanos::from(2));
-    submit_matching_option_limit(&exchange, &cache, &btc_ask, UnixNanos::from(3));
+    submit_order_and_process(&exchange, &cache, &eth_bid, UnixNanos::from(2));
+    submit_order_and_process(&exchange, &cache, &btc_ask, UnixNanos::from(3));
 
     let exchange = exchange.borrow();
 
@@ -1145,7 +1343,7 @@ fn test_option_resting_limit_order_fills_as_maker_when_bbo_trades_through(
         matching_option_quantity(&instrument),
         limit_price,
     );
-    submit_matching_option_limit(&exchange, &cache, &order, UnixNanos::from(2));
+    submit_order_and_process(&exchange, &cache, &order, UnixNanos::from(2));
 
     assert!(
         saving_handler
@@ -1168,7 +1366,7 @@ fn test_option_resting_limit_order_fills_as_maker_when_bbo_trades_through(
         .unwrap();
 
     let messages = saving_handler.get_messages();
-    let fill = matching_option_fill(&messages, order.client_order_id());
+    let fill = find_order_fill(&messages, order.client_order_id());
     assert_eq!(fill.instrument_id, instrument.id());
     assert_eq!(fill.order_side, side);
     assert_eq!(fill.last_px, limit_price);
@@ -1204,7 +1402,16 @@ fn matching_option_limit_order(
         .build()
 }
 
-fn submit_matching_option_limit(
+fn market_buy_order(instrument_id: InstrumentId, client_order_id: &str) -> OrderAny {
+    OrderTestBuilder::new(OrderType::Market)
+        .instrument_id(instrument_id)
+        .client_order_id(ClientOrderId::from(client_order_id))
+        .side(OrderSide::Buy)
+        .quantity(Quantity::from("1.000"))
+        .build()
+}
+
+fn submit_order_and_process(
     exchange: &Rc<RefCell<SimulatedExchange>>,
     cache: &Rc<RefCell<Cache>>,
     order: &OrderAny,
@@ -1238,10 +1445,7 @@ fn submit_matching_option_limit(
     exchange.borrow_mut().process(ts_init);
 }
 
-fn matching_option_fill(
-    messages: &[OrderEventAny],
-    client_order_id: ClientOrderId,
-) -> &OrderFilled {
+fn find_order_fill(messages: &[OrderEventAny], client_order_id: ClientOrderId) -> &OrderFilled {
     messages
         .iter()
         .find_map(|event| match event {

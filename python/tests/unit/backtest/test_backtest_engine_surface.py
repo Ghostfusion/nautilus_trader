@@ -40,6 +40,7 @@ from nautilus_trader.backtest import SimulationModule
 from nautilus_trader.backtest import SimulationModuleContext
 from nautilus_trader.common import ImportableActorConfig
 from nautilus_trader.execution import BestPriceFillModel
+from nautilus_trader.execution import DefaultFillModel
 from nautilus_trader.execution import MakerTakerFeeModel
 from nautilus_trader.execution import OneTickSlippageFillModel
 from nautilus_trader.execution import StaticLatencyModel
@@ -1176,6 +1177,37 @@ def test_importable_strategy_processes_bars_trades_and_reference_data() -> None:
     assert result.total_orders >= 3
     assert result.total_positions >= 1
     assert result.summary["positions.open"] == "0"
+    engine.dispose()
+
+
+def test_add_venue_accepts_instrument_fill_model_overrides() -> None:
+    """
+    Test add_venue accepts per-instrument fill model overrides and runs with them.
+    """
+    instrument = TestInstrumentProvider.audusd_sim()
+    engine = BacktestEngine(BacktestEngineConfig(bypass_logging=True, run_analysis=False))
+    engine.add_venue(
+        venue=Venue("SIM"),
+        oms_type=OmsType.NETTING,
+        account_type=AccountType.MARGIN,
+        starting_balances=[Money(1_000_000.0, USD)],
+        base_currency=USD,
+        fill_model=DefaultFillModel(prob_fill_on_limit=1.0, prob_slippage=0.0),
+        instrument_fill_models={
+            instrument.id: OneTickSlippageFillModel(
+                prob_fill_on_limit=1.0,
+                prob_slippage=0.0,
+            ),
+        },
+        fee_model=MakerTakerFeeModel(maker_rate=Decimal(0), taker_rate=Decimal(0)),
+    )
+    engine.add_instrument(instrument)
+    engine.add_data(_audusd_quotes(instrument, count=4))
+
+    engine.run()
+    result = engine.get_result()
+
+    assert result.iterations == 4
     engine.dispose()
 
 

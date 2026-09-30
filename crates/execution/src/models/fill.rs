@@ -1640,6 +1640,80 @@ impl Display for FillModelKind {
     }
 }
 
+/// The fill model selection for a venue, resolved per instrument as an inheritance chain.
+///
+/// The selection levels, from least to most specific, are the global default, the venue
+/// default, and the per-instrument override:
+///
+/// 1. The global default is the built-in fill model. It is what a venue inherits when the
+///    venue configuration sets no fill model.
+/// 2. The venue default is set by the venue configuration, or replaced at runtime for a
+///    backtest venue.
+/// 3. The per-instrument override is set by the venue configuration for a named instrument.
+///
+/// A level that sets a model overrides every less specific level, and a level that sets
+/// nothing inherits, so an instrument without an override resolves to the venue default and a
+/// venue without a default resolves to the built-in model. Resolution happens once, when the
+/// matching engine for an instrument is created; the engine then holds that model, which is
+/// the matching-engine level of the chain and can be replaced at runtime.
+///
+/// Order-specific overrides are not part of the selection: an order carries no fill model
+/// affiliation, so there is no level to declare and nothing to inherit.
+#[derive(Clone, Debug, Default)]
+pub struct FillModelSelection {
+    venue_default: FillModelHandle,
+    instrument_overrides: ahash::AHashMap<InstrumentId, FillModelHandle>,
+}
+
+impl FillModelSelection {
+    /// Creates a new [`FillModelSelection`] from a venue default and per-instrument overrides.
+    #[must_use]
+    pub fn new(
+        venue_default: FillModelHandle,
+        instrument_overrides: ahash::AHashMap<InstrumentId, FillModelHandle>,
+    ) -> Self {
+        Self {
+            venue_default,
+            instrument_overrides,
+        }
+    }
+
+    /// Returns the venue default, the level below the per-instrument overrides.
+    #[must_use]
+    pub fn venue_default(&self) -> &FillModelHandle {
+        &self.venue_default
+    }
+
+    /// Replaces the venue default, leaving the per-instrument overrides in place.
+    pub fn set_venue_default(&mut self, fill_model: FillModelHandle) {
+        self.venue_default = fill_model;
+    }
+
+    /// Sets the per-instrument override, replacing any existing override for the instrument.
+    pub fn set_instrument_override(
+        &mut self,
+        instrument_id: InstrumentId,
+        fill_model: FillModelHandle,
+    ) {
+        self.instrument_overrides.insert(instrument_id, fill_model);
+    }
+
+    /// Returns `true` if the instrument has an override instead of inheriting the venue default.
+    #[must_use]
+    pub fn has_instrument_override(&self, instrument_id: &InstrumentId) -> bool {
+        self.instrument_overrides.contains_key(instrument_id)
+    }
+
+    /// Resolves the fill model for an instrument: its override if set, else the venue default.
+    #[must_use]
+    pub fn resolve(&self, instrument_id: &InstrumentId) -> FillModelHandle {
+        self.instrument_overrides
+            .get(instrument_id)
+            .cloned()
+            .unwrap_or_else(|| self.venue_default.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use nautilus_core::correctness::CorrectnessError;
@@ -2303,5 +2377,82 @@ mod tests {
 
         assert!(error.contains("liquidity_factor"));
         assert!(error.contains(&kind.to_string()));
+    }
+
+    fn best_price_handle() -> FillModelHandle {
+        FillModelHandle::new(BestPriceFillModel::new(1.0, 0.0, None).unwrap())
+    }
+
+    #[rstest]
+    fn test_fill_model_selection_inherits_the_global_default() {
+        let selection = FillModelSelection::default();
+        let instrument_id = InstrumentId::from("ETHUSDT.BINANCE");
+
+        assert!(!selection.has_instrument_override(&instrument_id));
+        assert!(
+            !selection
+                .resolve(&instrument_id)
+                .fill_limit_inside_spread()
+                .unwrap()
+        );
+    }
+
+    #[rstest]
+    fn test_fill_model_selection_instrument_override_wins_over_the_venue_default() {
+        let venue_id = InstrumentId::from("BTCUSDT.BINANCE");
+        let override_id = InstrumentId::from("ETHUSDT.BINANCE");
+        let selection = FillModelSelection::new(
+            FillModelHandle::new(DefaultFillModel::default()),
+            ahash::AHashMap::from_iter([(override_id, best_price_handle())]),
+        );
+
+        assert!(selection.has_instrument_override(&override_id));
+        assert!(!selection.has_instrument_override(&venue_id));
+        assert!(
+            selection
+                .resolve(&override_id)
+                .fill_limit_inside_spread()
+                .unwrap()
+        );
+        assert!(
+            !selection
+                .resolve(&venue_id)
+                .fill_limit_inside_spread()
+                .unwrap()
+        );
+    }
+
+    #[rstest]
+    fn test_fill_model_selection_venue_default_change_keeps_instrument_overrides() {
+        let venue_id = InstrumentId::from("BTCUSDT.BINANCE");
+        let override_id = InstrumentId::from("ETHUSDT.BINANCE");
+        let mut selection = FillModelSelection::new(
+            FillModelHandle::new(DefaultFillModel::default()),
+            ahash::AHashMap::new(),
+        );
+        selection.set_instrument_override(
+            override_id,
+            FillModelHandle::new(DefaultFillModel::default()),
+        );
+        selection.set_venue_default(best_price_handle());
+
+        assert!(
+            selection
+                .venue_default()
+                .fill_limit_inside_spread()
+                .unwrap()
+        );
+        assert!(
+            selection
+                .resolve(&venue_id)
+                .fill_limit_inside_spread()
+                .unwrap()
+        );
+        assert!(
+            !selection
+                .resolve(&override_id)
+                .fill_limit_inside_spread()
+                .unwrap()
+        );
     }
 }

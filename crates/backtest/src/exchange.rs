@@ -42,7 +42,7 @@ use nautilus_execution::{
     },
     models::{
         fee::FeeModelHandle,
-        fill::FillModelHandle,
+        fill::{FillModelHandle, FillModelSelection},
         latency::{LatencyModel, LatencyModelHandle},
     },
 };
@@ -160,7 +160,7 @@ pub struct SimulatedExchange {
     /// loading) events dispatch directly, so immediate mode keeps its synchronous timing.
     deferring_events: Rc<Cell<bool>>,
     fee_model: FeeModelHandle,
-    fill_model: FillModelHandle,
+    fill_models: FillModelSelection,
     latency_model: Option<LatencyModelHandle>,
     instruments: AHashMap<InstrumentId, InstrumentAny>,
     matching_engines: IndexMap<InstrumentId, OrderMatchingEngine>,
@@ -250,7 +250,7 @@ impl SimulatedExchange {
             event_handler: None,
             deferring_events: Rc::new(Cell::new(false)),
             fee_model: config.fee_model,
-            fill_model: config.fill_model,
+            fill_models: FillModelSelection::new(config.fill_model, config.instrument_fill_models),
             latency_model: config.latency_model,
             instruments: AHashMap::new(),
             matching_engines: IndexMap::new(),
@@ -311,13 +311,31 @@ impl SimulatedExchange {
         msgbus::register_quote_endpoint(endpoint.into(), handler);
     }
 
-    /// Sets the fill model for the exchange.
+    /// Sets the venue fill model for the exchange.
+    ///
+    /// This sets the venue level of the fill model selection: every instrument without its
+    /// own override resolves to it, including matching engines that already exist. A
+    /// per-instrument override is more specific and is left in place.
     pub fn set_fill_model(&mut self, fill_model: FillModelHandle) {
-        for matching_engine in self.matching_engines.values_mut() {
-            matching_engine.set_fill_model(fill_model.clone());
+        self.fill_models.set_venue_default(fill_model);
+
+        let venue_default = self.fill_models.venue_default().clone();
+        for (instrument_id, matching_engine) in &mut self.matching_engines {
+            if self.fill_models.has_instrument_override(instrument_id) {
+                continue;
+            }
+            matching_engine.set_fill_model(venue_default.clone());
             log::info!("Setting fill model for {}", matching_engine.venue);
         }
-        self.fill_model = fill_model;
+    }
+
+    /// Returns the fill model the given instrument resolves to in the selection chain.
+    ///
+    /// The result is the per-instrument override if one is set, otherwise the venue fill
+    /// model, which itself defaults to the built-in model.
+    #[must_use]
+    pub fn fill_model_for(&self, instrument_id: &InstrumentId) -> FillModelHandle {
+        self.fill_models.resolve(instrument_id)
     }
 
     /// Sets the latency model for the exchange.
@@ -440,6 +458,10 @@ impl SimulatedExchange {
     // panics-doc-ok (transitive via expect_display on venue mismatch)
     /// Adds an instrument to the simulated exchange and initializes its matching engine.
     ///
+    /// The matching engine is created with the fill model the instrument resolves to in the
+    /// selection chain: its per-instrument override if one is configured, otherwise the venue
+    /// fill model.
+    ///
     /// # Errors
     ///
     /// Returns an error if:
@@ -500,7 +522,7 @@ impl SimulatedExchange {
         let mut matching_engine = OrderMatchingEngine::new(
             instrument.clone(),
             raw_id,
-            self.fill_model.clone(),
+            self.fill_models.resolve(&instrument_id),
             self.fee_model.clone(),
             self.book_type,
             self.oms_type,

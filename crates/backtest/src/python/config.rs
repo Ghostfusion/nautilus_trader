@@ -17,6 +17,7 @@
 
 use std::{collections::HashMap, fmt::Display, str::FromStr, time::Duration};
 
+use ahash::AHashMap;
 use nautilus_common::{
     cache::CacheConfig, enums::Environment, logging::logger::LoggerConfig,
     msgbus::MessageBusConfig, python::config_error_to_pyvalue_err,
@@ -28,6 +29,7 @@ use nautilus_core::{
 use nautilus_data::engine::config::DataEngineConfig;
 use nautilus_execution::{
     engine::config::ExecutionEngineConfig,
+    models::fill::FillModelAny,
     python::{
         fee::{fee_model_any_to_pyobject, pyobject_to_fee_model_any},
         fill::{fill_model_any_to_pyobject, pyobject_to_fill_model_any},
@@ -329,6 +331,7 @@ impl BacktestVenueConfig {
         liquidation_enabled = None,
         liquidation_trigger_ratio = None,
         liquidation_cancel_open_orders = None,
+        instrument_fill_models = None,
     ))]
     #[expect(clippy::too_many_arguments)]
     fn py_new(
@@ -371,6 +374,7 @@ impl BacktestVenueConfig {
         liquidation_enabled: Option<bool>,
         liquidation_trigger_ratio: Option<f64>,
         liquidation_cancel_open_orders: Option<bool>,
+        instrument_fill_models: Option<HashMap<InstrumentId, Py<PyAny>>>,
     ) -> pyo3::PyResult<Self> {
         let oms_type = enum_from_python(oms_type)?;
         let account_type = enum_from_python(account_type)?;
@@ -393,6 +397,18 @@ impl BacktestVenueConfig {
         let fill_model = fill_model
             .map(|obj| Python::attach(|py| pyobject_to_fill_model_any(obj.bind(py))))
             .transpose()?;
+        let instrument_fill_models: Option<AHashMap<InstrumentId, FillModelAny>> =
+            instrument_fill_models
+                .map(|models| {
+                    models
+                        .into_iter()
+                        .map(|(instrument_id, obj)| {
+                            Python::attach(|py| pyobject_to_fill_model_any(obj.bind(py)))
+                                .map(|model| (instrument_id, model))
+                        })
+                        .collect::<pyo3::PyResult<_>>()
+                })
+                .transpose()?;
         let latency_model = latency_model
             .map(|obj| Python::attach(|py| pyobject_to_latency_model_any(obj.bind(py))))
             .transpose()?;
@@ -428,6 +444,7 @@ impl BacktestVenueConfig {
             .maybe_margin_model(margin_model)
             .modules(modules)
             .maybe_fill_model(fill_model)
+            .maybe_instrument_fill_models(instrument_fill_models)
             .maybe_latency_model(latency_model)
             .maybe_fee_model(fee_model)
             .maybe_price_protection_points(price_protection_points)
@@ -609,6 +626,24 @@ impl BacktestVenueConfig {
     fn py_fill_model(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         self.fill_model()
             .map(|model| fill_model_any_to_pyobject(py, model))
+            .transpose()
+    }
+
+    #[getter]
+    #[pyo3(name = "instrument_fill_models")]
+    fn py_instrument_fill_models(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<Option<HashMap<InstrumentId, Py<PyAny>>>> {
+        self.instrument_fill_models()
+            .map(|models| {
+                models
+                    .iter()
+                    .map(|(instrument_id, model)| {
+                        fill_model_any_to_pyobject(py, model).map(|obj| (*instrument_id, obj))
+                    })
+                    .collect()
+            })
             .transpose()
     }
 

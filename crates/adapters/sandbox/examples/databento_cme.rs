@@ -103,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         book_type: BookType::L1_MBP,
         fee_model: Some(FeeModelAny::MakerTaker(MakerTakerFeeModel::zero())),
         fill_model: None,
+        instrument_fill_models: ahash::AHashMap::new(),
         latency_model: None,
         frozen_account: false,
         bar_execution: true,

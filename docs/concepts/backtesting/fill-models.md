@@ -164,6 +164,58 @@ constructed, using that model's own constructor. It holds no behaviour of its ow
 second fill implementation: passing the model object directly remains supported and equivalent, and
 `config.fill_model` reads back the resolved model object either way.
 
+### Per-instrument overrides
+
+A venue can set a different fill model for individual instruments:
+
+```python
+from decimal import Decimal
+
+from nautilus_trader.config import BacktestVenueConfig
+from nautilus_trader.execution import DefaultFillModel
+from nautilus_trader.execution import FillModelConfig
+from nautilus_trader.execution import FillModelKind
+from nautilus_trader.execution import MakerTakerFeeModel
+from nautilus_trader.model import AccountType
+from nautilus_trader.model import BookType
+from nautilus_trader.model import InstrumentId
+from nautilus_trader.model import OmsType
+
+venue = BacktestVenueConfig(
+    name="BINANCE",
+    oms_type=OmsType.NETTING,
+    account_type=AccountType.MARGIN,
+    book_type=BookType.L1_MBP,
+    starting_balances=["1_000_000 USDT"],
+    fill_model=DefaultFillModel(prob_fill_on_limit=0.0),
+    instrument_fill_models={
+        InstrumentId.from_str("ETHUSDT-PERP.BINANCE"): FillModelConfig(
+            kind=FillModelKind.THREE_TIER,
+            random_seed=7,
+        ),
+    },
+    fee_model=MakerTakerFeeModel(
+        maker_rate=Decimal("0"),
+        taker_rate=Decimal("0"),
+    ),
+)
+```
+
+Fill model selection is an inheritance chain. The levels, from least to most specific, are the
+global default (the built-in model above, used when a venue sets no fill model), the venue
+`fill_model`, and the per-instrument override. A level that sets a model overrides the less
+specific levels, and a level that sets nothing inherits them, so an instrument without an override
+resolves to the venue fill model and a venue without one resolves to the default model.
+
+The override is applied when the matching engine for the instrument is created. Calling
+`BacktestEngine.change_fill_model` afterwards changes the venue level only, so existing instrument
+overrides keep applying.
+
+`instrument_fill_models` is accepted wherever `fill_model` is: `BacktestVenueConfig`,
+`BacktestEngine.add_venue`, and `SandboxExecutionClientConfig`. Entries are either built-in model
+objects or `FillModelConfig` descriptions, like `fill_model` itself. The sandbox field is
+runtime-only in configuration serialization, as its other model fields are.
+
 ### Custom fill models
 
 The low-level `BacktestEngine.add_venue()` method also accepts a custom Python object. It must
@@ -276,8 +328,10 @@ Configuration layer:
 Default and selection:
 
 - The default is `FillModelAny::Default(DefaultFillModel::default())` (`fill.rs:1424-1427`), which is also what `FillModelHandle::default()` yields (`fill.rs:153-157`).
-- `BacktestVenueConfig.fill_model` is `Option<FillModelAny>` (`config.rs:528-529`); `BacktestNode` does `.unwrap_or_default().into()` so an omitted fill model becomes the default model (`node.rs:264-268`).
-- `SimulatedVenueConfig.fill_model` is a `FillModelHandle` (`config.rs:291-293`); the exchange stores it and passes it to every matching engine (`exchange.rs:163,253,503`). `BacktestEngine::change_fill_model` swaps it at runtime (`crates/backtest/src/engine.rs:351-360`).
+- Selection is an inheritance chain resolved by `FillModelSelection` in the execution crate (`fill.rs:1643-1716`): the global default, then the venue default, then the per-instrument override. `resolve` returns the instrument's override when it has one and the venue default otherwise (`fill.rs:1708-1715`), so a level that sets no model inherits.
+- `BacktestVenueConfig.fill_model` is `Option<FillModelAny>` (`config.rs:528-529`) and `instrument_fill_models` is an optional `InstrumentId`-keyed map of the same description (`config.rs:536-540`); `BacktestNode` maps the venue model and the overrides to handles (`node.rs:264-275`).
+- `SimulatedVenueConfig.fill_model` is a `FillModelHandle` (`config.rs:291-293`) and `instrument_fill_models` is an `InstrumentId`-keyed handle map (`config.rs:294-299`); the exchange builds the selection from both (`exchange.rs:163,253-256`) and resolves it per instrument when the matching engine is created, so the engine receives exactly the resolved model (`exchange.rs:524-528`). `BacktestEngine::change_fill_model` replaces the venue default at runtime and leaves instrument overrides in place (`exchange.rs:322-333`; `crates/backtest/src/engine.rs:351-360`).
+- The sandbox client carries the same selection (`crates/adapters/sandbox/src/execution.rs:143-154`) and resolves it when it creates a matching engine (`crates/adapters/sandbox/src/execution.rs:1006`). Its `instrument_fill_models` field is runtime-only in serialization, like its other model fields (`crates/adapters/sandbox/src/config.rs:88-100`).
 - When a model returns a synthetic book, its fills come from `OrderBook::simulate_fills` using a market sentinel price (`Price::max`/`Price::min`), and are marked `from_synthetic` (`mod.rs:4575-4611`). When it returns `None`, the engine uses the real book: market orders cross the book (`determine_market_price_and_volume`, `mod.rs:4520-4548`) and limit orders use crossed levels or `simulate_fills` (`determine_limit_price_and_volume`, `mod.rs:4357-4517`).
 - `fill_limit_inside_spread` is applied once at engine construction: the matching core treats a limit at or better than the same-side best quote as fillable only when the model returns `true` (`mod.rs:184-186,551-555`).
 - After a fill price is produced, `apply_fills` may shift it by one tick when `is_slipped()` is true and the book is L1 (`mod.rs:5112-5117`).

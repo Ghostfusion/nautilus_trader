@@ -347,6 +347,8 @@ class BacktestVenueConfig:
     @property
     def fill_model(self) -> typing.Any | None: ...
     @property
+    def instrument_fill_models(self) -> dict[model.InstrumentId, typing.Any] | None: ...
+    @property
     def latency_model(self) -> typing.Any | None: ...
     @property
     def fee_model(self) -> typing.Any | None: ...
@@ -393,6 +395,7 @@ class BacktestVenueConfig:
         liquidation_enabled: bool | None = None,
         liquidation_trigger_ratio: float | None = None,
         liquidation_cancel_open_orders: bool | None = None,
+        instrument_fill_models: typing.Mapping[model.InstrumentId, typing.Any] | None = None,
     ) -> BacktestVenueConfig: ...
 
 @typing.final
@@ -516,6 +519,7 @@ class BacktestEngine:
         liquidation_enabled: bool = False,
         liquidation_trigger_ratio: float | None = None,
         liquidation_cancel_open_orders: bool = True,
+        instrument_fill_models: typing.Mapping[model.InstrumentId, typing.Any] | None = None,
     ) -> None: ...
     def change_fill_model(self, venue: model.Venue, fill_model: typing.Any) -> None: ...
     def add_data(
