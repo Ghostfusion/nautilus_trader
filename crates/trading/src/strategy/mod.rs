@@ -57,9 +57,12 @@ use nautilus_model::{
         LIMIT_ORDER_TYPES, Order, OrderAny, OrderCore, OrderError, OrderList, STOP_ORDER_TYPES,
     },
     position::Position,
+    signal::TradingSignal,
     types::{Price, Quantity},
 };
 use ustr::Ustr;
+
+use crate::target_pipeline::TargetPipelineConfig;
 
 /// Describes one child update in a batch modify request.
 pub type BatchModifyOrder = (
@@ -165,6 +168,85 @@ pub trait Strategy: DataActor {
         Self: StrategyNative,
     {
         StrategyNative::strategy_core(self).portfolio_api()
+    }
+
+    /// Enables the optional target pipeline for this strategy.
+    ///
+    /// The strategy holds no pipeline until this is called, so a strategy that never enables one
+    /// keeps the direct order path unchanged. Enabling replaces any pipeline already enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pipeline configuration is invalid.
+    fn enable_target_pipeline(&mut self, config: TargetPipelineConfig) -> anyhow::Result<()>
+    where
+        Self: StrategyNative,
+    {
+        StrategyNative::strategy_core_mut(self).enable_target_pipeline(config)
+    }
+
+    /// Disables the target pipeline, returning the strategy to the direct order path.
+    fn disable_target_pipeline(&mut self)
+    where
+        Self: StrategyNative,
+    {
+        StrategyNative::strategy_core_mut(self).disable_target_pipeline();
+    }
+
+    /// Returns whether the target pipeline is enabled for this strategy.
+    fn target_pipeline_enabled(&self) -> bool
+    where
+        Self: StrategyNative,
+    {
+        StrategyNative::strategy_core(self).target_pipeline_enabled()
+    }
+
+    /// Submits one signal batch through the target pipeline.
+    ///
+    /// The strategy's enabled pipeline constructs a target per signal against a snapshot of the
+    /// cache and the portfolio, reconciles the targets to the minimal order set, and submits each
+    /// resulting [`TargetOrder`](crate::target::TargetOrder) as a market order on the existing
+    /// order submission path. The returned client order IDs are in the order the orders were
+    /// emitted.
+    ///
+    /// Because the snapshot is built from what the cache already holds, a signal whose instrument
+    /// the cache holds no price or no definition for cannot be constructed or reconciled, and the
+    /// call returns that error rather than submitting a partial batch. The pipeline stores no
+    /// position state: the cache and the portfolio stay authoritative, and a second call emits an
+    /// order only for the delta the cache does not already reflect.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pipeline is not enabled, the strategy is not registered, the
+    /// signals name more than one venue, the account equity for the venue is absent or held in more
+    /// than one currency, order creation fails, a signal cannot be constructed or reconciled, or
+    /// order submission fails.
+    fn submit_signals(&mut self, signals: Vec<TradingSignal>) -> anyhow::Result<Vec<ClientOrderId>>
+    where
+        Self: StrategyNative + StrategyBinding,
+    {
+        let target_orders = StrategyNative::strategy_core(self).target_orders(&signals)?;
+        let mut client_order_ids = Vec::with_capacity(target_orders.len());
+
+        for target_order in target_orders {
+            let order = StrategyNative::strategy_core(self).order().market(
+                target_order.instrument_id,
+                target_order.side,
+                target_order.quantity,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            let client_order_id = order.client_order_id();
+            self.submit_order(order, None, None, None)?;
+            client_order_ids.push(client_order_id);
+        }
+
+        Ok(client_order_ids)
     }
 
     /// Submits an order.

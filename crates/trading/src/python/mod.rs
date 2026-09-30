@@ -24,6 +24,7 @@ pub mod algorithm;
 pub mod controller;
 pub mod sessions;
 pub mod strategy;
+pub mod target_pipeline;
 pub mod universe;
 
 #[cfg(feature = "examples")]
@@ -48,6 +49,7 @@ pub fn trading(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::controller::ImportableControllerConfig>()?;
     m.add_class::<crate::strategy::StrategyConfig>()?;
     m.add_class::<crate::strategy::ImportableStrategyConfig>()?;
+    m.add_class::<crate::target_pipeline::TargetPipelineConfig>()?;
     m.add_class::<algorithm::PyExecutionAlgorithm>()?;
     m.add_class::<crate::algorithm::ExecutionAlgorithmConfig>()?;
     m.add_class::<crate::algorithm::ImportableExecutionAlgorithmConfig>()?;

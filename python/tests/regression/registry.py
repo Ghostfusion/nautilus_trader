@@ -26,6 +26,7 @@ from tests.regression.cases.equity_session_events import SCENARIO as EQUITY_SESS
 from tests.regression.cases.execution_realism_composed import SCENARIO as EXECUTION_REALISM_COMPOSED
 from tests.regression.cases.market_impact_model import SCENARIO as MARKET_IMPACT_MODEL
 from tests.regression.cases.multi_venue_parity import SCENARIO as MULTI_VENUE_PARITY
+from tests.regression.cases.target_pipeline_parity import SCENARIO as TARGET_PIPELINE_PARITY
 from tests.regression.cases.universe_membership import SCENARIO as UNIVERSE_MEMBERSHIP
 from tests.regression.cases.venue_slippage_model import SCENARIO as VENUE_SLIPPAGE_MODEL
 from tests.regression.scenario import Scenario
@@ -39,4 +40,5 @@ SCENARIOS: tuple[Scenario, ...] = (
     VENUE_SLIPPAGE_MODEL,
     MARKET_IMPACT_MODEL,
     EXECUTION_REALISM_COMPOSED,
+    TARGET_PIPELINE_PARITY,
 )

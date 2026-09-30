@@ -675,6 +675,52 @@ shows no measurable regression when it is unused; the parity golden scenario pas
 **Risks.** Competing ownership of position intent. Mitigation: reconciliation against the
 authoritative cache before any order is emitted, and the feature stays behind a flag until proven.
 
+**Implementation.** Steps 1 to 4, delivered earlier, define the `TradingSignal` and `Target` values
+in `crates/model/src/{signal,target}.rs`, the `TargetConstruction` stage with
+`TargetConstructionConfig`, and the `TargetReconciler` with `ReconcileContext`, `TargetOrder`, and
+`TargetReconcilerError` in `crates/trading/src/target.rs`. Steps 5 to 7 were delivered together:
+
+5. The opt-in surface. `crates/trading/src/target_pipeline.rs` adds `TargetPipelineConfig`, which
+   bundles a `TargetConstructionConfig` with a `min_order_quantity: Quantity`, and `TargetPipeline`,
+   which holds a `TargetConstruction` and a `TargetReconciler` and delegates `construct` and
+   `reconcile` to them without adding semantics. `StrategyCore` holds an `Option<TargetPipeline>`
+   that is `None` until the strategy opts in, with `enable_target_pipeline`, `disable_target_pipeline`,
+   `target_pipeline_enabled`, and `target_orders`. `target_orders` builds the construction and
+   reconciliation contexts from what the strategy already holds: equity from the portfolio, positions
+   and open orders from the cache, and prices and instrument definitions from the cache (a price
+   prefers the last trade, then the mid quote, then the mark price). The `Strategy` trait forwards
+   the three control methods and adds `submit_signals`, which submits each reconciled `TargetOrder`
+   as a market order on the existing `submit_order` path and returns the client order IDs in the
+   order emitted. Python exposes `TargetPipelineConfig` (in `nautilus_trader.trading`) and the four
+   methods on `Strategy` (`crates/trading/src/python/strategy.rs`,
+   `crates/trading/src/python/target_pipeline.rs`).
+6. The three-layer separation is documented in `docs/concepts/target_pipeline.md`, linked from
+   `docs/concepts/index.md`: a signal is not a target and a target is not an order, neither is a
+   trading command, the cache and the portfolio stay authoritative, and the pipeline is opt-in while
+   the direct path is unchanged.
+7. The parity evidence and the golden scenario.
+   `python/tests/integration/test_target_pipeline_parity.py` runs the same quote data twice: one
+   strategy submits a market order of 100 units directly, and one enables the pipeline and submits a
+   long signal whose constructed target, at 1,000,000 USD equity, a mid price of 100.000, a 1 per
+   cent stop, and 0.0001 of equity risked, resolves through the fixed-risk sizing to the same 100
+   units. The observed sets agree:
+
+   - direct orders `[("AAPL.XNAS", "BUY", "100")]`, pipeline orders
+     `[("AAPL.XNAS", "BUY", "100")]`;
+   - direct fills `[("AAPL.XNAS", "BUY", "100.01", "100")]`, pipeline fills
+     `[("AAPL.XNAS", "BUY", "100.01", "100")]`;
+   - direct positions `[("AAPL.XNAS", "LONG", "100")]`, pipeline positions
+     `[("AAPL.XNAS", "LONG", "100")]`.
+
+   The golden scenario `python/tests/regression/cases/target_pipeline_parity.py` runs the pipeline
+   path and declares its order and fill; its committed digest is
+   `blake3:1f23f678e90160164393ac0632eb9956d224ddab3ebfcc2ac362121d1dee07a7`.
+
+Acceptance is met for the simple case: the two paths produce equivalent orders for equivalent
+intent, the pipeline is disabled by default, and the goldens that predate this change are unchanged.
+The hot-path regression claim is not separately benchmarked here; the pipeline is inert when unused,
+because a strategy holds no pipeline until it opts in and the direct path is untouched.
+
 ## 10. W8: optimization as an external research subsystem (L6)
 
 **Objective.** A research optimizer over backtest runs with an explicit methodology boundary, split

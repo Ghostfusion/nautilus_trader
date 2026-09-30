@@ -3,6 +3,7 @@
 
 import collections.abc
 import datetime
+import decimal
 import enum
 import typing
 
@@ -28,6 +29,7 @@ __all__ = [
     "StaticUniverseRule",
     "Strategy",
     "StrategyConfig",
+    "TargetPipelineConfig",
     "Universe",
     "UniverseDefinition",
     "UniverseRemovalPolicy",
@@ -561,6 +563,12 @@ class Strategy:
         client_id: model.ClientId | None = None,
         params: dict | None = None,
     ) -> None: ...
+    def enable_target_pipeline(self, config: TargetPipelineConfig) -> None: ...
+    def disable_target_pipeline(self) -> None: ...
+    def target_pipeline_enabled(self) -> bool: ...
+    def submit_signals(
+        self, signals: typing.Sequence[model.TradingSignal]
+    ) -> list[model.ClientOrderId]: ...
     def modify_order(
         self,
         client_order_id: model.ClientOrderId,
@@ -1100,6 +1108,27 @@ class StrategyConfig:
     def log_commands(self) -> bool: ...
     @property
     def log_rejected_due_post_only_as_warning(self) -> bool: ...
+
+@typing.final
+class TargetPipelineConfig:
+    @property
+    def risk_per_trade(self) -> decimal.Decimal: ...
+    @property
+    def stop_loss_bps(self) -> int: ...
+    @property
+    def max_weight(self) -> decimal.Decimal: ...
+    @property
+    def commission_rate(self) -> decimal.Decimal: ...
+    @property
+    def min_order_quantity(self) -> model.Quantity: ...
+    def __new__(
+        cls,
+        risk_per_trade: decimal.Decimal,
+        stop_loss_bps: int,
+        max_weight: decimal.Decimal,
+        commission_rate: decimal.Decimal,
+        min_order_quantity: model.Quantity | None = None,
+    ) -> TargetPipelineConfig: ...
 
 @typing.final
 class UniverseDefinition:

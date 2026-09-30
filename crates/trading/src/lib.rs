@@ -111,6 +111,7 @@ pub mod controller;
 pub mod sessions;
 pub mod strategy;
 pub mod target;
+pub mod target_pipeline;
 pub mod universe;
 
 #[cfg(feature = "examples")]
@@ -128,6 +129,7 @@ pub use target::{
     ReconcileContext, TargetConstruction, TargetConstructionConfig, TargetConstructionContext,
     TargetConstructionError, TargetOrder, TargetReconciler, TargetReconcilerError,
 };
+pub use target_pipeline::{TargetPipeline, TargetPipelineConfig};
 pub use universe::{
     ScheduledUniverseRule, ScheduledUniverseSet, SharedUniverseRule, StaticUniverseRule, Universe,
     UniverseBarSpec, UniverseChange, UniverseChangeReason, UniverseDefinition, UniverseMember,

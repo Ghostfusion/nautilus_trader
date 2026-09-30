@@ -31,16 +31,29 @@ use nautilus_core::{
     correctness::{CorrectnessResult, CorrectnessResultExt, FAILED},
 };
 use nautilus_execution::order_manager::manager::OrderManager;
-use nautilus_model::identifiers::{
-    ActorId, ClientOrderId, StrategyId, TraderId, UNASSIGNED_ORDER_ID_TAG, check_order_id_tag,
-    normalize_order_id_tag,
+use nautilus_model::{
+    enums::{OrderSide, PriceType},
+    identifiers::{
+        ActorId, ClientOrderId, InstrumentId, StrategyId, TraderId, UNASSIGNED_ORDER_ID_TAG, Venue,
+        check_order_id_tag, normalize_order_id_tag,
+    },
+    instruments::InstrumentAny,
+    orders::Order,
+    position::fold_net_position,
+    signal::TradingSignal,
+    types::{Money, Price, Quantity},
 };
 use nautilus_portfolio::portfolio::Portfolio;
+use rust_decimal::{Decimal, prelude::FromPrimitive};
 use ustr::Ustr;
 
 use super::{
     api::{OrderApi, PortfolioApi},
     config::StrategyConfig,
+};
+use crate::{
+    target::{ReconcileContext, TargetConstructionContext, TargetOrder},
+    target_pipeline::{TargetPipeline, TargetPipelineConfig},
 };
 
 /// The core component of a [`Strategy`](crate::strategy::Strategy), managing data, orders,
@@ -68,6 +81,7 @@ pub struct StrategyCore {
     pub(crate) market_exit_attempts: u64,
     pub(crate) market_exit_timer_name: Ustr,
     pub(crate) market_exit_tag: Ustr,
+    pub(crate) target_pipeline: Option<TargetPipeline>,
 }
 
 impl Debug for StrategyCore {
@@ -194,6 +208,7 @@ impl StrategyCore {
             market_exit_attempts: 0,
             market_exit_timer_name,
             market_exit_tag: Ustr::from("MARKET_EXIT"),
+            target_pipeline: None,
         })
     }
 
@@ -373,6 +388,200 @@ impl StrategyCore {
         self.pending_stop = false;
         self.market_exit_attempts = 0;
     }
+
+    /// Enables the optional target pipeline for this strategy.
+    ///
+    /// The strategy holds no pipeline until this is called, so a strategy that never enables one
+    /// keeps the direct order path unchanged. Enabling replaces any pipeline already enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pipeline configuration is invalid.
+    pub fn enable_target_pipeline(&mut self, config: TargetPipelineConfig) -> anyhow::Result<()> {
+        let pipeline = TargetPipeline::new(config)?;
+        self.target_pipeline = Some(pipeline);
+        Ok(())
+    }
+
+    /// Disables the target pipeline, returning the strategy to the direct order path.
+    pub fn disable_target_pipeline(&mut self) {
+        self.target_pipeline = None;
+    }
+
+    /// Returns whether the target pipeline is enabled for this strategy.
+    #[must_use]
+    pub fn target_pipeline_enabled(&self) -> bool {
+        self.target_pipeline.is_some()
+    }
+
+    /// Returns the enabled target pipeline, if any.
+    #[must_use]
+    pub fn target_pipeline(&self) -> Option<&TargetPipeline> {
+        self.target_pipeline.as_ref()
+    }
+
+    /// Builds the snapshot from the cache and the portfolio, then runs the pipeline.
+    ///
+    /// The snapshot is assembled from what the strategy already has access to: the equity comes
+    /// from the portfolio, and the positions, open orders, prices, and instrument definitions come
+    /// from the cache. Nothing is written back, so the cache and the portfolio stay authoritative
+    /// and the pipeline stores no position state of its own.
+    ///
+    /// A price is resolved from the cache for each signal instrument, preferring the last trade
+    /// price, then the mid quote price, then the mark price. A signal instrument the cache holds no
+    /// price or no definition for is passed through to the construction stage without one, and the
+    /// stage reports it, so a missing input surfaces as an error rather than as a silently dropped
+    /// signal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pipeline is not enabled, the strategy is not registered, the
+    /// signals name more than one venue, the account equity for the venue is absent or held in more
+    /// than one currency, or a signal cannot be constructed or reconciled.
+    pub fn target_orders(&self, signals: &[TradingSignal]) -> anyhow::Result<Vec<TargetOrder>> {
+        let Some(pipeline) = self.target_pipeline.as_ref() else {
+            anyhow::bail!("Target pipeline is not enabled");
+        };
+
+        if signals.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let strategy_id = self
+            .strategy_id
+            .ok_or_else(|| anyhow::anyhow!("Strategy is not registered"))?;
+
+        let mut instrument_ids: Vec<InstrumentId> = Vec::new();
+        let mut venues: Vec<Venue> = Vec::new();
+        for signal in signals {
+            let instrument_id = signal.instrument_id();
+            if !instrument_ids.contains(&instrument_id) {
+                instrument_ids.push(instrument_id);
+            }
+            if !venues.contains(&instrument_id.venue) {
+                venues.push(instrument_id.venue);
+            }
+        }
+
+        if venues.len() != 1 {
+            anyhow::bail!("Target pipeline requires signals for a single venue, was {venues:?}");
+        }
+        let venue = venues[0];
+
+        let cache_rc = self.cache_rc();
+        let cache = cache_rc.try_borrow().map_err(|_| {
+            anyhow::anyhow!("Cannot build a target snapshot: the cache is currently borrowed")
+        })?;
+
+        let mut instruments: Vec<InstrumentAny> = Vec::new();
+        let mut prices: Vec<(InstrumentId, Price)> = Vec::new();
+        let mut positions: Vec<(InstrumentId, Decimal)> = Vec::new();
+        let mut open_orders: Vec<(InstrumentId, OrderSide, Quantity)> = Vec::new();
+
+        for instrument_id in &instrument_ids {
+            if let Some(instrument) = cache.instrument(instrument_id) {
+                instruments.push(instrument.clone());
+            }
+            if let Some(price) = resolve_cache_price(&cache, instrument_id) {
+                prices.push((*instrument_id, price));
+            }
+            positions.push((
+                *instrument_id,
+                net_cache_position(&cache, strategy_id, instrument_id),
+            ));
+            for order in
+                cache.orders_open(None, Some(instrument_id), Some(&strategy_id), None, None)
+            {
+                open_orders.push((order.instrument_id(), order.order_side(), order.quantity()));
+            }
+        }
+        drop(cache);
+
+        let equity = self.target_pipeline_equity(venue)?;
+
+        let construction_context = TargetConstructionContext {
+            equity,
+            instruments: instruments.clone(),
+            prices: prices.clone(),
+            positions: Vec::new(),
+        };
+        let targets = pipeline.construct(signals, &construction_context)?;
+
+        let reconcile_context = ReconcileContext {
+            instruments,
+            prices,
+            equity,
+            positions,
+            open_orders,
+        };
+
+        Ok(pipeline.reconcile(&targets, &reconcile_context)?)
+    }
+
+    /// Returns the single-currency account equity for `venue` from the portfolio.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the portfolio holds no equity for the venue, or holds it in more than
+    /// one currency, which the single [`Money`] the construction stage sizes from cannot express.
+    fn target_pipeline_equity(&self, venue: Venue) -> anyhow::Result<Money> {
+        let equity = self.portfolio_api().equity(&venue, None);
+
+        if equity.is_empty() {
+            anyhow::bail!("Target pipeline requires account equity for venue {venue}");
+        }
+
+        if equity.len() > 1 {
+            let currencies = equity
+                .keys()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow::bail!(
+                "Target pipeline requires a single-currency account, {venue} holds: {currencies}",
+            );
+        }
+
+        Ok(equity
+            .into_values()
+            .next()
+            .expect("equity is non-empty after the length check"))
+    }
+}
+
+/// Resolves the cache price for `instrument_id`, preferring the most observable source.
+///
+/// The last trade price is preferred, then the mid quote price, then the mark price. An
+/// instrument the cache holds none of resolves to `None`, which the construction stage reports.
+fn resolve_cache_price(cache: &Cache, instrument_id: &InstrumentId) -> Option<Price> {
+    cache
+        .price(instrument_id, PriceType::Last)
+        .or_else(|| cache.price(instrument_id, PriceType::Mid))
+        .or_else(|| cache.price(instrument_id, PriceType::Mark))
+}
+
+/// Returns the signed net position for `instrument_id` from the strategy's cached positions.
+///
+/// The legs are folded with [`fold_net_position`], so a net short is negative. A [`Quantity`] is
+/// non-negative and cannot express a short position, so the result is an exact [`Decimal`].
+fn net_cache_position(
+    cache: &Cache,
+    strategy_id: StrategyId,
+    instrument_id: &InstrumentId,
+) -> Decimal {
+    let legs: Vec<(Decimal, Decimal, u64)> = cache
+        .positions_open(None, Some(instrument_id), Some(&strategy_id), None, None)
+        .iter()
+        .map(|position| {
+            (
+                position.signed_decimal_qty(),
+                Decimal::from_f64(position.avg_px_open).unwrap_or(Decimal::ZERO),
+                position.ts_opened.as_u64(),
+            )
+        })
+        .collect();
+
+    fold_net_position(&legs).0
 }
 
 impl DataActorNative for StrategyCore {

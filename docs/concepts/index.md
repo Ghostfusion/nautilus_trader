@@ -19,6 +19,12 @@ Covers capabilities and implementation details.
 
 How to implement trading strategies using the `Strategy` component.
 
+## Target Pipeline
+
+[Target Pipeline](target_pipeline.md) describes the optional signal-to-target-to-order path, the
+three-layer separation, and why the cache and portfolio stay authoritative while the direct path is
+unchanged.
+
 ## Instruments
 
 Instrument definitions for tradable assets and contracts.

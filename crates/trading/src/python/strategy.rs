@@ -86,6 +86,7 @@ use nautilus_model::{
         data::option_chain::PyStrikeRange, events::order::order_event_to_pyobject,
         instruments::instrument_any_to_pyobject, orders::pyobject_to_order_any,
     },
+    signal::TradingSignal,
     types::{Price, Quantity},
     universe::UniverseChange,
 };
@@ -97,9 +98,12 @@ use pyo3::{
 };
 use ustr::Ustr;
 
-use crate::strategy::{
-    BatchModifyOrder, ImportableStrategyConfig, Strategy, StrategyConfig, StrategyCore,
-    StrategyNative, route_time_event,
+use crate::{
+    strategy::{
+        BatchModifyOrder, ImportableStrategyConfig, Strategy, StrategyConfig, StrategyCore,
+        StrategyNative, route_time_event,
+    },
+    target_pipeline::TargetPipelineConfig,
 };
 
 #[pyo3::pymethods]
@@ -2190,6 +2194,41 @@ impl PyStrategy {
 
         Strategy::submit_order_list(inner, orders, position_id, client_id, params_map)
             .map_err(to_pyruntime_err)
+    }
+
+    /// Enables the optional target pipeline for this strategy.
+    ///
+    /// Until this is called the strategy holds no pipeline and the direct order path is
+    /// unchanged. Enabling replaces any pipeline already enabled.
+    #[pyo3(name = "enable_target_pipeline")]
+    fn py_enable_target_pipeline(&mut self, config: TargetPipelineConfig) -> PyResult<()> {
+        Strategy::enable_target_pipeline(self.inner_mut(), config).map_err(to_pyruntime_err)
+    }
+
+    /// Disables the target pipeline, returning the strategy to the direct order path.
+    #[pyo3(name = "disable_target_pipeline")]
+    fn py_disable_target_pipeline(&mut self) {
+        Strategy::disable_target_pipeline(self.inner_mut());
+    }
+
+    /// Returns whether the target pipeline is enabled for this strategy.
+    #[pyo3(name = "target_pipeline_enabled")]
+    fn py_target_pipeline_enabled(&self) -> bool {
+        Strategy::target_pipeline_enabled(self.inner())
+    }
+
+    /// Submits one signal batch through the target pipeline.
+    ///
+    /// The enabled pipeline constructs a target per signal, reconciles them to the minimal order
+    /// set against the cache and the portfolio, and submits each resulting market order on the
+    /// existing order path. The returned client order IDs are in the order the orders were
+    /// emitted.
+    ///
+    /// A signal whose instrument the cache holds no price or no definition for cannot be
+    /// constructed or reconciled, and the call raises rather than submitting a partial batch.
+    #[pyo3(name = "submit_signals")]
+    fn py_submit_signals(&mut self, signals: Vec<TradingSignal>) -> PyResult<Vec<ClientOrderId>> {
+        Strategy::submit_signals(self.inner_mut(), signals).map_err(to_pyruntime_err)
     }
 
     #[pyo3(name = "modify_order")]
