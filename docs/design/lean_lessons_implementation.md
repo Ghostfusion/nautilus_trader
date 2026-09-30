@@ -290,13 +290,17 @@ inert for assets where a corporate action cannot occur.
 
 **Not implemented yet.**
 
-- The opt-in adjustment stage. No data configuration selects a representation, converts input, or
-  emits the actions as events; only the `AdjustmentSeries` primitive exists.
-- The symbol map. Identity is not modelled over time, so a rename does not resolve to one identity
-  and emits no event.
-- The delisting action. The `Delisting` kind exists, but it is not a terminal instrument status and
-  has no position-close behaviour through the `InstrumentClose` path.
-- Run provenance. No run records which representation it consumed.
+- Delivery of a corporate action to the Python actor and strategy surface. The data engine publishes
+  each action on `data.corporate_actions.{venue}.{symbol}`, but no `on_corporate_action` callback and
+  no subscribe helper reach Python, so a Python component cannot observe an action.
+- Declared regression scenarios for a mid-series rename and a delisting close. Both behaviours are
+  implemented and unit tested, but no declared scenario pins them.
+- A declared regression scenario for the adjustment stage. `BacktestNode.get_engine_canonical_result`
+  now exposes the canonical document of a catalog-driven run, but a scenario of the stage needs an
+  order in that document, and a market order submitted by a strategy in a node run over catalog bars
+  does not fill: the canonical document of such a run has no orders, fills, or positions, and its
+  digest does not move with the prices. That is the blocker to record, and it is worth its own
+  investigation before the stage can be pinned by a scenario.
 
 **Boundary.** Engine and research. File formats are the data contract (L9A).
 
@@ -307,14 +311,20 @@ subtracted, a split and dividend composed, two splits composed, a symbol change 
 scaling a price, `convert` between representations including identity, effect-time sorting, and the
 rejection of a foreign instrument or a non-positive split. `crates/serialization/src/arrow/corporate_action.rs`
 round-trips a batch, and `crates/backtest/src/config.rs` accepts `NautilusDataType::CorporateAction`
-in the data configuration allow list. The golden scenario coverage in the design (a raw and adjusted
-series, an unchanged default-path digest, a mid-series rename, and a delisting close) is not present,
-because it depends on the steps listed as not implemented.
+in the data configuration allow list. The stage is covered end to end by
+`python/tests/integration/test_backtest_node_corporate_actions.py`, which runs a node over a
+synthetic catalog holding a 4:1 split and a dividend and asserts the converted series, the reverse
+conversion, an unconfigured run passing raw prices through while replaying no action record, and
+that each action record is processed at its effective instant rather than at its announcement.
+`BacktestNode.get_engine_canonical_result` exposes the canonical document of a catalog-driven run,
+so a declared scenario could pin the stage once the fill blocker above is resolved. The unchanged
+default path is asserted by every scenario that predates the stage keeping its committed digest.
 
 **Risks.** Mixed adjusted and raw semantics inside one strategy is the classic silent error.
-Mitigation: raw data immutable, adjustment opt-in at the primitive level, and a representation
-recorded per run. The recording and the stage wiring are not implemented, so this mitigation is
-currently partial; the residual risk is the unimplemented steps above.
+Mitigation: raw data immutable, adjustment opt-in per data configuration, and a representation
+recorded per run in the canonical document. The residual risk is that an action cannot reach a
+Python component, that a mid-series rename and a delisting close have no declared scenario, and that
+the stage cannot yet be pinned by a scenario because a node-path order does not fill.
 
 ## 7. W5: universe definition, selection, and membership (L2)
 
@@ -353,10 +363,6 @@ through the existing subscription machinery.
 
 **Not implemented yet.**
 
-- The live sandbox subscription-leak run. The live node accepts a universe (`add_universe` on both
-  the backtest node and the live node) and the live path uses the same data command path the unit
-  tests exercise, so the remaining work is a live-path test with a mock data client rather than an
-  unverified code path.
 - The per-event cost comparison for an unused universe is not measured. What is asserted is that an
   unconfigured universe holds no claims and arms no timer, and that the existing scenarios keep
   their digests unchanged.
@@ -367,9 +373,11 @@ through the existing subscription machinery.
 removal, both removal policies, and the claim balance of an add, remove, and stop lifecycle. The
 golden scenario and its committed expectations prove a scheduled universe reproduces its result
 across runs, and the scenarios that predate it keep their digests unchanged. The Python integration
-test covers delivery to a subscribed strategy through a real run. Outstanding: the live sandbox
-subscription-leak run (the same command path is covered by the unit tests) and a measured per-event
-cost comparison for an unused universe.
+test covers delivery to a subscribed strategy through a real run. The live path is covered by
+`test_live_node_universe_releases_member_subscriptions_on_stop` in `crates/live/src/node/mod.rs`,
+which registers a recording data client through the node builder, drives the node's run loop, and
+asserts that every subscription the universe made for its members is released when the node stops.
+Outstanding: a measured per-event cost comparison for an unused universe.
 
 **Risks.** Subscription ownership bugs and live metadata gaps. Mitigation: the claim-balance tests
 over the data command path, a definition that declares its subscriptions explicitly, and the fact

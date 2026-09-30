@@ -270,3 +270,58 @@ def test_node_delivers_corporate_actions_at_their_effective_instants(tmp_path: P
     # action record was re-stamped to its effective instant; the announcement is earlier.
     assert result.backtest_end == TRAILING_DIVIDEND_NS
     assert result.backtest_end != ANNOUNCE_NS
+
+
+def _canonical_digest(catalog_path: Path, run_id: str) -> str:
+    catalog = ParquetDataCatalog(str(catalog_path))
+    catalog.write_instruments([INSTRUMENT])
+    catalog.write_bars(_bars(RAW_PRICES))
+    catalog.write_corporate_actions(_corporate_actions())
+
+    venue = BacktestVenueConfig(
+        name="XNAS",
+        oms_type="NETTING",
+        account_type="CASH",
+        starting_balances=["1_000_000 USD"],
+        book_type="L1_MBP",
+        fee_model=MakerTakerFeeModel(maker_rate=Decimal(0), taker_rate=Decimal(0)),
+    )
+    data = BacktestDataConfig(
+        data_type=NautilusDataType.Bar,
+        catalog_path=str(catalog_path),
+        instrument_id=INSTRUMENT_ID,
+        bar_types=[str(BAR_TYPE)],
+        data_adjustment=DataAdjustment(PriceRepresentation.RAW, PriceRepresentation.ADJUSTED),
+    )
+    config = BacktestRunConfig(
+        id=run_id,
+        venues=[venue],
+        data=[data],
+        engine=BacktestEngineConfig(bypass_logging=True, run_analysis=False),
+        dispose_on_completion=False,
+    )
+    node = BacktestNode([config])
+    node.build()
+    try:
+        node.run()
+        return node.get_engine_canonical_result(run_id).digest()
+    finally:
+        node.dispose()
+
+
+def test_node_canonical_result_is_reproducible_across_catalog_directories(
+    tmp_path: Path,
+) -> None:
+    """
+    Test a catalog run projects the same canonical document from a different catalog directory.
+    """
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+
+    first = _canonical_digest(first_dir, "corporate-action-digest")
+    second = _canonical_digest(second_dir, "corporate-action-digest")
+
+    assert first.startswith("blake3:")
+    assert first == second

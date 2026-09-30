@@ -40,7 +40,10 @@ use super::engine::{
     generate_positions_report,
 };
 use crate::{
-    config::BacktestRunConfig, engine::BacktestEngine, node::BacktestNode, result::BacktestResult,
+    config::BacktestRunConfig,
+    engine::BacktestEngine,
+    node::BacktestNode,
+    result::{BacktestResult, CanonicalBacktestResult},
 };
 
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -109,6 +112,26 @@ impl BacktestNode {
     #[pyo3(name = "dispose")]
     fn py_dispose(&mut self) {
         self.dispose();
+    }
+
+    /// Returns the canonical result of the given run config engine.
+    ///
+    /// The canonical document is the same one `BacktestEngine.get_canonical_result` returns, so a
+    /// run driven from the catalog by this node is comparable by digest like an engine run.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No engine exists for the run config ID.
+    /// - Observable state cannot be projected into the canonical schema.
+    #[pyo3(name = "get_engine_canonical_result")]
+    fn py_get_engine_canonical_result(
+        &self,
+        run_config_id: &str,
+    ) -> PyResult<CanonicalBacktestResult> {
+        self.require_engine(run_config_id)?
+            .get_canonical_result()
+            .map_err(to_pyruntime_err)
     }
 
     /// Returns the cache for the given run config engine.
