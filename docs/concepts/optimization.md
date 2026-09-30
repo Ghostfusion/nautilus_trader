@@ -125,12 +125,124 @@ runner and produce the same results, in the same order.
 - `statistic_values`: the statistics bridge.
 - `TrainStage`, `OptimizeStage`, `ValidateStage`, `OutOfSampleStage`, `WalkForwardStage`,
   `WalkForwardWindow`, `walk_forward_windows`, `WalkForwardReport`: the methodology stages.
+- `OptimizationConfig`, `load_config`, `run_config`: the JSON configuration-file entry point the
+  `nautilus optimize` command and notebooks share.
 
 ## Where it lives
 
 The subsystem lives in `python/nautilus_trader/optimization/`: the parameter model in `space.py`,
 enumeration in `search.py`, execution in `runner.py`, the statistics bridge in `metrics.py`, result
 aggregation in `report.py`, the sweep in `optimizer.py`, the stages in `stages.py`, persistence in
-`persistence.py`, and process fan-out in `concurrency.py`. The objective and constraints are the
-existing Rust types exposed from `nautilus_trader.analysis`; this subsystem adds no second
-objective and no second execution path.
+`persistence.py`, process fan-out in `concurrency.py`, and the configuration-file entry point in
+`config.py`. The objective and constraints are the existing Rust types exposed from
+`nautilus_trader.analysis`; this subsystem adds no second objective and no second execution path.
+
+## The `optimize` command
+
+`nautilus optimize <CONFIG>` runs a declared optimization from a configuration file. It is a thin
+front end: it locates a Python interpreter, invokes the `nautilus_trader.optimization.config`
+entry point over the file, and lets the child's machine-readable JSON document go straight to
+standard output. It contains no optimization logic: no search, no objective, and no aggregation.
+
+```bash
+nautilus optimize config.json
+```
+
+The command writes one JSON document to standard output and reports failure through both the
+document and the process exit status, matching the catalog data subcommands. A successful sweep
+exits `0`; a configuration that is missing a file, contains an unknown key, or fails to load
+prints a document with `"status": "error"` and exits non-zero.
+
+| Argument or flag  | Meaning                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `<CONFIG>`        | Path to the JSON configuration file (required).                                    |
+| `--python <PATH>` | Python interpreter to invoke, overriding `NAUTILUS_PYTHON` and the fallback order. |
+
+## Configuration file
+
+The configuration file is JSON, matching the convention of the configuration file loader in
+`crates/system/src/config_file.rs`: a typed constructor remains the canonical API and a file is a
+view of a typed configuration, so unknown keys are rejected rather than ignored. JSON is used
+rather than YAML even though the Python project depends on `pyyaml`, because the loader convention
+it follows is JSON and the format needs no third-party parser.
+
+The document records the whole sweep: the strategy under test and its configuration factory, the
+parameter space, the run window, the objective and constraints, the methodology stage, the
+concurrency policy, and an optional persistence directory.
+
+```json
+{
+  "schema": "nautilus.optimization.config/v1",
+  "strategy": {
+    "strategy_path": "my_package.strategies:EMACross",
+    "config_path": "my_package.strategies:EMACrossConfig",
+    "config_factory": "my_package.runs:config_factory"
+  },
+  "space": {
+    "base": {
+      "instrument_id": "BTCUSDT.BINANCE",
+      "bar_type": "BTCUSDT.BINANCE-1-MINUTE-LAST-EXTERNAL",
+      "trade_size": "0.010000"
+    },
+    "parameters": [
+      {"name": "fast_ema_period", "choices": [5, 10]},
+      {"name": "slow_ema_period", "choices": [20, 30]}
+    ]
+  },
+  "window": {"start": null, "end": null},
+  "objective": {
+    "terms": [
+      {"metric": "Sharpe Ratio (252 days)", "weight": 1.0, "direction": "maximize"},
+      {"metric": "Max Drawdown", "weight": 1.0, "direction": "maximize"}
+    ]
+  },
+  "constraints": [
+    {"metric": "Max Drawdown", "comparison": "at_least", "bound": -0.013}
+  ],
+  "stage": {"kind": "optimize"},
+  "concurrency": {"max_workers": 1},
+  "store": {"directory": "runs/optimization"}
+}
+```
+
+- `strategy.config_factory` is an importable `module:function` reference to the configuration
+  factory the runner calls for each run window; it returns the venue configurations, data
+  configurations, and engine configuration. The configuration file describes no venue or data
+  configuration itself, so it cannot become a second configuration path.
+- `space.base` holds the fixed strategy values and `space.parameters` the named parameters with
+  their ordered choices; the last parameter varies fastest.
+- `window.start` and `window.end` are Unix nanoseconds, or `null` for the data's own bounds.
+- `objective.terms[].direction` is `maximize` or `minimize`, and
+  `constraints[].comparison` is `at_least` or `at_most`.
+- `store` is optional; when present the sweep is persisted under its directory.
+
+| `stage.kind`    | Extra keys                         | Runs                                                         |
+| --------------- | ---------------------------------- | ------------------------------------------------------------ |
+| `optimize`      | none                               | The ranked report of a search.                               |
+| `train`         | none                               | The best experiment selected on the window.                  |
+| `validate`      | `parameters`                       | One experiment evaluated against the constraints.            |
+| `out_of_sample` | `parameters`                       | One experiment evaluated on a window it was not selected on. |
+| `walk_forward`  | `in_sample_ns`, `out_of_sample_ns` | A search and out-of-sample evaluation per window.            |
+
+## Notebook helper
+
+`examples/backtest/notebooks/optimization_sweep.py` drives the same workflow a notebook user
+wants: it writes a configuration document, loads it with `load_config`, runs it with `run_config`,
+and prints the best experiment's parameters, score, and canonical digest. The notebook and the CLI
+call the same entry point, so there is one optimization implementation and one semantic model.
+
+## Interpreter contract
+
+The `optimize` command resolves the Python interpreter in this order, taking the first candidate
+that resolves to an existing file:
+
+1. `--python`, when given.
+2. `NAUTILUS_PYTHON`, when set and non-empty.
+3. `VIRTUAL_ENV\Scripts\python.exe` on Windows or `VIRTUAL_ENV/bin/python` elsewhere, when
+   `VIRTUAL_ENV` is set.
+4. `python3` on `PATH`, then `python` on `PATH`.
+
+A candidate that contains a path separator is treated as a path; otherwise it is looked up on
+`PATH` (with a `.exe` suffix tried on Windows). When no candidate resolves, the command fails and
+names every candidate it tried. The interpreter must have `nautilus_trader` importable, because
+the invoked module is the package's own optimization entry point.

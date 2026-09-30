@@ -298,7 +298,7 @@ pub(crate) fn run_generate(args: &CatalogDataOpt) -> anyhow::Result<()> {
 /// The data subcommands emit one machine-readable document on standard output, so console logging
 /// is disabled unless `NAUTILUS_LOG` is set to configure it explicitly. Failures stay visible
 /// through the document and the process exit status.
-fn silence_console_logging() {
+pub(crate) fn silence_console_logging() {
     if std::env::var_os("NAUTILUS_LOG").is_none() {
         log::set_max_level(log::LevelFilter::Off);
     }

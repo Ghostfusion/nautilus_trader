@@ -15,6 +15,7 @@
 
 use clap::Parser;
 use nautilus_persistence::backend::migration::parse_storage_option;
+use std::path::PathBuf;
 
 /// Command-line interface for NautilusTrader.
 #[derive(Debug, Parser)]
@@ -29,8 +30,26 @@ pub struct NautilusCli {
 pub enum Commands {
     Database(DatabaseOpt),
     Catalog(CatalogOpt),
+    /// Run a declared parameter optimization over backtest runs.
+    Optimize(OptimizeOpt),
     #[cfg(feature = "defi")]
     Blockchain(BlockchainOpt),
+}
+
+/// Parameter optimization options.
+///
+/// This is a thin front end: it invokes the Python optimization entry point over the same
+/// configuration file a notebook uses, and holds no optimization logic of its own. The child
+/// writes one machine-readable JSON document to standard output and reports failure through both
+/// the document and the process exit status.
+#[derive(Debug, Parser)]
+#[command(about = "Parameter optimization over backtest runs", long_about = None)]
+pub struct OptimizeOpt {
+    /// Path to the JSON optimization configuration file.
+    pub(crate) config: PathBuf,
+    /// Python interpreter to invoke, overriding `NAUTILUS_PYTHON` and the fallback order.
+    #[arg(long)]
+    pub(crate) python: Option<String>,
 }
 
 /// Database management options and subcommands.
@@ -462,6 +481,48 @@ pub struct CatalogConvertOpt {
     /// Identifier to restrict the conversion to. Can be repeated.
     #[arg(long = "identifier")]
     pub(crate) identifiers: Vec<String>,
+}
+
+#[cfg(test)]
+mod optimize_tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[test]
+    fn optimize_parses_config_path_and_defaults_python() {
+        let cli = NautilusCli::try_parse_from(["nautilus", "optimize", "config.json"]).unwrap();
+
+        let Commands::Optimize(config) = cli.command else {
+            panic!("Expected optimize command");
+        };
+
+        assert_eq!(config.config, PathBuf::from("config.json"));
+        assert_eq!(config.python, None);
+    }
+
+    #[test]
+    fn optimize_parses_python_override() {
+        let cli = NautilusCli::try_parse_from([
+            "nautilus",
+            "optimize",
+            "config.json",
+            "--python",
+            "/usr/bin/python3",
+        ])
+        .unwrap();
+
+        let Commands::Optimize(config) = cli.command else {
+            panic!("Expected optimize command");
+        };
+
+        assert_eq!(config.python.as_deref(), Some("/usr/bin/python3"));
+    }
+
+    #[test]
+    fn optimize_requires_a_config_path() {
+        assert!(NautilusCli::try_parse_from(["nautilus", "optimize"]).is_err());
+    }
 }
 
 #[cfg(test)]

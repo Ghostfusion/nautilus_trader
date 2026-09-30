@@ -59,6 +59,7 @@ mod blockchain;
 mod catalog;
 mod database;
 pub mod opt;
+mod optimize;
 
 use nautilus_persistence::backend::parquet::migration::{
     ParquetMigrationConfig, migrate_parquet_catalog,
@@ -108,6 +109,7 @@ pub async fn run(opt: NautilusCli) -> anyhow::Result<()> {
             CatalogCommand::Generate(args) => crate::catalog::run_generate(&args)?,
         },
         Commands::Database(database_opt) => run_database_command(database_opt).await?,
+        Commands::Optimize(optimize_opt) => crate::optimize::run_optimize(&optimize_opt)?,
         #[cfg(feature = "defi")]
         Commands::Blockchain(blockchain_opt) => {
             Box::pin(run_blockchain_command(blockchain_opt)).await?;

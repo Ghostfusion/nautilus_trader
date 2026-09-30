@@ -23,6 +23,10 @@ validate, out-of-sample, walk-forward) are explicit rather than one loop over a 
 """
 
 from nautilus_trader.optimization.concurrency import ConcurrencyPolicy as ConcurrencyPolicy
+from nautilus_trader.optimization.config import ConfigError as ConfigError
+from nautilus_trader.optimization.config import OptimizationConfig as OptimizationConfig
+from nautilus_trader.optimization.config import load_config as load_config
+from nautilus_trader.optimization.config import run_config as run_config
 from nautilus_trader.optimization.metrics import statistic_values as statistic_values
 from nautilus_trader.optimization.optimizer import Optimizer as Optimizer
 from nautilus_trader.optimization.persistence import ExperimentStore as ExperimentStore
@@ -52,11 +56,13 @@ __all__ = [
     "BacktestRunner",
     "CanonicalRun",
     "ConcurrencyPolicy",
+    "ConfigError",
     "Experiment",
     "ExperimentResult",
     "ExperimentStore",
     "FailedExperiment",
     "GridSearch",
+    "OptimizationConfig",
     "OptimizeStage",
     "Optimizer",
     "OutOfSampleStage",
@@ -71,6 +77,8 @@ __all__ = [
     "WalkForwardResult",
     "WalkForwardStage",
     "WalkForwardWindow",
+    "load_config",
+    "run_config",
     "statistic_values",
     "walk_forward_windows",
 ]
