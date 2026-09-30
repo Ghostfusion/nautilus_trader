@@ -36,6 +36,8 @@ pub mod orderbook;
 pub mod orders;
 pub mod position;
 pub mod reports;
+pub mod signal;
+pub mod target;
 pub mod types;
 pub mod universe;
 
@@ -160,6 +162,10 @@ pub fn model(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::universe::UniverseMembershipState>()?;
     m.add_class::<crate::universe::UniverseChangeReason>()?;
     m.add_class::<crate::universe::UniverseChange>()?;
+    m.add_class::<crate::signal::SignalDirection>()?;
+    m.add_class::<crate::signal::TradingSignal>()?;
+    m.add_class::<crate::python::target::PyTargetValue>()?;
+    m.add_class::<crate::target::Target>()?;
     m.add_class::<crate::data::funding::FundingRateUpdate>()?;
     m.add_class::<crate::data::greeks::OptionGreekValues>()?;
     m.add_class::<crate::data::greeks::BlackScholesGreeksResult>()?;
