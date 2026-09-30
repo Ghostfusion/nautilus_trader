@@ -14,6 +14,12 @@ path and [tutorials](../tutorials/) first.
 | [Data catalog with Databento][data_catalog_databento]             | Set up a catalog with Databento market data. |
 | [Inspect, validate, and convert a data catalog](catalog_data_cli) | Data CLI subcommands over a catalog.         |
 
+## Configuration
+
+| Guide                                                                | Description                                     |
+| :------------------------------------------------------------------- | :---------------------------------------------- |
+| [Validate and resolve a configuration file](configuration_file_cli)  | Validate and print a typed configuration file.  |
+
 ## Live trading
 
 | Guide                                                   | Description                                          |

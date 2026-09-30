@@ -369,7 +369,7 @@ fn resolve_family(name: &str) -> Option<FamilySelector> {
         .map(FamilySelector::InstrumentClass)
 }
 
-fn emit(value: &Value) {
+pub(crate) fn emit(value: &Value) {
     println!("{value}");
 }
 

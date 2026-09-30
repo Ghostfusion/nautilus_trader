@@ -57,6 +57,7 @@
 #[cfg(feature = "defi")]
 mod blockchain;
 mod catalog;
+mod config;
 mod database;
 pub mod opt;
 mod optimize;
@@ -69,7 +70,7 @@ use nautilus_persistence::backend::parquet::migration::{
 use crate::blockchain::run_blockchain_command;
 use crate::{
     database::postgres::run_database_command,
-    opt::{CatalogCommand, Commands, NautilusCli},
+    opt::{CatalogCommand, Commands, ConfigCommand, NautilusCli},
 };
 
 /// Builds the top-level CLI command, augmented with capability-aware blockchain help.
@@ -109,6 +110,10 @@ pub async fn run(opt: NautilusCli) -> anyhow::Result<()> {
             CatalogCommand::Generate(args) => crate::catalog::run_generate(&args)?,
         },
         Commands::Database(database_opt) => run_database_command(database_opt).await?,
+        Commands::Config(config_opt) => match config_opt.command {
+            ConfigCommand::Validate(args) => crate::config::run_validate(&args)?,
+            ConfigCommand::Resolve(args) => crate::config::run_resolve(&args)?,
+        },
         Commands::Optimize(optimize_opt) => crate::optimize::run_optimize(&optimize_opt)?,
         #[cfg(feature = "defi")]
         Commands::Blockchain(blockchain_opt) => {

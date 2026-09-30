@@ -30,6 +30,8 @@ pub struct NautilusCli {
 pub enum Commands {
     Database(DatabaseOpt),
     Catalog(CatalogOpt),
+    /// Validate and resolve a typed configuration file.
+    Config(ConfigOpt),
     /// Run a declared parameter optimization over backtest runs.
     Optimize(OptimizeOpt),
     #[cfg(feature = "defi")]
@@ -483,6 +485,71 @@ pub struct CatalogConvertOpt {
     pub(crate) identifiers: Vec<String>,
 }
 
+/// Configuration file options and subcommands.
+#[derive(Debug, Parser)]
+#[command(about = "Typed configuration file validation and resolution", long_about = None)]
+pub struct ConfigOpt {
+    #[clap(subcommand)]
+    pub(crate) command: ConfigCommand,
+}
+
+/// Operations on typed configuration files.
+#[derive(Debug, Parser)]
+pub enum ConfigCommand {
+    /// Validate a configuration file against a typed configuration.
+    Validate(ConfigFileOpt),
+    /// Print the resolved configuration with the built-in defaults and the file applied.
+    Resolve(ConfigFileOpt),
+}
+
+/// A configuration file path and the typed configuration to load it as.
+///
+/// The file is a view of an existing typed configuration, so the schema selector names that Rust
+/// type and the loader's own `Serialize`/`Deserialize` surface is the file schema.
+#[derive(Debug, Parser)]
+pub struct ConfigFileOpt {
+    /// Path to the JSON configuration file.
+    pub(crate) config: PathBuf,
+    /// Typed configuration to load the file as.
+    #[arg(long, value_enum, default_value = "kernel")]
+    pub(crate) schema: ConfigSchema,
+}
+
+/// The typed configuration a configuration file is loaded as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ConfigSchema {
+    /// The Nautilus kernel configuration (KernelConfig).
+    #[expect(
+        clippy::doc_markdown,
+        reason = "clap renders doc comments as plain help text"
+    )]
+    Kernel,
+    /// The backtest engine configuration (BacktestEngineConfig).
+    #[expect(
+        clippy::doc_markdown,
+        reason = "clap renders doc comments as plain help text"
+    )]
+    Backtest,
+    /// The live node configuration (LiveNodeConfig).
+    #[expect(
+        clippy::doc_markdown,
+        reason = "clap renders doc comments as plain help text"
+    )]
+    Live,
+}
+
+impl ConfigSchema {
+    /// Returns the canonical name of the selected typed configuration.
+    #[must_use]
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Kernel => "KernelConfig",
+            Self::Backtest => "BacktestEngineConfig",
+            Self::Live => "LiveNodeConfig",
+        }
+    }
+}
+
 #[cfg(test)]
 mod optimize_tests {
     use clap::Parser;
@@ -669,5 +736,76 @@ mod database_tests {
         ]);
 
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[test]
+    fn config_validate_defaults_the_schema_to_kernel() {
+        let cli =
+            NautilusCli::try_parse_from(["nautilus", "config", "validate", "config.json"]).unwrap();
+
+        let Commands::Config(ConfigOpt {
+            command: ConfigCommand::Validate(config),
+        }) = cli.command
+        else {
+            panic!("Expected config validate command");
+        };
+
+        assert_eq!(config.config, PathBuf::from("config.json"));
+        assert_eq!(config.schema, ConfigSchema::Kernel);
+    }
+
+    #[test]
+    fn config_resolve_parses_each_schema_selector() {
+        for (flag, expected) in [
+            ("kernel", ConfigSchema::Kernel),
+            ("backtest", ConfigSchema::Backtest),
+            ("live", ConfigSchema::Live),
+        ] {
+            let cli = NautilusCli::try_parse_from([
+                "nautilus",
+                "config",
+                "resolve",
+                "config.json",
+                "--schema",
+                flag,
+            ])
+            .unwrap();
+
+            let Commands::Config(ConfigOpt {
+                command: ConfigCommand::Resolve(config),
+            }) = cli.command
+            else {
+                panic!("Expected config resolve command");
+            };
+
+            assert_eq!(config.schema, expected);
+        }
+    }
+
+    #[test]
+    fn config_rejects_an_unknown_schema() {
+        assert!(
+            NautilusCli::try_parse_from([
+                "nautilus",
+                "config",
+                "validate",
+                "config.json",
+                "--schema",
+                "unknown",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn config_requires_a_file_path() {
+        assert!(NautilusCli::try_parse_from(["nautilus", "config", "validate"]).is_err());
     }
 }
