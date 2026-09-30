@@ -601,6 +601,16 @@ Step 7 is complete: the three added scenarios commit distinct canonical digests 
 of the ordering, every scenario predating them passes with its committed expectations unchanged, and
 each scenario reproduces its digest across repeated runs.
 
+The evidence behind each stage: Stage A's is the scenarios that predate the workstream, whose
+committed expectations are byte-identical after every step of it. Stage B's is the composite
+reproduction above, bounded as recorded. Step 5's is a recorded decision and reason for each
+candidate addition, and Step 6's is that the one adopted model is a pure function of the fill
+quantity and the seeder is unchanged. The inventory's citations were audited against the code after
+the final step: of 194 cited locations, 105 were already accurate and 89 pointed at lines that the
+subsequent steps had shifted or that were imprecise from the start, and all 89 were corrected, so
+every citation resolves to the construct its sentence describes. The audit changed no prose and no
+code.
+
 **Node path.** `python/tests/integration/test_backtest_node_bar_fills.py` runs a node over a
 synthetic bar catalog with a strategy that submits a market order from `on_bar` and asserts that the
 order, the fill, and the position appear in the node's reports and that the canonical document
