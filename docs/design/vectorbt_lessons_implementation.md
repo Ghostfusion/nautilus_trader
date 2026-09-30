@@ -3,7 +3,7 @@
 Companion to [`vectorbt_lessons_design.md`](vectorbt_lessons_design.md) and to
 [`vnpy_lessons_implementation.md`](vnpy_lessons_implementation.md). Section references of the form
 `design N` point at the design document, and decision identifiers (`D1` to `D11`) are the revised
-numbering introduced by revision 2 of this record.
+numbering introduced in revision 2 of this record.
 
 ## 1. Status and scope
 
@@ -21,34 +21,34 @@ establish are not made.
 
 ### 1.2 Revision history
 
-| Version | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1       | Initial record from the vectorbt probe: the licence finding, the capability inventory, eleven decisions and this implementation record                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| 2       | Applied design-review feedback. The decision set was renumbered and reclassified by layer; the deflated Sharpe ratio was rescoped from the requirement to the first statistic satisfying a trial-provenance requirement; the split leakage interval became a policy whose values are optional and whose concept is mandatory; the ambiguity resolution became a versioned policy with an identity recorded in the result; metrics gained a direction; the label work was split into tranches; caching was deferred with an identity model; the provider adapter was moved out of the document; a first-class study identity was added; the licence rule was restated as an engineering boundary with a provenance chain; the dependency graph was replaced by one that shows information flow, with the phases restated as work order; and the placement questions became preconditions rather than open questions |
+| Version | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1       | Initial record from the vectorbt probe: the licence finding, the capability inventory, eleven decisions and this implementation record                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 2       | Applied design-review feedback. Decisions renumbered and classified by layer; the deflated Sharpe ratio rescoped from the requirement to the first statistic behind a trial-provenance requirement; leakage became a policy whose values are optional and whose concept is mandatory; the ambiguity resolution became a versioned policy recorded by identity; metrics gained a direction; labels split into tranches; caching deferred with an identity model; the provider adapter relocated; study identity added; the licence rule restated as an engineering boundary with a provenance chain; the dependency graph replaced and the phases restated as work order                                                                                                                                                                                                                                                                                                                                                                                |
+| 3       | Applied the second review. Identity promoted to a first-class contract covering study, trial, dataset, universe and result, with the trial level made explicit, and moved into `design 8`; the design's dependency section split into a contract graph and a work order so the graph no longer contradicts its own explanation; the leakage policy became an exclusion relation with purge before, purge after, embargo after and a label overlap rule; the ambiguity default became an owner decision separate from the policy contract, and ambiguity was separated from execution simulation; the statistical contract for the multiple-testing correction was specified in full; the stability obligation was classified by kernel type; the metric status vocabulary gained `invalid` and the direction vocabulary became action-oriented; capability results became domain-scoped; the label definition gained an alignment convention; a no-decision-authority invariant was added; dataset and trial identity were added to the open questions |
 
-The document is deliberately shaped like the VeighNa record so the two can be read side by side, and
-so that a later reader can see which candidate learnings the two probes share (the label and dataset
-layer) and which are peculiar to this one (multiple-testing-aware reporting, the split contract, the
-parity protocol).
+### 1.3 Reference maps
 
-### 1.3 Renumbering map
+Two renumberings affect how earlier revisions are read.
 
-Revision 2 renumbered the decisions. The old identifiers appear in the earlier commits and must not be
-confused with the current ones.
+| Revision 1 decision | Revision 2 and 3 decision | Subject                                            |
+| ------------------- | ------------------------- | -------------------------------------------------- |
+| D5                  | D1                        | Metric identity, metadata and availability reasons |
+| D3                  | D2                        | Reusable split contract with a leakage policy      |
+| D6                  | D3                        | Explicit ambiguity policy with result provenance   |
+| D4                  | D4                        | Multiple-testing-aware research reporting          |
+| D10                 | D5                        | Numerical-stability testing                        |
+| D7                  | D6                        | Label and target policy framework                  |
+| D2                  | D7                        | Secondary implementation parity protocol           |
+| D1                  | D8                        | Capability-result codes                            |
+| D8                  | D9                        | Declarative research caching, deferred             |
+| D9                  | D10                       | Provider adapter, relocated                        |
+| D11                 | D11                       | Rust schema ownership, no change                   |
 
-| Revision 1 | Revision 2 | Subject                                            |
-| ---------- | ---------- | -------------------------------------------------- |
-| D5         | D1         | Metric identity, metadata and availability reasons |
-| D3         | D2         | Reusable split contract with a leakage policy      |
-| D6         | D3         | Explicit ambiguity policy with result provenance   |
-| D4         | D4         | Multiple-testing-aware research reporting          |
-| D10        | D5         | Numerical-stability testing                        |
-| D7         | D6         | Label and target policy framework                  |
-| D2         | D7         | Secondary implementation parity protocol           |
-| D1         | D8         | Capability-result codes                            |
-| D8         | D9         | Declarative research caching, deferred             |
-| D9         | D10        | Provider adapter, moved out of the document        |
-| D11        | D11        | Rust schema ownership, no change                   |
+Revision 3 also moved sections in the design document, so a citation taken from revision 2 of this
+record must be shifted: `design 8 L*` is now `design 9 L*`, `design 12` is now `design 13`,
+`design 12.1` is now `design 13.1`, and the open questions moved from `design 13` to `design 14`.
+Identity moved out of an invariant into `design 8`, and the invariants renumbered accordingly.
 
 ## 2. Probe provenance and reproduction
 
@@ -96,77 +96,81 @@ Every row was verified by reading the file at the cited line in the working tree
 `d71348e30a`. Rows marked "absent" record a search that returned no match, and the search scope is
 stated.
 
-| #   | Fact                                                                                         | Evidence                                                                                                                                                                                                                                                                                                                                               |
-| --- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Statistics are a Rust trait with one struct per statistic                                    | `crates/analysis/src/statistic.rs:36` `pub trait PortfolioStatistic: Debug {`, `:40` `fn name(&self) -> String;`, `:47` `fn calculate_from_returns(&self, returns: &Returns) -> Option<Self::Item>`, `:56` `calculate_from_realized_pnls`, `:68` `calculate_from_positions`, `:79` `calculate_from_returns_with_benchmark`                             |
-| 2   | 34 statistics are declared, one module each                                                  | `crates/analysis/src/statistics/mod.rs:18-51`, 34 `pub mod` lines                                                                                                                                                                                                                                                                                      |
-| 3   | There is a name-keyed registry with runtime registration and deregistration                  | `crates/analysis/src/analyzer.rs:38` `pub type Statistic = Arc<dyn PortfolioStatistic<Item = f64> + Send + Sync>;`, `:59` `pub statistics: AHashMap<String, Statistic>,`, `:123` `pub fn register_statistic(&mut self, statistic: Statistic)`, `:128` `pub fn deregister_statistic`                                                                    |
-| 4   | Twenty statistics are registered by default                                                  | `crates/analysis/src/analyzer.rs:79-98`, twenty `register_statistic` calls                                                                                                                                                                                                                                                                             |
-| 5   | There is no metric metadata object                                                           | No match for `metric_config`, `MetricConfig`, `MetricRegistry`, `MetricSpec`, `stats_builder` anywhere in the repository                                                                                                                                                                                                                               |
-| 6   | Statistics return `Option` and a skipped statistic leaves no trace in the result             | `crates/analysis/src/statistic.rs:47`, `:56`, `:68` all return `Option<Self::Item>`; the analyzer inserts only `Some` values                                                                                                                                                                                                                           |
-| 7   | Walk-forward validation exists as explicit stages                                            | `python/nautilus_trader/optimization/stages.py:51` `class WalkForwardWindow`, `:74` `def walk_forward_windows(`, `:128` `class TrainStage`, `:159` `class OptimizeStage`, `:217` `class ValidateStage`, `:263` `class OutOfSampleStage`, `:351` `class WalkForwardStage`                                                                               |
-| 8   | The stage vocabulary is closed and typed                                                     | `python/nautilus_trader/optimization/config.py:94` `STAGE_KINDS = ("optimize", "train", "validate", "out_of_sample", "walk_forward")`                                                                                                                                                                                                                  |
-| 9   | One search strategy is implemented, and searching is pure enumeration                        | `python/nautilus_trader/optimization/search.py:37` `class SearchStrategy(Protocol)`, `:62` `class GridSearch`                                                                                                                                                                                                                                          |
-| 10  | A run is identified by a canonical digest and recorded with its parameter mapping            | `python/nautilus_trader/optimization/space.py:47` `canonical_json`, `:74` `digest_of`, `:97` `class Experiment`, `runner.py:61` `class CanonicalRun`, `:85` `class FailedExperiment`                                                                                                                                                                   |
-| 11  | A search reports results and failures together                                               | `python/nautilus_trader/optimization/report.py:120` `class SearchReport`                                                                                                                                                                                                                                                                               |
-| 12  | There is no purge or embargo rule                                                            | No match for `purge` or `embargo` as a validation concept in `python/nautilus_trader`, `crates`, or `docs`; the only hits are cache-instrument purges in adapters                                                                                                                                                                                      |
-| 13  | There is no splitter contract and no cross-validation splitter                               | No match for `splitter`, `cross_val`, `cv_split` in `python/nautilus_trader`, `crates`, or `docs`                                                                                                                                                                                                                                                      |
-| 14  | There is no multiple-testing correction                                                      | No match for `deflated`, `PBO`, `multiple testing`, or `bootstrap` in `python/nautilus_trader`, `crates/analysis`, `crates/backtest`, or `docs`                                                                                                                                                                                                        |
-| 15  | Every hot path has exactly one implementation and it is Rust                                 | `python/nautilus_trader/indicators/__init__.py:26` `from nautilus_trader._libnautilus.indicators import *`, `:29` `fixup_module_names(globals(), __name__)`; `crates/indicators/src/python/mod.rs:40-41` `#[pymodule]` / `pub fn indicators`                                                                                                           |
-| 16  | The compiled extension is mandatory                                                          | `python/nautilus_trader/__init__.py:26` unconditional star import of `nautilus_trader._libnautilus`; no `find_spec`, no engine setting, no pure-Python fallback for any hot path                                                                                                                                                                       |
-| 17  | The Rust core owns every domain schema                                                       | `crates/model/src/events/order/filled.rs:40-47` `pyo3::pyclass(module = "nautilus_trader.model", from_py_object)` and `pyo3_stub_gen::derive::gen_stub_pyclass` above `pub struct OrderFilled {`; `crates/model/src/python/mod.rs:302` `m.add_class::<crate::events::OrderFilled>()?;`                                                                 |
-| 18  | The version relationship is asserted at build time, not at run time                          | `crates/core/build.rs:30` `let nautilus_version = "2.0.0rc6";`; `python/nautilus_trader/__init__.py:29-34` derives `__version__` from installed distribution metadata; `Cargo.toml:55` `license = "LGPL-3.0-only"`                                                                                                                                     |
-| 19  | Order denial already reports a stable machine-readable code                                  | `crates/model/src/events/order/denied_reason.rs:64-68` `#[strum_discriminants(name(OrderDeniedCode), derive(Display, AsRefStr, EnumIter, EnumString), strum(serialize_all = "SCREAMING_SNAKE_CASE"))]`; `:57` `Only the leading code is canonical. Consumers must not recover classification or control flow`                                          |
-| 20  | The denial event itself carries only the rendered string                                     | `crates/model/src/events/order/denied.rs:61` `pub reason: Ustr,` within `pub struct OrderDenied`                                                                                                                                                                                                                                                       |
-| 21  | Configuration is typed, rejects unknown keys, and collects every violation with a field path | `crates/common/src/cache/config.rs:43` `#[serde(default, deny_unknown_fields)]`; `crates/backtest/src/config.rs:624-625` `pub fn validate(&self) -> ConfigResult<()>` with `let mut errors = ConfigErrorCollector::new();`, pushing `ConfigError::empty_field` and `ConfigError::range`                                                                |
-| 22  | Bar-level ambiguity is resolved by a documented, configurable ordering policy                | `crates/backtest/src/config.rs:364` `pub bar_execution: bool`, `:367` `pub bar_adaptive_high_low_ordering: bool`, `:525-530` documents the fixed order Open, High, Low, Close and the adaptive heuristic                                                                                                                                               |
-| 23  | Catalog coverage and gap reporting exist and are mature                                      | `crates/persistence/src/backend/parquet/catalog/coverage.rs:77` `pub fn get_missing_intervals_for_request(`, `:263` `get_intervals`; `crates/persistence/src/backend/parquet/catalog/mod.rs:244` `pub struct ParquetDataCatalog {`                                                                                                                     |
-| 24  | Nothing computes supervised labels, forward returns, extrema or trade MFE and MAE            | No match for `triple_barrier`, `forward_return`, `zigzag`, `local_extrema`, `mfe`, or `mae` in `crates/model`, `crates/data`, `crates/trading`, or `python/nautilus_trader`; the only Label concept is the proposal in `vnpy_lessons_design.md`                                                                                                        |
-| 25  | A study identity does not exist; run identity is partial                                     | Rows 10 and 11 record a canonical digest, a run record and a report; no match for `study_id`, `trial_count`, `search_space_digest` or `validation_scheme_digest` in `python/nautilus_trader`, and no match for `seed` in `python/nautilus_trader/optimization`, so a run records no seed. Those identifiers appear only in this review's own documents |
-| 26  | The result does not record which bar-ordering policy produced it                             | `crates/backtest/src/result.rs:105-114` records metrics and an elapsed time; no `ambiguity_policy`, `policy_id`, or ordering field is present                                                                                                                                                                                                          |
+| #   | Fact                                                                                                                        | Evidence                                                                                                                                                                                                                                                                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Statistics are a Rust trait with one struct per statistic                                                                   | `crates/analysis/src/statistic.rs:36` `pub trait PortfolioStatistic: Debug {`, `:40` `fn name(&self) -> String;`, `:47` `fn calculate_from_returns(&self, returns: &Returns) -> Option<Self::Item>`, `:56` `calculate_from_realized_pnls`, `:68` `calculate_from_positions`, `:79` `calculate_from_returns_with_benchmark`                                         |
+| 2   | 34 statistics are declared, one module each                                                                                 | `crates/analysis/src/statistics/mod.rs:18-51`, 34 `pub mod` lines                                                                                                                                                                                                                                                                                                  |
+| 3   | There is a name-keyed registry with runtime registration and deregistration                                                 | `crates/analysis/src/analyzer.rs:38` `pub type Statistic = Arc<dyn PortfolioStatistic<Item = f64> + Send + Sync>;`, `:59` `pub statistics: AHashMap<String, Statistic>,`, `:123` `pub fn register_statistic(&mut self, statistic: Statistic)`, `:128` `pub fn deregister_statistic`                                                                                |
+| 4   | Twenty statistics are registered by default                                                                                 | `crates/analysis/src/analyzer.rs:79-98`, twenty `register_statistic` calls                                                                                                                                                                                                                                                                                         |
+| 5   | There is no metric metadata object                                                                                          | No match for `metric_config`, `MetricConfig`, `MetricRegistry`, `MetricSpec`, `stats_builder` anywhere in the repository                                                                                                                                                                                                                                           |
+| 6   | Statistics return `Option` and a skipped statistic leaves no trace in the result                                            | `crates/analysis/src/statistic.rs:47`, `:56`, `:68` all return `Option<Self::Item>`; the analyzer inserts only `Some` values                                                                                                                                                                                                                                       |
+| 7   | Walk-forward validation exists as explicit stages                                                                           | `python/nautilus_trader/optimization/stages.py:51` `class WalkForwardWindow`, `:74` `def walk_forward_windows(`, `:128` `class TrainStage`, `:159` `class OptimizeStage`, `:217` `class ValidateStage`, `:263` `class OutOfSampleStage`, `:351` `class WalkForwardStage`                                                                                           |
+| 8   | The stage vocabulary is closed and typed                                                                                    | `python/nautilus_trader/optimization/config.py:94` `STAGE_KINDS = ("optimize", "train", "validate", "out_of_sample", "walk_forward")`                                                                                                                                                                                                                              |
+| 9   | One search strategy is implemented, and searching is pure enumeration                                                       | `python/nautilus_trader/optimization/search.py:37` `class SearchStrategy(Protocol)`, `:62` `class GridSearch`                                                                                                                                                                                                                                                      |
+| 10  | A run is identified by a canonical digest and recorded with its parameter mapping                                           | `python/nautilus_trader/optimization/space.py:47` `canonical_json`, `:74` `digest_of`, `:97` `class Experiment`, `runner.py:61` `class CanonicalRun`, `:85` `class FailedExperiment`                                                                                                                                                                               |
+| 11  | A search reports results and failures together                                                                              | `python/nautilus_trader/optimization/report.py:120` `class SearchReport`                                                                                                                                                                                                                                                                                           |
+| 12  | There is no purge or embargo rule                                                                                           | No match for `purge` or `embargo` as a validation concept in `python/nautilus_trader`, `crates`, or `docs`; the only hits are cache-instrument purges in adapters                                                                                                                                                                                                  |
+| 13  | There is no splitter contract and no cross-validation splitter                                                              | No match for `splitter`, `cross_val`, `cv_split` in `python/nautilus_trader`, `crates`, or `docs`                                                                                                                                                                                                                                                                  |
+| 14  | There is no multiple-testing correction                                                                                     | No match for `deflated`, `PBO`, `multiple testing`, or `bootstrap` in `python/nautilus_trader`, `crates/analysis`, `crates/backtest`, or `docs`                                                                                                                                                                                                                    |
+| 15  | Every hot path has exactly one implementation and it is Rust                                                                | `python/nautilus_trader/indicators/__init__.py:26` `from nautilus_trader._libnautilus.indicators import *`, `:29` `fixup_module_names(globals(), __name__)`; `crates/indicators/src/python/mod.rs:40-41` `#[pymodule]` / `pub fn indicators`                                                                                                                       |
+| 16  | The compiled extension is mandatory                                                                                         | `python/nautilus_trader/__init__.py:26` unconditional star import of `nautilus_trader._libnautilus`; no `find_spec`, no engine setting, no pure-Python fallback for any hot path                                                                                                                                                                                   |
+| 17  | The Rust core owns every domain schema                                                                                      | `crates/model/src/events/order/filled.rs:40-47` `pyo3::pyclass(module = "nautilus_trader.model", from_py_object)` and `pyo3_stub_gen::derive::gen_stub_pyclass` above `pub struct OrderFilled {`; `crates/model/src/python/mod.rs:302` `m.add_class::<crate::events::OrderFilled>()?;`                                                                             |
+| 18  | The version relationship is asserted at build time, not at run time                                                         | `crates/core/build.rs:30` `let nautilus_version = "2.0.0rc6";`; `python/nautilus_trader/__init__.py:29-34` derives `__version__` from installed distribution metadata; `Cargo.toml:55` `license = "LGPL-3.0-only"`                                                                                                                                                 |
+| 19  | Order denial already reports a stable machine-readable code                                                                 | `crates/model/src/events/order/denied_reason.rs:64-68` `#[strum_discriminants(name(OrderDeniedCode), derive(Display, AsRefStr, EnumIter, EnumString), strum(serialize_all = "SCREAMING_SNAKE_CASE"))]`; `:57` `Only the leading code is canonical. Consumers must not recover classification or control flow`                                                      |
+| 20  | The denial event itself carries only the rendered string                                                                    | `crates/model/src/events/order/denied.rs:61` `pub reason: Ustr,` within `pub struct OrderDenied`                                                                                                                                                                                                                                                                   |
+| 21  | Configuration is typed, rejects unknown keys, and collects every violation with a field path                                | `crates/common/src/cache/config.rs:43` `#[serde(default, deny_unknown_fields)]`; `crates/backtest/src/config.rs:624-625` `pub fn validate(&self) -> ConfigResult<()>` with `let mut errors = ConfigErrorCollector::new();`, pushing `ConfigError::empty_field` and `ConfigError::range`                                                                            |
+| 22  | Bar-level ambiguity is resolved by a documented, configurable ordering policy                                               | `crates/backtest/src/config.rs:364` `pub bar_execution: bool`, `:367` `pub bar_adaptive_high_low_ordering: bool`, `:525-530` documents the fixed order Open, High, Low, Close and the adaptive heuristic                                                                                                                                                           |
+| 23  | Catalog coverage and gap reporting exist and are mature                                                                     | `crates/persistence/src/backend/parquet/catalog/coverage.rs:77` `pub fn get_missing_intervals_for_request(`, `:263` `get_intervals`; `crates/persistence/src/backend/parquet/catalog/mod.rs:244` `pub struct ParquetDataCatalog {`                                                                                                                                 |
+| 24  | Nothing computes supervised labels, forward returns, extrema or trade MFE and MAE                                           | No match for `triple_barrier`, `forward_return`, `zigzag`, `local_extrema`, `mfe`, or `mae` in `crates/model`, `crates/data`, `crates/trading`, or `python/nautilus_trader`; the only Label concept is the proposal in `vnpy_lessons_design.md`                                                                                                                    |
+| 25  | A study identity and a trial identity do not exist; run identity is partial                                                 | Rows 10 and 11 record a canonical digest, a run record and a report; no match for `study_id`, `trial_id`, `trial_count`, `search_space_digest` or `validation_scheme_digest` in `python/nautilus_trader`, and no match for `seed` in `python/nautilus_trader/optimization`, so a run records no seed. Those identifiers appear only in this review's own documents |
+| 26  | The result does not record which bar-ordering policy produced it                                                            | `crates/backtest/src/result.rs:105-114` records metrics and an elapsed time; no `ambiguity_policy`, `policy_id`, or ordering field is present                                                                                                                                                                                                                      |
+| 27  | There is no dataset or universe identity vocabulary, and the name `kernel_version` is already taken by the operating system | No match for `dataset_identity`, `dataset_digest`, `universe_digest` or `membership_as_of` in `python/nautilus_trader` or `crates`; `as_of` appears only in `python/nautilus_trader/persistence/catalog_to_df.py`; `crates/common/src/logging/headers.rs:85` uses `kernel_version` for the OS kernel, so a numerical kernel version needs a distinguished name     |
 
 Three rows corrected an expectation held before reading the code. Row 1 shows that a statistics
-registry already exists, so the lesson is metadata and availability reasons rather than a registry
-(design D1). Row 7 shows that walk-forward validation already exists, so the lesson is the split
-*contract* and its leakage policy rather than the concept of a split (design D2). Row 25 shows that
-trial provenance is partial: a digest and a report exist, a study identity does not, which is why the
-requirement in L4 is a record rather than a single statistic. The earlier probe produced a similar
-correction for the universe and portfolio construction workstreams, and all of them are recorded
-because the corrections are the evidence that the comparison was done against source.
+registry already exists, so the lesson is metadata and status rather than a registry (design D1). Row
+7 shows that walk-forward validation already exists, so the lesson is the split *contract* and its
+leakage policy rather than the concept of a split (design D2). Row 25 shows that trial provenance is
+partial: a digest and a report exist, and the study and trial levels do not, which is why the
+requirement in L4 is an identity record rather than a single statistic. The earlier probe produced a
+similar correction for the universe and portfolio construction workstreams, and all of them are
+recorded because the corrections are the evidence that the comparison was done against source.
 
 ## 4. Mechanism specifications
 
 Each specification is written against our own requirements and cites the source mechanism only for
-provenance. None of them may be implemented by copying vectorbt code (design 1.2 and 7.3). The
-mechanism names are given as `L` identifiers from `design 8` and decision identifiers from
-`design 12`.
+provenance. None of them may be implemented by copying vectorbt code (design 1.2 and 7.3). Mechanism
+names are given as `L` identifiers from `design 9` and decision identifiers from `design 13`.
 
-### 4.1 D1 Metric identity, metadata and availability reasons
+### 4.1 D1 Metric identity, metadata, status and reason codes
 
-**Specification to implement** (`design 8 L1`).
+**Specification to implement** (`design 9 L1`).
 
 1. A statistic declares, beside its identity: a display title, units, tags and a direction drawn from
-   a closed set (`higher_is_better`, `lower_is_better`, `target`, `informational`). Identity is stable
-   and machine-facing; the title is presentational and may change without breaking a caller.
+   a closed, action-oriented set (`maximize`, `minimize`, `target`, `informational`). A metric with a
+   target value carries it in the definition, so a tracking error or a distance to a target is
+   expressible without inventing a non-monotonic direction.
 2. Parameters that currently appear inside a display name, such as the annualisation period, move
    into the metadata, and the title renders from them at presentation time.
-3. A statistic that is registered but cannot be computed reports a status and a reason code naming
-   what is missing, for example a returns series, a benchmark, a frequency or a non-empty position
-   list. It is not silently dropped, and it is never reported as zero.
-4. The result distinguishes three states per statistic: computed, unavailable with a reason, and not
-   registered. This is the distinction that does not exist today.
-5. Direction is declarative and consumed by reporting and optimization; no optimization logic lives
-   inside a statistic.
+3. A statistic reports a status from a four-state vocabulary, and the four states are semantically
+   distinct: `computed`, `unavailable` (an input the definition requires was absent),
+   `invalid` (the inputs were present and no meaningful value could be produced, for example a
+   non-finite input or a zero denominator), and `not_registered` (the metric is not in the metric
+   set). Every state other than `computed` carries a reason code from a closed, domain-owned set.
+4. `invalid` must not be collapsed into `unavailable`, because that hides a data defect behind an
+   applicability rule, and neither may be collapsed into a dropped row, which is what happens today.
+5. Direction and status are declarative and consumed by reporting; no optimization logic lives inside
+   a statistic.
 
-**Acceptance and verification.** A result containing at least one computed, one unavailable and one
-unregistered statistic, asserted in a single test; a test that a title renders from metadata
-parameters; a test that the units, tags and direction sets are closed.
+**Acceptance and verification.** A result containing a computed, an unavailable, an invalid and an
+unregistered statistic, asserted in a single test; a test that `invalid` and `unavailable` are
+distinguishable on the same metric; a test that a title renders from metadata parameters; a test that
+the units, tags and direction sets are closed.
 
 **Not implemented.**
 
-### 4.2 D2 Reusable split contract with a leakage policy
+### 4.2 D2 Reusable split contract with a leakage exclusion relation
 
-**Specification to implement** (`design 8 L2`).
+**Specification to implement** (`design 9 L2`).
 
 1. A split is produced by a contract that yields, per split, a tuple of index arrays, one per set. The
    contract is duck-typed: anything with a `split(X, **kwargs)` method satisfies it.
@@ -177,139 +181,165 @@ parameters; a test that the units, tags and direction sets are closed.
 4. A minimum length filters windows before selection, and a requested number of splits selects that
    many evenly spaced windows rather than the first ones, so a coarse study still spans the sample.
 5. An empty set and a request that cannot be satisfied raise, naming the constraint.
-6. A leakage policy is part of the contract, expressed as a purge interval removed before each test
-   set and an embargo removed after it, both in bars. The *concept* is mandatory: a splitter with no
-   notion of leakage is the defect. The *values* are not: a zero purge and a zero embargo are
-   permitted for a study with no label overlap, provided the study records the justification. A zero
-   interval by omission and a zero interval by decision must be distinguishable.
-7. The existing optimization stages consume the contract rather than owning window generation, so
+6. The leakage policy is expressed as an exclusion relation, not as a time distance alone: purge
+   before, purge after, embargo after, and a label overlap rule. The label overlap rule is the
+   operative part, because a label at `t` covering `t+1` to `t+20` makes training observations near
+   the test boundary overlap the target period of an evaluation observation, and no arrangement of
+   purge distances repairs that unless the rule is stated. The first implementation may derive the
+   three intervals from one duration, but the contract must be capable of expressing them separately.
+7. The concept is mandatory and the values are not: a zero purge and a zero embargo are legitimate
+   for a study with no label overlap, provided the study records the justification, and a zero
+   interval by omission must be distinguishable from a zero interval by decision.
+8. The existing optimization stages consume the contract rather than owning window generation, so
    walk-forward and split-based validation share one implementation of the bounds.
-8. Statistics are computed per split by the caller, as they are today; the contract returns indices
+9. Statistics are computed per split by the caller, as they are today; the contract returns indices
    and does not aggregate.
 
 **Acceptance and verification.** A contract test over several lengths and set-length combinations
-including the fractional and absolute forms and the reversed direction; a test asserting that no index
-appears in a test set and in its own in-sample set within the leakage interval; a test that an
+including the fractional and absolute forms and the reversed direction; a test asserting that no
+training observation overlaps the label information of an evaluation observation; a test that an
 unsatisfiable request raises with the constraint named; a test that a zero interval without a
-justification is refused; and a regression scenario asserting that existing walk-forward stages
-produce identical windows after migrating onto the contract.
+justification is refused; a test that the three exclusions can be expressed independently; and a
+regression scenario asserting that existing walk-forward stages produce identical windows after
+migrating onto the contract.
 
 **Not implemented.**
 
-### 4.3 D3 Explicit ambiguity policy with result provenance
+### 4.3 D3 Ambiguity policy identity, separate from execution simulation
 
-**Specification to implement** (`design 8 L3`).
+**Specification to implement** (`design 9 L3`).
 
 1. An ambiguity policy is a versioned value with an identity: the policy id, the trigger precedence,
    the intrabar ordering, the gap handling, the simultaneous-event handling and a version.
-2. Every fill assumption that a bar-only replay cannot determine is documented in one place, in the
+2. Every assumption that a bar-only replay cannot determine is documented in one place, in the
    user-facing documentation and not only in the source: the ordering of the bar's prices, the price
    used when a stop triggers, the priority between simultaneous triggers, and the treatment of a gap
    through a threshold.
-3. Defaults are pessimistic. Where the outcome is unknowable, the resolution that is worse for the
-   simulated strategy is selected, and the choice is stated.
+3. A result records the ambiguity policy identity that produced it, not the word "pessimistic", so a
+   policy change does not silently rewrite the interpretation of historical results.
 4. Ambiguous configurations are rejected: a setting whose meaning depends on an unspecifiable
    ordering is a configuration error rather than a silent convention.
-5. A result records the ambiguity policy identity that produced it, not the word "pessimistic", so a
-   policy change does not silently rewrite the interpretation of historical results.
-6. vectorbt's specific rules are not adopted as our fill rules: they belong to a bar simulator whose
+5. The ambiguity policy is distinct from an execution simulation policy. The research layer may record
+   an execution assumption; it must not own execution semantics, because owning them would place venue
+   and market-rule concerns inside the research layer (design 1.1).
+6. The contract and the default are separate decisions. The architecture requires that ambiguity is
+   explicit, identified and unable to resolve silently. Which policy is the default is an owner
+   decision, because it changes published numbers (`design 14` question 1). If the selected default is
+   pessimistic, that property is tested rather than assumed.
+7. vectorbt's specific rules are not adopted as our fill rules: they belong to a bar simulator whose
    model is not ours.
-7. Nothing in this item changes behaviour without an explicit owner decision, because changing the
-   default changes published numbers (`design 13` question 1).
 
 **Acceptance and verification.** A test that each documented assumption has a matching assertion in
 the simulation tests; a test that an ambiguous configuration is rejected with a named constraint; a
-test that the policy identity appears in the result metadata; and a test that two results produced
-under different policy versions are distinguishable.
+test that the policy identity appears in the result metadata; a test that two results produced under
+different policy versions are distinguishable; and, once the owner names the default, a test that
+asserts the named default rather than an assumed one.
 
 **Not implemented.**
 
 ### 4.4 D4 Multiple-testing-aware research reporting
 
-**Specification to implement** (`design 8 L4`).
+**Specification to implement** (`design 9 L4`).
 
-1. A study record carries the trial provenance: study id, dataset digest, search-space digest,
+1. The study record carries the trial provenance: study id, dataset identity, search-space digest,
    parameter count, trial count, failed trial count, validation-scheme digest, objective definition,
-   selection rule and seed. The requirement is the record; a correction is only as good as the count
-   and the space it was drawn from.
+   selection rule and study seed, and each trial carries its own identity (`design 8.2`). The
+   requirement is the record; a correction is only as good as the count, the space and the trials it
+   was drawn from.
 2. The initial statistic is the deflated Sharpe ratio, computed from the estimated per-period Sharpe
    ratio, the variance of the Sharpe ratio across the trials, the number of trials, the backtest
    horizon in periods, the skew and the non-excess kurtosis.
-3. Every input is per-period. Annualised figures are rejected at the boundary rather than divided
-   silently, because the correction is not scale invariant in the way a reader assumes.
-4. Missing returns are excluded rather than zero-filled, and the horizon is the count of periods that
-   contributed.
-5. The mathematical definition is pinned in our own terms before implementation, including the
-   convention for the kurtosis and the treatment of missing returns. No release of another project is
-   used as the definition.
-6. The value is reported, never a gate. Below the minimum trial count of `design 13` question 3 the
-   statistic is unavailable with a reason code, consistent with D1.
-7. The record is forward compatible: adding further diagnostics, such as an overfitting probability or
+3. The statistical contract is specified before the first test is written, and every element of the
+   table below is part of the specification rather than left to the implementation.
+4. The value is reported, never a gate (design 7.6). Below the minimum observations or the minimum
+   trials it is `unavailable` with a reason code, consistent with D1.
+5. The record is forward compatible: adding further diagnostics, such as an overfitting probability or
    a bootstrap, changes no earlier part of the contract.
 
+| Element                     | Requirement                                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Return definition           | The return series that feeds the Sharpe ratio is stated, including the compounding convention             |
+| Risk-free treatment         | A stated rate series or an explicit zero, never an implicit assumption                                    |
+| Minimum observations        | Below this count the statistic is `unavailable` with a reason, not computed                               |
+| Minimum trials              | Below this count the correction is noise on noise and the statistic is `unavailable`                      |
+| Trial independence          | Stated explicitly; a study whose trials are dependent must say so                                         |
+| Trial dependence            | Nominal and effective trial counts are distinguished wherever the chosen correction needs them            |
+| Sharpe convention           | Per-period, with the estimator and the divisor convention pinned                                          |
+| Variance, skew, kurtosis    | Estimators named; the kurtosis convention is non-excess                                                   |
+| Annualisation               | Prohibited: annualised inputs are rejected at the boundary rather than divided silently                   |
+| Missing returns             | Excluded rather than zero-filled, and the horizon counts contributing periods                             |
+| Failed and duplicate trials | A failed trial is counted and identified; a duplicate parameter set is detected rather than counted twice |
+
 **Acceptance and verification.** Each of: a hand-computed deterministic case; zero, one and many trial
-cases; a missing-return case; a non-excess-kurtosis case; a large trial-count case; an
-insufficient-input case producing an unavailable status with a reason; and, where applicable, a
-monotonicity check that more trials under the null do not raise the corrected value. The definition is
-pinned in the specification before the first test is written.
+cases; a missing-return case; a non-excess-kurtosis case; a large trial-count case; an annualised-input
+rejection; an insufficient-input case producing `unavailable` with a reason; a dependent-trial case
+that is required to declare its dependence; and, where applicable, a monotonicity check that more
+trials under the null do not raise the corrected value.
 
 **Not implemented.**
 
-### 4.5 D5 Numerical-stability test category
+### 4.5 D5 Numerical-stability obligation, classified by kernel type
 
-**Specification to implement** (`design 8 L5`). A test category, applied to every research kernel
-that reduces a series, containing at least:
+**Specification to implement** (`design 9 L5`). Every research kernel that reduces, transforms or
+estimates is classified, and its class determines the obligation. The classification table in
+`design 9 L5` is the specification, reproduced here with the obligations:
 
-1. running-variance and running-mean stability over a long series, compared against a compensated or
-   two-pass computation rather than against the kernel's own twin;
-2. empty input, single-element input, and input shorter than the window;
-3. a minimum period greater than the series length, whose result must be NaN and not a partial
-   aggregate;
-4. NaN propagation, and agreement between implementations on where NaNs land;
-5. overflow and underflow;
-6. very large magnitudes and very small magnitudes;
-7. catastrophic cancellation, for example a variance of nearly equal values;
-8. monotonicity where it is mathematically required;
-9. invariance under constant translation and scaling where applicable;
-10. layout cases: non-contiguous, transposed, single-column and single-row inputs;
-11. a documented divisor convention, sample or population, since a one-off difference here is
-    invisible in a parity test but changes every later number.
+| Kernel class            | Obligation                                                                                                             |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `reduction`             | Empty input, single element, NaN propagation, layout                                                                   |
+| `rolling_reduction`     | The reduction cases plus running-variance stability over a long series and the minimum-period-greater-than-length case |
+| `cumulative`            | The reduction cases plus overflow, underflow and catastrophic cancellation                                             |
+| `normalization`         | The reduction cases plus invariance under translation and scaling, and a zero-denominator case                         |
+| `statistical_estimator` | The reduction cases plus a documented divisor convention, a minimum-observation case and an independent recomputation  |
+| `transform`             | Empty input, single element, NaN edges and layout only                                                                 |
+| `label`                 | The transform cases plus the wait convention and a leakage boundary case                                               |
 
-**Acceptance and verification.** The category exists, at least the cases above that apply are present
-for each reducing kernel, and the variance case is compared against an independent method. Parity
-alone is explicitly not the standard.
+1. A kernel that is not classified is an incomplete obligation, not an exempt one; classification is
+   part of the work rather than an escape from it.
+2. The running-variance case is compared against a compensated or two-pass computation, never against
+   the kernel's own twin.
+3. The minimum-period-greater-than-length case must yield NaN rather than a partial aggregate.
+4. The divisor convention, sample or population, is documented per estimator, because a one-off
+   difference is invisible in a parity test and changes every later number.
+
+**Acceptance and verification.** The classification exists for every research kernel, and for each
+kernel the obligation for its class is met. Parity alone is explicitly not the standard.
 
 **Not implemented.**
 
-### 4.6 D6 Label and target policy framework, in tranches
+### 4.6 D6 Label and target policy framework, in tranches, with alignment
 
-**Specification to implement** (`design 8 L6`), as an extension of the Feature, Label and Dataset
+**Specification to implement** (`design 9 L6`), as an extension of the Feature, Label and Dataset
 candidate in `vnpy_lessons_design.md` (D5 and D13 there), not as a competing layer.
 
-1. **First tranche.** A fixed-horizon forward return; future aggregates over a forward window (mean,
-   standard deviation, minimum, maximum) with an explicit wait offset excluding the current bar; a
-   first-hit threshold label over a forward window with independent positive and negative thresholds,
-   reporting which threshold was breached first and zero when neither was; and dataset-level leakage
-   validation.
-2. **Second tranche, after the dataset and leakage contracts exist.** A local-extrema state machine
-   producing peaks and troughs under per-instrument thresholds; the symmetric conversion of one
-   threshold into the other, recorded explicitly because the arithmetic is not the naive negation;
-   and trend encodings over the interval between two consecutive extrema, binary, continuous and
-   saturated, with the interval labelled by an event that occurs later by construction.
-3. Every policy exists only on the target path. A leakage test fails if a label value is read as a
+1. A label definition carries an identity, a horizon, a direction, a threshold, a wait, an
+   aggregation, a missing-data policy and an **alignment convention**. The alignment convention is
+   first-class because pairing a feature at `t` with a label at `t` and pairing it with a label at
+   `t+1` produce materially different datasets while looking superficially equivalent.
+2. **First tranche.** A fixed-horizon forward return; future aggregates over a forward window (mean,
+   standard deviation, minimum, maximum) with an explicit wait excluding the current bar; a first-hit
+   threshold label over a forward window with independent positive and negative thresholds, reporting
+   which threshold was breached first and zero when neither was; and dataset-level leakage validation
+   against the leakage policy of D2.
+3. **Second tranche, after the dataset and leakage contracts exist.** A local-extrema state machine
+   under per-instrument thresholds; the symmetric conversion of one threshold into the other, recorded
+   explicitly because the arithmetic is not the naive negation; and trend encodings over the interval
+   between two consecutive extrema, binary, continuous and saturated.
+4. Every policy exists only on the target path. A leakage test fails if a label value is read as a
    feature, and the target path is not reachable from the live strategy interface.
-4. A parameter sweep is not a dataset: the dataset contract in the earlier review governs.
+5. A parameter sweep is not a dataset: the dataset contract in the earlier review governs.
 
 **Acceptance and verification.** The first-hit label pinned against a hand-computed case with
 asymmetric thresholds; the wait convention pinned against a case where a zero wait would read the
-current bar; a leakage test; and, for the second tranche, a test that per-instrument thresholds are
-applied per instrument.
+current bar; the alignment convention pinned against both pairings so the two are distinguishable; a
+leakage test; and, for the second tranche, a test that per-instrument thresholds are applied per
+instrument.
 
 **Not implemented.**
 
 ### 4.7 D7 Secondary implementation parity protocol
 
-**Specification to implement** (`design 8 L7`). A document, linked from the crate that owns the
+**Specification to implement** (`design 9 L7`). A document, linked from the crate that owns the
 boundary, stating:
 
 1. One implementation is the reference. For the Cython-to-pyo3 transition that is the v1 engine, which
@@ -324,6 +354,8 @@ boundary, stating:
    implementation directly; they go through the owning crate.
 6. Version agreement between the halves is asserted at build time, which is already the case, and the
    assertion message names both versions.
+7. The protocol is not a prerequisite for any research work; it becomes actionable only when a second
+   implementation exists.
 
 **Acceptance and verification.** The document exists, is linked from the boundary crate, and its
 checklist is followed if and when a second implementation appears. No acceptance condition applies to
@@ -331,35 +363,36 @@ code that does not exist; the acceptance is the presence of the protocol and its
 
 **Not implemented** (no such document exists today).
 
-### 4.8 D8 Capability-result codes
+### 4.8 D8 Domain-scoped capability results
 
-**Specification to implement** (`design 8 L8`).
+**Specification to implement** (`design 9 L8`).
 
-1. A capability answer is a value with a `code` drawn from a closed enum, a `detail` string for
-   humans, and a list of required preconditions or conversions. It replaces any boolean or sentence
-   returned by a "can this be done" query in the analysis and data layers.
-2. The codes follow the discipline already documented for order denial: the code is canonical, the
-   detail is not, and no caller may branch on the detail. `OrderDeniedReason` and `OrderDeniedCode`
-   are the model, not a new invention.
-3. Producer examples: whether a statistic can be computed from the available inputs and, if not, which
+1. One shape: a capability result carries availability, a code, a human-readable detail and the
+   requirements or preconditions that were not met.
+2. The code set is domain-scoped, not universal: order capability reuses the existing
+   `OrderDeniedCode` set, and analytics, data and research each own their own closed set. A single
+   universal enum would accumulate every refusal reason in the system and stop being checkable.
+3. The codes follow the discipline already documented for order denial: the code is canonical, the
+   detail is not, and no caller may branch on the detail.
+4. Producer examples: whether a statistic can be computed from the available inputs and, if not, which
    input is missing; whether a requested catalog range is covered and, if not, where the gaps are;
-   whether a requested split is representable and, if not, which length constraint failed.
-4. The probe is a pure function of its inputs, so it is cheap to call before doing work.
+   whether a requested split or study is representable and, if not, which constraint failed.
+5. The probe is a pure function of its inputs, so it is cheap to call before doing work.
 
-**Acceptance and verification.** A unit test per producer asserting the code for at least two refusal
+**Acceptance and verification.** A unit test per domain asserting the code for at least two refusal
 cases, and a test asserting that no detail string is matched anywhere in the source.
 
 **Not implemented.**
 
 ### 4.9 D9 Declarative research caching, deferred
 
-**Specification to implement only when triggered** (`design 8 L9`). The trigger is a measured case of
+**Specification to implement only when triggered** (`design 9 L9`). The trigger is a measured case of
 the same expensive computation being repeated over an identical dataset, configuration and parameter
 set. Until then the item is a recorded intent, not work.
 
-1. The cache key is an identity, not a function signature: dataset digest, computation id,
-   computation version, parameter digest and relevant configuration digest. The worst research bug in
-   this area is a cache that returns a value computed over different data for the same arguments.
+1. The cache key is an identity from `design 8`, not a function signature: dataset digest, computation
+   id, computation version, parameter digest and relevant configuration digest. The worst research bug
+   in this area is a cache that returns a value computed over different data for the same arguments.
 2. Caching is declared, not implied: named conditions decide whether a computation is cached, with an
    allow list, a deny list and a per-instance override.
 3. Caching can be disabled globally and per computation, and disabling it must not change results.
@@ -376,7 +409,7 @@ test that an unhashable argument returns a result, and a test that clearing inva
 ### 4.10 D10 Provider adapter, relocated
 
 **Status.** No specification in this document. The provider adapter contract is moved to the
-data-provider architecture review (`design 8 L10`, `design 12`).
+data-provider architecture review (`design 9 L10`, `design 13`).
 
 The mechanism, recorded only so the move is auditable: a provider adapter implements exactly two
 behaviours, fetch one instrument over a range and incrementally update one instrument, and everything
@@ -390,30 +423,43 @@ review.
 
 **Not implemented and not scheduled.**
 
-### 4.11 Research study identity (a required concept, with no decision identifier)
+### 4.11 Identity contracts for study, trial, dataset, universe and result
 
-**Specification to implement** (`design 7.6`). This concept was added during review rather than
-adopted from the source library, so it carries no decision identifier and no provenance label beyond
-the comparison that exposed the need.
+**Specification to implement** (`design 8`). These contracts are cross-cutting requirements that the
+decisions above express, so they carry no decision identifier of their own.
 
-1. A study identity exists as a first-class value: study id, dataset digest, split contract, label
-   definition, feature definition, parameter space, objective, trial count, validation policy,
-   ambiguity policy id, metric set, random seed and result digest.
-2. A result carries its implementation identity beside it: study id, dataset digest, code version,
-   schema version, kernel version, numerical backend, parameter digest and result digest.
-3. The invariant, restated from `design 7.6`: a research result must be reproducible from its study
-   identity, its dataset identity, its validation contract, its computation identity, its parameter
-   identity and its assumption policy.
-4. The field lists are a proposal to be pruned, not a schema to be filled in. Pruning before results
+1. **Study identity** carries the study id, the dataset identity, the feature and label definitions,
+   the split contract, the leakage policy, the parameter space, the objective definition, the
+   **selection rule**, the validation policy, the metric set, the study seed and the trial counts.
+2. **Trial identity** carries the trial id, the study id, the parameter digest, the parameter values,
+   the seed, the execution status, the objective value and the result digest. The trial level is what
+   makes a trial count meaningful: knowing that 500 trials occurred is not knowing which 500.
+3. **Dataset identity** carries the digest, the source version, the as-of time, the calendar identity,
+   the instrument universe identity, the adjustment policy and the missing-data policy. The principle
+   is that the identity identifies the information state available to the study, not merely the bytes
+   consumed, because byte-identical files can differ in universe membership, calendar or adjustment
+   policy.
+4. **Universe identity** carries the universe digest, the membership policy id and the membership
+   as-of time, and it consumes the point-in-time and membership workstream proposed in the earlier
+   review rather than starting a new one.
+5. **Result identity** carries the study id, the trial id, the dataset identity, the computation
+   identity (code version, schema version, kernel version, numerical backend and parameter digest),
+   the assumption policy and the metric results, with a result digest.
+6. The invariant, restated: a research result must be reproducible from its study identity, its
+   dataset identity, its validation contract, its computation identity, its parameter identity and its
+   assumption policy.
+7. The field lists are a proposal to be pruned, not a schema to be filled in. Pruning before results
    exist is cheap; backfilling after is not.
-5. The identity is composed from digests that already exist where possible: the experiment digest and
+8. The identities compose from digests that already exist where possible: the experiment digest and
    the canonical result digest are present today (rows 10 and 11), the dataset digest belongs to the
-   catalog, and the policy and kernel identities are new.
+   catalog, and the policy and numerical kernel identities are new. The name `kernel_version` is
+   already used for the operating system (row 27), so the numerical kernel version needs a
+   distinguished name.
 
 **Acceptance and verification.** A result cannot be produced without a study identity, asserted by
-construction rather than by convention; a test that two runs of the same study over the same data
-produce the same result digest; a test that a changed kernel version changes the implementation
-identity while the study id stays stable.
+construction rather than convention; two runs of the same study over the same data produce the same
+result digest; a changed kernel version changes the implementation identity while the study id stays
+stable; and the trial identity is sufficient to re-run an individual trial.
 
 **Not implemented.**
 
@@ -431,7 +477,8 @@ search or a read, not an execution; no test was run, and this is stated rather t
 | Is walk-forward validation missing?                                                   | No: stages exist (rows 7 and 8)                                                                                                                                                                                                                                                                                                                             |
 | Is a split contract missing?                                                          | Yes, and it is a specification (D2)                                                                                                                                                                                                                                                                                                                         |
 | Is leakage control missing?                                                           | Yes, and this is the one finding with a correctness character: a walk-forward study conducted today cannot purge or embargo, so an in-sample window may overlap the label horizon of its own out-of-sample window. It is recorded as D2 with an explicit policy rather than as a defect, because no existing test or documented guarantee is violated today |
-| Is trial provenance recorded?                                                         | Partially (row 25): a digest and a report exist, a study identity does not, so this is D4 and D11 by specification                                                                                                                                                                                                                                          |
+| Is trial provenance recorded?                                                         | Partially (row 25): a digest and a report exist, and the study and trial levels do not, so this is D4 and the identity contracts by specification                                                                                                                                                                                                           |
+| Is dataset or universe identity recorded?                                             | No (row 27), and it is the identity contract with the largest open question attached                                                                                                                                                                                                                                                                        |
 | Is a multiple-testing correction missing?                                             | Yes, and it is a specification (D4)                                                                                                                                                                                                                                                                                                                         |
 | Is there a duplicate implementation to keep in parity?                                | No: one implementation per kernel (row 15)                                                                                                                                                                                                                                                                                                                  |
 | Is the extension optional or switchable in a way that could silently change numerics? | No: it is mandatory and unconditional (row 16)                                                                                                                                                                                                                                                                                                              |
@@ -452,8 +499,8 @@ These are properties of vectorbt, recorded so that the same trap is not imported
 
 | Observation                                                                  | Evidence                                                                                                                                                                                                                                  | Why it matters here                                                                                                                                                |
 | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Three numerical defects and one bounds defect were fixed in a single release | Release notes for v1.1.1: rolling standard deviation stability in both engines, deflated Sharpe kurtosis convention, expanding mean and standard deviation when the minimum period exceeds the length, out-of-bounds reads on empty input | Two implementations multiply exactly this class of risk, which is why D5 exists as a test category rather than a parity suite                                      |
-| A correction metric was wrong for a long time                                | The deflated Sharpe ratio used excess kurtosis and did not ignore missing returns until v1.1.1, and the notes state that results change                                                                                                   | A multiple-testing correction that is itself wrong is worse than none, which is why D4 pins the definition in our own terms and tests the convention               |
+| Three numerical defects and one bounds defect were fixed in a single release | Release notes for v1.1.1: rolling standard deviation stability in both engines, deflated Sharpe kurtosis convention, expanding mean and standard deviation when the minimum period exceeds the length, out-of-bounds reads on empty input | Two implementations multiply exactly this class of risk, which is why D5 exists as a classified test obligation rather than a parity suite                         |
+| A correction metric was wrong for a long time                                | The deflated Sharpe ratio used excess kurtosis and did not ignore missing returns until v1.1.1, and the notes state that results change                                                                                                   | A multiple-testing correction that is itself wrong is worse than none, which is why D4 specifies the statistical contract in full and pins it in our own terms     |
 | A runtime engine switch changes numerics silently                            | `vectorbt/_engine.py` resolves the engine per call from an argument, a global setting and availability; randomised kernels are pinned to one engine to preserve random streams                                                            | This is the mechanism D7 rejects: results must not depend on which engine happened to be installed                                                                 |
 | Cache keys are value hashes                                                  | Indicator caches key on a hash of the parameter values                                                                                                                                                                                    | Hash collisions and dataset mismatch are the two silent correctness hazards in a research cache, which is why the D9 identity model starts from the dataset digest |
 | Configuration can lose arguments when reconstructed                          | The `Configured` documentation warns that attributes outside `writeable_attrs` and arguments derived from global defaults are not preserved                                                                                               | Our typed configuration with explicit defaults does not have this failure mode, and it should stay that way                                                        |
@@ -466,55 +513,66 @@ These are properties of vectorbt, recorded so that the same trap is not imported
 ## 6. Acceptance criteria and verification, by item
 
 This table is the detailed verification plan. The minimum acceptance contract per decision, which is
-what makes the design independently reviewable, is stated in `design 12.1`.
+what makes the design independently reviewable, is stated in `design 13.1`.
 
-| Item                            | Acceptance                                                                                                                       | Verification                                                                                                                            | Status          |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| D1 Metric identity              | Identity, title, units, tags and direction declared; unavailable statistics carry a status and a reason                          | One test covering computed, unavailable and unregistered in a single result; closed sets                                                | Not implemented |
-| D2 Split contract               | Any series length and any set-length mixture, with a leakage policy that is respected and a zero interval that must be justified | Contract tests, a leakage test, a refusal test, a zero-interval justification test, window equality after migration                     | Not implemented |
-| D3 Ambiguity policy             | Every bar-level assumption documented, pessimistic by default, ambiguous configurations rejected, policy identity recorded       | Assumption-to-test mapping, rejection test, policy identity in the result, policy-version distinguishability                            | Not implemented |
-| D4 Multiple-testing reporting   | Trial provenance recorded; per-period inputs only; convention pinned in our own terms; reported and never a gate                 | Seven acceptance cases from section 4.4, including insufficient input and the monotonicity check                                        | Not implemented |
-| D5 Numerical stability          | The applicable cases from section 4.5 present for each reducing kernel, variance compared against an independent method          | The category exists and each kernel has its cases                                                                                       | Not implemented |
-| D6 Labels                       | The first tranche exists only on the target path, with the first-hit label and the wait convention pinned                        | Hand-computed asymmetric case, wait case, leakage test; per-instrument test in the second tranche                                       | Not implemented |
-| D7 Parity protocol              | A written protocol exists and is linked from the owning crate                                                                    | The document and its link; the checklist applies only if a second implementation appears                                                | Not implemented |
-| D8 Capability codes             | A probe returns a typed value with a closed code, and nothing branches on the detail text                                        | Two refusal cases per producer, and a source test against detail matching                                                               | Not implemented |
-| D9 Cache                        | No acceptance criterion while deferred; if triggered, the key is the identity model and cached and uncached runs agree           | Deferred                                                                                                                                | Not implemented |
-| D10 Provider adapter            | No acceptance criterion in this document                                                                                         | Belongs to the data-provider architecture review                                                                                        | Not implemented |
-| D11 Schema ownership            | No acceptance criterion: the decision is to change nothing                                                                       | Not applicable                                                                                                                          | Not implemented |
-| Study identity (no decision id) | A result cannot be produced without a study identity; the field lists are pruned, not filled in                                  | Construction-level assertion, digest stability under an unchanged study, kernel-version change reflected in the implementation identity | Not implemented |
+| Item                                | Acceptance                                                                                                                                                                            | Verification                                                                                                                                              | Status          |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| D1 Metric identity                  | Identity, title, units, tags and direction declared; a four-state status with domain-owned reason codes                                                                               | One test covering computed, unavailable, invalid and unregistered in a single result; `invalid` versus `unavailable` on one metric; closed sets           | Not implemented |
+| D2 Split contract                   | Any series length and any set-length mixture; a leakage relation expressing purge before, purge after, embargo after and a label overlap rule; a zero interval that must be justified | Contract tests, a label-overlap test, a refusal test, a zero-interval justification test, three-exclusion expressibility, window equality after migration | Not implemented |
+| D3 Ambiguity policy                 | Every assumption documented, ambiguous configurations rejected, an identity recorded in the result, the policy distinct from execution simulation, the default named by the owner     | Assumption-to-test mapping, rejection test, identity in the result, policy-version distinguishability, a test asserting the named default                 | Not implemented |
+| D4 Multiple-testing reporting       | Study and trial identity recorded; the full statistical contract specified before testing; reported and never a gate                                                                  | Nine acceptance cases from section 4.4, including dependent trials and the annualisation rejection                                                        | Not implemented |
+| D5 Numerical stability              | Each kernel classified by class, and the obligation for its class met; running variance compared against an independent method                                                        | The classification exists and each kernel has its class obligation                                                                                        | Not implemented |
+| D6 Labels                           | The first tranche exists only on the target path, the definition includes the alignment convention, a leakage test fails if a label value is read as a feature                        | Hand-computed asymmetric case, wait case, both alignment pairings, leakage test; per-instrument test in the second tranche                                | Not implemented |
+| D7 Parity protocol                  | A written protocol exists and is linked from the owning crate; not a research prerequisite                                                                                            | The document and its link; the checklist applies only if a second implementation appears                                                                  | Not implemented |
+| D8 Capability results               | One shared shape with domain-scoped closed code sets; nothing branches on detail text                                                                                                 | Two refusal cases per domain, and a source test against detail matching                                                                                   | Not implemented |
+| D9 Cache                            | No acceptance criterion while deferred; if triggered, the key is the identity model and cached and uncached runs agree                                                                | Deferred                                                                                                                                                  | Not implemented |
+| D10 Provider adapter                | No acceptance criterion in this document                                                                                                                                              | Belongs to the data-provider architecture review                                                                                                          | Not implemented |
+| D11 Schema ownership                | No acceptance criterion: the decision is to change nothing                                                                                                                            | Not applicable                                                                                                                                            | Not implemented |
+| Identity contracts (no decision id) | A result cannot be produced without a study identity; the trial identity is sufficient to re-run a trial; field lists are pruned, not filled in                                       | Construction-level assertion, digest stability, kernel-version change reflected in the implementation identity, trial re-run                              | Not implemented |
 
 ## 7. Explicit non-goals
 
 1. **No port of any vectorbt subsystem.** No accessor layer, no factory-generated indicator classes,
    no broadcast parameter grid, no plotting, no widgets.
-2. **No dependency on the package**, and no vendored, transliterated or mechanically paraphrased code
-   (design 1.2 and 7.3).
+2. **No dependency on the package**, and no vendored, transliterated or mechanically derived code or
+   documentation (design 1.2 and 7.3).
 3. **No change to the execution model.** Research-layer mechanisms only; the engine, the exchange
-   simulation and the order state machine are untouched.
-4. **No behavior change without an owner decision**, including the pessimistic bar default.
+   simulation and the order state machine are untouched, and the research layer records execution
+   assumptions without owning execution semantics.
+4. **No behavior change without an owner decision**, including the ambiguity default.
 5. **No provider integration here.** The provider adapter contract is moved to the data-provider
    architecture review, including the market question that goes with it.
-6. **No gate introduced by any metric.** A metric that gates is a risk rule and belongs with the risk
-   caps, as recorded in the earlier review.
+6. **No decision authority for the research layer.** No metric, label or diagnostic gates an order or
+   a live control (design 7.6).
 7. **No second implementation invented to justify D7.** The protocol is a document until a second
    implementation exists.
 8. **No speculative caching.** D9 is not started until a measured case of repeated expensive
    computation exists.
+9. **No total ordering imposed where none exists.** The phases are a work order, not a dependency
+   chain, and the contract graph in `design 11` is the only dependency statement.
 
 ## 8. Outstanding measurements and open items
 
-1. Whether the pessimistic bar default changes published results is unmeasured. Answering it requires
-   running the existing backtest scenarios under both policies and comparing, which was not done in
-   this review because the review runs no tests. This gates D3.
-2. The correct leakage interval length is unmeasured and depends on the label horizon and bar spacing.
-   No value is proposed here because a guessed interval is worse than an explicit zero. This gates D2.
-3. The minimum trial count at which a correction is meaningful is unmeasured here and is a literature
-   question rather than a repository question. This gates D4.
-4. The units, tags and direction vocabulary does not exist yet, including whether it is closed. This
+1. Which ambiguity policy is the default is an owner decision, and whether a pessimistic default
+   changes published results is unmeasured. Answering it requires running the existing backtest
+   scenarios under both policies and comparing, which was not done in this review because the review
+   runs no tests. This gates D3.
+2. The leakage rule is unresolved in its substantive form: what observations are forbidden from
+   training because their feature and label information overlaps the evaluation information. No
+   interval length is proposed here because a guessed interval is worse than an explicit zero. This
+   gates D2 and D6.
+3. The minimum observation count and the minimum trial count at which a correction says anything are
+   unmeasured here and are a literature question rather than a repository question. This gates D4.
+4. Trial dependence in a typical sweep is unmeasured, and whether the chosen correction needs an
+   effective trial count is unanswered. This gates D4's second tranche.
+5. The units, tags and direction vocabulary does not exist yet, including whether it is closed. This
    gates D1.
-5. Which further multiple-testing diagnostics are wanted beyond the first statistic is unanswered. The
-   study record in D4 is what makes them possible later. This gates D4's second tranche.
-6. The study-identity field lists are a proposal and need pruning. Every field kept must be justified
-   by a comparison someone will actually perform.
-7. The vectorbt clone was deleted, so any cited line must be re-derived from the pinned revision. The
-   revision is recorded in section 2 and the re-derivation is a single shallow clone.
+6. The kernel classification is incomplete until every research kernel is assigned a class. This gates
+   D5.
+7. What constitutes dataset identity is the largest open question, and it gates the reproducibility of
+   every study rather than any single decision.
+8. What constitutes trial identity decides whether a trial can be re-run at all, and it gates D4.
+9. The identity field lists are a proposal and need pruning. Every field kept must be justified by a
+   comparison someone will actually perform.
+10. The vectorbt clone was deleted, so any cited line must be re-derived from the pinned revision. The
+    revision is recorded in section 2 and the re-derivation is a single shallow clone.

@@ -9,34 +9,27 @@ architecture; it does not dictate the architecture of those layers, and no vecto
 this repository (section 1.2). Every item below is stated as a gap in NautilusTrader that vectorbt
 either exposes or closes, never as a port of a vectorbt subsystem.
 
-**Status.** Design review, revised after review feedback. No production code changes accompany this
-document, because the authorising instruction permits code changes only for defects and none were
-found (section 5.1 of the companion document). Items accepted here are specified, ordered and given
-minimum acceptance criteria, and are marked **not implemented**.
+**Status.** Architecture approved; contracts under revision. No production code changes accompany
+this document, because the authorising instruction permits code changes only for defects and none
+were found (section 5.1 of the companion document). Items accepted here are specified, ordered and
+given minimum acceptance criteria, and are marked **not implemented**. The identity contracts in
+section 8 are the centre of gravity: they are cross-cutting, they sit underneath the decisions rather
+than beside them, and the remaining sections are read as their consequences.
 
 ### Revision summary
 
-| Change                                         | Detail                                                                                                                                                                                     |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Decision set renumbered and reclassified       | Each decision now carries a layer: research integrity, engineering policy, deferred, or no change. The engineering decisions are no longer presented as research capabilities (section 12) |
-| Study identity added as a first-class concept  | A research result is reproducible from the identity of the study that produced it, not only from its code path (section 7.6)                                                               |
-| D4 rescoped                                    | The requirement is multiple-testing-aware reporting with trial provenance; the deflated Sharpe ratio is the first statistic that satisfies it, not the requirement itself                  |
-| D2 rescoped                                    | The purge and embargo concept is mandatory and its values are not; a zero interval is allowed when justified and the justification is recorded                                             |
-| D3 rescoped                                    | The ambiguity resolution is a versioned policy with an identity, and the identity is what the result records                                                                               |
-| D1 extended                                    | Metrics gain a direction, so reporting and optimization do not have to infer it from a name                                                                                                |
-| D6 scoped to a first tranche                   | Forward return, future aggregates, a first-hit threshold label and the wait convention come first; extrema and trend-state labels follow the dataset contract                              |
-| D9 deferred                                    | Caching is a triggered capability with an identity model, not a Phase 1 deliverable                                                                                                        |
-| D10 moved out                                  | The provider adapter contract belongs to the data-provider architecture, not to this document                                                                                              |
-| Dependency graph and phases replaced           | The graph now shows information flow, the phases show work order, and the two are explicitly distinguished (sections 10 and 11)                                                            |
-| Preconditions stated                           | The research-layer placement questions are a gate on this design rather than an open question inside it (section 1.3)                                                                      |
-| Licence wording and provenance chain tightened | The rule is stated as an engineering boundary including a provenance chain, and the licensing consequences are left to a licensing review (section 7.3)                                    |
+| Revision | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Initial review: eleven decisions extracted from the probe                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 2        | Decisions renumbered and classified by layer; the deflated Sharpe ratio rescoped to a first statistic behind a trial-provenance requirement; leakage became a policy with optional values; the ambiguity resolution became a versioned policy; metrics gained a direction; labels split into tranches; caching deferred; the provider adapter relocated; study identity added                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 3        | Identity promoted to a first-class contract section covering study, trial, dataset, universe and result, with the trial level made explicit; the D1/D3/D4 graph split into a contract graph and a work order, so the graph no longer contradicts its own explanation; the leakage policy gained an exclusion relation rather than a time distance alone; the ambiguity default became an owner decision separate from the policy contract, and ambiguity was separated from execution simulation; the statistical contract for the correction was specified; the stability obligation was classified by kernel type; the metric status vocabulary gained `invalid`; capability codes became domain-scoped; the label definition gained an alignment convention; a no-decision-authority invariant was added; two identity questions were added to the open list |
 
 ## 1. Purpose and scope
 
 vectorbt is a mature vectorized research and backtesting library with a substantial research and
 validation surface. Version 1.1.1 is not the library it was in 2020: it now carries a Rust engine
-beside its Numba kernels, dispatches between them at call time, and ships a test suite larger than
-its library code. It is therefore relevant to this project twice over, as a source of research-layer
+beside its Numba kernels, dispatches between them at call time, and ships a test suite larger than its
+library code. It is therefore relevant to this project twice over, as a source of research-layer
 mechanisms and as a worked example of governing two implementations of the same numerics.
 
 The question this review asks is: **which research-integrity and validation mechanisms should this
@@ -47,9 +40,10 @@ project acquire, given what vectorbt implements and what this project already is
 This review introduces no market-specific semantics. Every accepted item is a statistical,
 validation, engineering or process mechanism, and none of them touches a market rule. Where an item
 would have touched one, it was removed: the data-provider contract was moved out of this document
-(section 12, D10) precisely because provider integration is a data-architecture concern in which the
-market question does arise. Market-rule concerns remain owned by the instrument, calendar, venue and
-data layers.
+(section 13, D10) precisely because provider integration is a data-architecture concern in which the
+market question does arise. The research layer may record execution assumptions without owning
+execution semantics, and the distinction is drawn explicitly in D3. Market-rule concerns remain owned
+by the instrument, calendar, venue and data layers.
 
 ### 1.2 The licence and provenance boundary
 
@@ -59,23 +53,26 @@ as `NOASSERTION`.
 
 The engineering rule, stated as a boundary rather than as a legal opinion: **no vectorbt source code,
 dependency, copied documentation, test fixture, or mechanically derived implementation may enter this
-repository.** Mechanisms must be independently specified from our own requirements and independently
-implemented. Whether any particular use of the licence is permissible is a question for a licensing
-review, not for a design document, and this document does not attempt to answer it.
+repository.** **No implementation artifact may be derived by mechanical transformation of vectorbt
+source, tests, fixtures or documentation.** Whether any particular use of the licence is permissible
+is a question for a licensing review, not for a design document, and this document does not attempt
+to answer it.
 
 Independence is maintained by a provenance chain, and an adopted mechanism must be able to show every
-link of it:
+link of it. The chain is the auditable test, because "paraphrased" is not:
 
 ```text
-source observation
+observed mechanism
       |
-independent requirement stated in our own terms
+our own requirement, stated in our own terms
       |
-independent interface and design
+our own interface
       |
-independent implementation
+our own mathematical specification
       |
-independent tests
+our own implementation
+      |
+our own tests
 ```
 
 ### 1.3 Preconditions
@@ -87,10 +84,9 @@ answer:
 1. **The research layer belongs in this repository.** Otherwise most items below have no home.
 2. **The research layer may depend on the data catalog.** It reads catalog data and emits derived
    data; it does not own storage.
-3. **The research layer cannot reach live execution.** It is not on the strategy path, and no live
-   component may import it.
+3. **The research layer has no decision authority and no live execution authority** (invariant 7.6).
 
-These are recorded here as a gate, not as an open question in section 13.
+These are recorded here as a gate, not as an open question in section 14.
 
 ## 2. Method and evidence
 
@@ -121,34 +117,27 @@ was:
 
 ## 3. What vectorbt is mechanically
 
-The architecture explains which of its mechanisms transfer and which do not.
+Two properties explain almost every decision below, and the rest of the description exists only to
+establish why particular mechanisms do not transfer.
 
-- **A matrix engine, not an event engine.** The unit of work is a two-dimensional array: rows are
-  time, columns are an instrument or a parameter combination. There is no clock, no queue, no venue
-  and no live path. A backtest is a compiled kernel over arrays, and a parameter sweep is achieved by
-  widening the array.
-- **A portfolio simulator with a documented fill model.** `Portfolio.from_orders` and
-  `Portfolio.from_signals` accept market-microstructure knobs as broadcast arguments and stop
-  machinery as first-class parameters, including the reference price used to initialise a stop and
-  the price used when a stop fires.
-- **Records as structured arrays, with rich views on top.** Orders, logs, trades, positions,
-  drawdowns and ranges are NumPy structured arrays with declared dtypes, and the analytic objects are
-  views that derive their quantities from the record columns.
-- **Accessors as the public surface.** Behaviour is attached to pandas and NumPy objects as
-  accessors, which is what makes the library feel like pandas-native tooling rather than a framework.
-- **Factories as the extension point.** Indicators, signals and labels are produced by a shared
-  factory that turns a declaration into a class whose `.run(...)` performs the broadcast, the
-  parameter grid, the concatenation and the column labelling.
-- **Two implementations of the same numerics.** Since v1.0.0 every hot kernel has a Numba twin
-  (`*_nb`) and a Rust twin (`*_rs`), with a resolver that decides per call which one runs.
+- **A matrix research library.** The unit of work is an array whose columns are instruments or
+  parameter combinations. There is no clock, no queue, no venue, no live path, and no accounting
+  authority; a backtest is a compiled kernel over arrays and a parameter sweep is a wider array.
+- **Two implementations of the same numerics.** Since v1.0.0 every hot kernel has a Numba twin and a
+  Rust twin, with a resolver that decides per call which one runs.
 
-The last point is a process contribution rather than a feature contribution: vectorbt is the inverse
-of this project, and in inverting it, it documents the rules that make two implementations
+Everything else follows from the first property: records are structured arrays with analytic views on
+top, behaviour is attached to pandas objects as accessors, and extension points are factories that
+turn a declaration into a class. Those are good answers to a different question, which is why they are
+excluded in section 7.2 rather than compared in detail.
+
+The second property is a process contribution rather than a feature contribution: vectorbt is the
+inverse of this project, and in inverting it, it documents the rules that make two implementations
 survivable.
 
 ## 4. Capability taxonomy
 
-The taxonomy is used to decide both provenance and layer classification.
+The taxonomy decides provenance and layer classification.
 
 | Area                                 | What vectorbt has                                                                                                                                            | Where it sits                                               | Layer        |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- | ------------ |
@@ -156,15 +145,16 @@ The taxonomy is used to decide both provenance and layer classification.
 | B Signal and indicator generation    | A declaration factory, parameter grids, ranking and index statistics, TA-Lib and pandas-ta adapters                                                          | Research ergonomics                                         | Not adopted  |
 | C Statistics and analytics           | A declarative metric registry, preset statistics per object, rolling twins, drawdown records, empyrical-derived return metrics, a deflated Sharpe ratio      | Research and analysis                                       | D1, D4       |
 | D Validation and optimization        | Three splitter classes over a generator contract, parameter grids, an advertised purged cross-validation in the paid edition only, no optimizer              | Research integrity                                          | D2           |
-| E Data ingestion and storage         | A `Data` container contract, provider subclasses, a scheduler-driven updater, no on-disk cache in the community edition                                      | Data architecture, moved out                                | D10          |
+| E Data ingestion and storage         | A `Data` container contract, provider subclasses, a scheduler-driven updater, no on-disk cache in the community edition                                      | Data architecture, relocated                                | D10          |
 | F Configuration and serialization    | A nested dict-like `Config`, a bespoke pickle layer, a global settings tree                                                                                  | Engineering, weaker than ours                               | Warning only |
 | G Engineering process                | A dual-engine resolver, a documented kernel-addition process, parity and fallback tests, a published benchmark harness, test volume exceeding library volume | Engineering policy                                          | D5, D7, D8   |
 | H Presentation                       | Plotly figures, widgets, dashboards, image helpers                                                                                                           | Out of scope by construction                                | Not adopted  |
 
-The distinction between the two layers matters for the rest of this document. A **research-integrity**
-mechanism changes what a reported research result means. An **engineering-policy** mechanism changes
-how the code that produces it is written. They are adopted for different reasons, they are owned by
-different work, and they are phased separately.
+The layer distinction matters for the rest of this document. A **research-integrity** mechanism
+changes what a reported research result means. An **engineering-policy** mechanism changes how the
+code that produces it is written. They are adopted for different reasons, owned by different work, and
+phased separately. D7 is not a prerequisite for running research, and the classification exists to
+prevent exactly that reading.
 
 ## 5. Where NautilusTrader stands
 
@@ -183,7 +173,8 @@ Verified against the working tree; the row-level evidence is in section 3 of the
 | Walk-forward windows                                         | Present as explicit optimization stages                                                          | Present as splitter classes                                                  |
 | Reusable split contract, any length and any number of sets   | Absent                                                                                           | Present: three splitters over one generator contract                         |
 | Purging and embargo                                          | Absent                                                                                           | Absent in the community edition; advertised in the paid edition              |
-| Trial provenance for a research result                       | Present in part: a canonical digest and a run record exist; a study identity does not            | Absent                                                                       |
+| Trial provenance for a research result                       | Partial: a canonical digest and a run record exist; a study or trial identity does not           | Absent                                                                       |
+| Point-in-time dataset and universe identity                  | Membership workstream proposed in the earlier review; no identity contract                       | Absent                                                                       |
 | Multiple-testing correction                                  | Absent                                                                                           | A deflated Sharpe ratio                                                      |
 | Supervised labels                                            | Absent; proposed only in the earlier design document                                             | Five label policies plus four future-aggregate primitives                    |
 | Bar-level ambiguity policy                                   | Documented and configurable, but the policy has no identity in the result                        | Pessimistic resolution, with ambiguous settings rejected                     |
@@ -201,8 +192,8 @@ vectorbt is a library over pandas that must not own a database.
 ## 6. Comparison and the structural difference
 
 vectorbt is a research instrument: it exists to evaluate many ideas quickly, and it optimises for
-throughput of experiments. This project is an execution platform with a research surface: it exists
-to run the same idea in simulation and in production, and it optimises for the identity of the two.
+throughput of experiments. This project is an execution platform with a research surface: it exists to
+run the same idea in simulation and in production, and it optimises for the identity of the two.
 
 Three consequences follow, and they explain why the accepted list is short.
 
@@ -214,23 +205,22 @@ Three consequences follow, and they explain why the accepted list is short.
    agree in total PnL. That is the same discipline as the accounting authority here, and the earlier
    review recorded it as a canonical-accounting decision. The overlap is treated as confirmation, not
    as a new item.
-3. **Where vectorbt is silent, the silence is informative.** It has no queue position, no intrabar
-   path, no depth, no partial fill against real liquidity, and no multiple-testing machinery beyond
-   one ratio. A research layer built on the vectorbt model cannot claim live fidelity, which is why
-   none of the simulation machinery is adopted here.
+3. **Where vectorbt is silent, the silence is informative** (section 10). It has no queue position,
+   no intrabar path, no depth and no multiple-testing machinery beyond one ratio, which is why it
+   cannot serve as the reference architecture for this project.
 
 ## 7. Architectural invariants
 
 ### 7.1 State ownership
 
-| State                                    | Owner                                                                    |
-| ---------------------------------------- | ------------------------------------------------------------------------ |
-| Live execution, order and position state | The engine and the portfolio (unchanged)                                 |
-| Bar, tick and instrument data            | The data catalog (unchanged)                                             |
-| Derived research arrays                  | The research layer, as a pure function of catalog data                   |
-| Metric definitions                       | The analysis layer, as registry entries                                  |
-| Split membership                         | Computed per study from the split contract, never persisted as the truth |
-| Study identity and its digests           | The research layer, recorded with every result                           |
+| State                                     | Owner                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------ |
+| Live execution, order and position state  | The engine and the portfolio (unchanged)                                 |
+| Bar, tick and instrument data             | The data catalog (unchanged)                                             |
+| Derived research arrays                   | The research layer, as a pure function of catalog data                   |
+| Metric definitions                        | The analysis layer, as registry entries                                  |
+| Split membership                          | Computed per study from the split contract, never persisted as the truth |
+| Study, dataset, trial and result identity | The research layer, recorded with every result (section 8)               |
 
 A research component may read catalog data and emit derived data. It may not hold position state, may
 not be reachable from the live path, and may not become a second accounting authority.
@@ -252,7 +242,7 @@ not be reachable from the live path, and may not become a second accounting auth
 
 NautilusTrader is LGPL-3.0-only; vectorbt is Apache-2.0 with Commons Clause and is reported by the
 GitHub API as `NOASSERTION`. Therefore no source file, code fragment, docstring, table, test case or
-data file from vectorbt may be copied, vendored, transliterated or mechanically paraphrased into this
+data file from vectorbt may be copied, vendored, transliterated or mechanically derived into this
 repository, and no dependency on the package may be introduced. Mechanisms in this document are
 described in prose, re-derived from the requirement they serve, and attributed to the source that
 exposed them. The provenance chain in section 1.2 is the test: if a link cannot be shown, the
@@ -265,68 +255,158 @@ mechanism is not adopted.
   same order log agree in total PnL. This project has the same obligation through the accounting
   authority and the parent/child conservation invariant recorded in the earlier review, and any new
   research analytic is subject to it.
-- **Every ambiguity is resolved explicitly, pessimistically and by an identified policy.** When the
-  data cannot determine an outcome, the resolution is documented, defaults to the less favourable
-  outcome, and is recorded in the result by policy identity (D3).
+- **Every ambiguity is resolved explicitly, by an identified policy.** When the data cannot determine
+  an outcome, the resolution is documented, is carried by a policy with an identity, and the identity
+  is recorded in the result (D3). Whether that policy is pessimistic is a property of the selected
+  default, not of the contract.
 
 ### 7.5 Report integrity
 
-- A statistic that cannot be computed is reported as unavailable with a reason, never as zero and
-  never as silence (D1).
+- A statistic that cannot be computed is reported with a status and a reason, never as zero and never
+  as silence (D1).
 - A research result that reports a performance figure must record how many trials produced it and
   what the trials were over, so a multiple-testing correction can be applied later even if it is not
   applied now (D4).
-- A simulated fill assumption must appear in the result metadata, not only in the source (D3).
+- A research result must identify the assumptions under which it was produced, and the identity of
+  the policy that made them (D3).
 
-### 7.6 Study identity
+### 7.6 No decision authority
 
-**A research result must be reproducible from its study identity, its dataset identity, its
-validation contract, its computation identity, its parameter identity and its assumption policy.**
+Research metrics, labels, validation statistics and multiple-testing diagnostics describe research
+results. They **do not** authorize orders, change live portfolio state, or override execution or risk
+controls.
 
-This is the invariant that ties the rest of the document together, and it is the reason several
-decisions below are stated as contracts on the result rather than as features. A result that cannot
-name the study that produced it, the data it read, the code and kernels that computed it, the
-parameters it swept and the assumptions it made is not a research result; it is an observation that
-cannot be audited, compared or reproduced.
+This is the general form of the rule recorded in D4: a value is reported, never a gate. It applies to
+the whole research layer unless a separate architecture explicitly promotes something into a risk or
+decision component, and that promotion is a risk-layer decision, not a research-layer one. A research
+component must therefore not be importable from the live path, and no live component may read a
+research metric as a control input.
 
-A study identity carries at least:
+## 8. Identity contracts
+
+Identity is the centre of the design, not a logging concern: **provenance is part of the meaning of a
+result.** This section defines the contracts that the decisions below consume, and it is cross-cutting
+in that D1, D2, D3, D4 and D6 all express a part of it.
+
+**The invariant.** *A research result must be reproducible from its study identity, its dataset
+identity, its validation contract, its computation identity, its parameter identity and its
+assumption policy.*
+
+A result that cannot name the study that produced it, the data it read, the code and kernels that
+computed it, the parameters it swept and the assumptions it made is not a research result; it is an
+observation that cannot be audited, compared or reproduced.
+
+Three levels are distinguished, because collapsing them loses exactly the information a multiple-testing
+correction needs: a study may contain many trials, and knowing that 500 trials occurred is not knowing
+which 500.
+
+### 8.1 Study identity
 
 ```text
 ResearchStudy
     study_id
-    dataset_digest
-    split_contract
-    label_definition
+    dataset_identity
     feature_definition
+    label_definition
+    split_contract
+    leakage_policy
     parameter_space
-    objective
-    trial_count
+    objective_definition
+    selection_rule
     validation_policy
-    ambiguity_policy_id
     metric_set
-    random_seed
+    study_seed
+    trial_count
+    failed_trial_count
+```
+
+`selection_rule` is part of the identity and not a convenience field. Maximising a Sharpe ratio,
+maximising a Sharpe ratio subject to a drawdown constraint, and selecting the top decile and then
+minimising drawdown are three different studies with the same data, and a result must say which rule
+selected its winner.
+
+### 8.2 Trial identity
+
+```text
+ResearchTrial
+    trial_id
+    study_id
+    parameter_digest
+    parameter_values
+    seed
+    execution_status
+    objective_value
     result_digest
 ```
 
-and a result carries its implementation identity beside it:
+The trial level is what makes a trial count meaningful. It also makes the distinction between a
+nominal and an effective trial count expressible: a sweep over twenty adjacent moving-average windows
+is not twenty independent opportunities, and a correction that assumes independence while the study
+did not provide it is wrong in a way that a reader cannot see from the result.
+
+### 8.3 Dataset identity
+
+```text
+DatasetIdentity
+    dataset_digest
+    source_version
+    as_of
+    calendar_identity
+    instrument_universe_identity
+    adjustment_policy
+    missing_data_policy
+```
+
+The principle is that a dataset identity must identify **the information state available to the
+study**, not merely the bytes consumed. Two runs over byte-identical files can have different
+information states if the universe membership, the calendar or the adjustment policy differs, and a
+digest alone does not express that. This contract consumes the point-in-time and membership
+workstream proposed in the earlier review (`vnpy_lessons_design.md`, D5 and D13), rather than
+competing with it.
+
+### 8.4 Universe identity
+
+```text
+UniverseIdentity
+    universe_digest
+    membership_policy_id
+    membership_as_of
+```
+
+A study that says "the 500 largest by capitalisation" is not reproducible without the membership
+timestamp, because that membership is different in every period. This is the same argument the
+earlier review used for stored membership history: a rule evaluated today cannot recover an
+instrument that has since left the universe.
+
+### 8.5 Result identity
 
 ```text
 ResearchResult
     study_id
-    dataset_digest
+    trial_id
+    dataset_identity
+    computation_identity
+    assumption_policy
+    metric_results
+    result_digest
+```
+
+where the computation identity is:
+
+```text
+ComputationIdentity
     code_version
     schema_version
     kernel_version
     numerical_backend
     parameter_digest
-    result_digest
 ```
 
-The implementation identity is not decoration. A research result computed before and after a numerical
-change in a kernel is not the same result, and without a kernel identity the difference is invisible
-until someone reruns it and cannot explain the drift.
+The computation identity is not decoration. A result computed before and after a numerical change in
+a kernel is not the same result, and without a kernel identity the difference is invisible until
+someone reruns it and cannot explain the drift.
 
-## 8. Candidate learnings
+## 9. Candidate learnings
 
 Provenance is recorded per item: **`vectorbt`** means vectorbt supplies the mechanism; **`vectorbt,
 extended`** means the shape is adopted and the implementation rejected or widened; **`Comparison`**
@@ -354,32 +434,40 @@ MetricDefinition
     title
     units
     tags
-    direction        higher_is_better | lower_is_better | target | informational
+    direction        maximize | minimize | target | informational
     applicability
 
 MetricResult
     value
-    status           computed | unavailable | not_registered
+    status           computed | unavailable | invalid | not_registered
     reason_code
     metadata
 ```
 
-so that a metric can say `SharpeRatio, unavailable, insufficient_periods` instead of vanishing.
+Four statuses, not three, and they are semantically distinct: **computed** is a value; **unavailable**
+means the inputs the definition requires were not present, such as insufficient periods or a missing
+benchmark; **invalid** means the inputs were present and the computation could not produce a
+meaningful value, such as a non-finite input or a zero denominator; **not_registered** means the
+metric is not part of the metric set at all. Collapsing `invalid` into `unavailable` would hide a data
+defect behind an applicability rule, and collapsing either into a dropped row is what happens today.
 
-**Decision D1: adopt metric metadata and mandatory availability reasons. Provenance: `vectorbt,
-extended`.** Identity is stable and machine-facing; title, units, tags and direction are declarative.
-Direction exists so that reporting and optimization read it from the definition rather than inferring
-it from a name, without putting optimization logic inside the metric. Rejected: string-path
-calculation resolution, lambda post-processing, and warning-in-a-log as the reporting channel.
+**Decision D1: adopt metric metadata, a four-state status and mandatory reason codes. Provenance:
+`vectorbt, extended`.** Identity is stable and machine-facing; title, units, tags and direction are
+declarative. Direction is action-oriented (`maximize`, `minimize`, `target`, `informational`) with the
+target value carried by the definition, so a metric such as a tracking error or a distance to a
+target is expressible without inventing a non-monotonic direction, and a metric such as drawdown is
+plainly `minimize`. Reason codes come from a closed taxonomy, because a report consumer needs to
+distinguish "not applicable here" from "the data is wrong". Rejected: string-path calculation
+resolution, lambda post-processing, and warning-in-a-log as the reporting channel.
 
-### L2 A split is a contract, and leakage is a policy
+### L2 A split is a contract, and leakage is an exclusion relation
 
 vectorbt expresses walk-forward validation as a generator contract: a splitter yields, per split, a
 tuple of index arrays, one per set. Set lengths may be fractions or absolute counts; the variable set
 is the last one, or the first when the direction is reversed; a minimum length filters windows; a
 requested number of splits is selected evenly across the available windows rather than from the start;
-an empty set and an oversized request are errors. Three splitters differ only in how they generate
-the window bounds.
+an empty set and an oversized request are errors. Three splitters differ only in how they generate the
+window bounds.
 
 This project already has walk-forward windows and stages that search in-sample and evaluate
 out-of-sample, but the window generator is welded to the stage, there is no reusable split contract,
@@ -387,37 +475,44 @@ and there is no purge or embargo anywhere in the repository. vectorbt is silent 
 community edition, which advertises purged cross-validation only as a paid feature. Both projects
 share the same hole, and the comparison is what makes it visible.
 
-The shape is a contract that carries its leakage policy:
+Time distance is the wrong primitive. What actually forbids an observation from training is the
+overlap of its feature and label information with the information used to evaluate:
 
 ```text
-SplitContract
-    train | validation | test
-
 LeakagePolicy
-    purge:   duration | none
-    embargo: duration | none
+    purge_before
+    purge_after
+    embargo_after
+    label_overlap_rule
+    zero_interval_justification
 ```
 
-**Decision D2: adopt a reusable split contract with an explicit leakage policy. Provenance:
-`vectorbt, extended`.** The *concept* is mandatory: a splitter without any notion of leakage is the
-defect being corrected. The *values* are not: a zero purge and a zero embargo are legitimate for a
-study with no label overlap, provided the study records why the interval is zero. A reusable split is
-a lazily generated sequence of tuples of index arrays with declared set lengths, a direction, a
-minimum length and a leakage policy. The existing optimization stages consume the contract instead of
-owning window generation.
+where the label overlap rule is the operative part: if a label at `t` is a return over `t+1` to
+`t+20`, then training observations near the test boundary can overlap the target period of an
+evaluation observation, and no arrangement of purge distances fixes that unless the rule is stated.
 
-### L3 Ambiguity resolution is a versioned policy, not an adjective
+**Decision D2: adopt a reusable split contract with a leakage policy expressed as an exclusion
+relation. Provenance: `vectorbt, extended`.** The *concept* is mandatory: a splitter with no notion of
+leakage is the defect being corrected. The *values* are not: a zero purge and a zero embargo are
+legitimate for a study with no label overlap, provided the study records the justification, and a
+zero interval by omission must be distinguishable from a zero interval by decision. The contract must
+be *capable* of expressing the three exclusions above even if the first implementation derives them
+from one interval. A reusable split is a lazily generated sequence of tuples of index arrays with
+declared set lengths, a direction, a minimum length and a leakage policy, and the existing optimization
+stages consume it rather than owning window generation.
+
+### L3 Ambiguity is a policy with an identity, and it is not execution semantics
 
 vectorbt cannot know the intrabar path from bars, and says so: the trailing stop may only be seeded
 from a previous bar's extreme, the stop-loss is assumed to be hit before the take-profit when both
 could have been hit, a gap through the threshold fills at the open rather than at the threshold, a
-threshold outside the bar's range does not trigger, a stop has priority over a user signal on the
-same bar, and a configuration with zero wait on both sides is rejected as ambiguous.
+threshold outside the bar's range does not trigger, a stop has priority over a user signal on the same
+bar, and a configuration with zero wait on both sides is rejected as ambiguous.
 
 This project documents a bar ordering policy: bars are processed in a fixed order, or, when the
-adaptive setting is enabled, the high or low closer to the open is visited first. That is a resolution
-policy too, and it is stated, which is the important half. It is not pessimistic, and, more
-importantly for reproducibility, it has no identity: a result cannot say which policy produced it.
+adaptive setting is enabled, the high or low closer to the open is visited first. The policy is stated,
+which is the important half. It is not identified: a result cannot say which policy produced it, and
+the word "pessimistic" is not an identity.
 
 ```text
 AmbiguityPolicy
@@ -429,14 +524,18 @@ AmbiguityPolicy
     version
 ```
 
-**Decision D3: define an explicit, versioned ambiguity policy and record its identity in the result.
-Provenance: `Comparison`.** Every bar-derived fill assumption is documented where a consumer can see
-it, not only in the source; the default is pessimistic; an ambiguity whose meaning depends on an
-unspecifiable ordering is a configuration error rather than a silent convention; and a result records
-the policy identity rather than the word "pessimistic", so a policy change does not silently rewrite
-history. vectorbt's rules are not adopted as our fill rules: they belong to a bar simulator whose
-model is not ours. Whether the existing default changes is an owner decision, because it changes
-published numbers (section 13).
+Two boundaries are drawn explicitly. First, the ambiguity policy is distinct from an
+**execution simulation policy**: the research layer may *record* an execution assumption, and it must
+not *own* execution semantics, because owning them would put venue and market-rule concerns inside a
+research document (section 1.1). Second, the contract and the default are separate decisions.
+
+**Decision D3: adopt an explicit, versioned ambiguity policy whose identity the result records, and
+leave the default to the owner. Provenance: `Comparison`.** The architecture requires that ambiguity
+is explicit, that it has an identity, and that an ambiguous configuration cannot resolve silently; an
+ambiguity whose meaning depends on an unspecifiable ordering is a configuration error rather than a
+convention. Which policy is the default is an owner decision, because it changes published numbers
+(section 14). If the selected default is pessimistic, that property is *tested* rather than assumed,
+and vectorbt's specific rules are not adopted as our fill rules.
 
 ### L4 Multiple testing needs trial provenance, not one statistic
 
@@ -446,36 +545,38 @@ trials, the backtest horizon, the skew and the non-excess kurtosis. It is delibe
 default metric registry and is kept outside the compiled kernels.
 
 This project's optimization layer enumerates experiments, runs them, ranks the results and reports
-failures, and it computes no multiple-testing adjustment of any kind. The architecture requirement is
-not "compute a deflated Sharpe ratio". It is: **every optimization study must preserve the number and
-the provenance of its trials, so that multiple-testing corrections can be applied.**
+failures, and it computes no multiple-testing adjustment of any kind. The architectural requirement is
+not "compute a deflated Sharpe ratio". It is: **every optimization study must preserve the identity
+and the provenance of its trials, so that multiple-testing corrections can be applied.**
 
-Trial count alone is not enough, because a count is meaningless without the space it was drawn from.
-The study records at least:
-
-```text
-study_id
-dataset_digest
-search_space_digest
-parameter_count
-trial_count
-failed_trial_count
-validation_scheme_digest
-objective_definition
-selection_rule
-seed
-```
+A count is meaningless without the space it was drawn from, and a space is meaningless without the
+individual trials (section 8.2). The study record therefore carries the counts, the digests and the
+selection rule; the trial record carries the parameters and the outcome of each attempt.
 
 **Decision D4: adopt multiple-testing-aware research reporting, with the deflated Sharpe ratio as the
-initial statistic. Provenance: `vectorbt, extended`.** The requirement is the trial provenance above
-and a reported correction; the deflated Sharpe ratio is one available correction, not the definition
-of the requirement, and further diagnostics such as an overfitting probability can be added later
-without changing the contract. The metric is per-period only, never annualised; missing returns are
-excluded rather than zero-filled; the convention is non-excess kurtosis; and the mathematical
-definition is pinned in our own terms rather than taken from any release of another project. The value
-is reported, never a gate: a metric that gates is a risk rule and belongs with the risk caps.
+initial statistic, and specify its statistical contract. Provenance: `vectorbt, extended`.** The
+requirement is the trial provenance above and a reported correction; the deflated Sharpe ratio is one
+available correction, not the definition of the requirement. Before implementation, the following are
+fixed in our own terms, none of which is optional:
 
-### L5 Numeric stability is its own test category
+| Element                     | Requirement                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Return definition           | The return series that feeds the Sharpe ratio is stated, including the compounding convention                                                                 |
+| Risk-free treatment         | Either a stated rate series or an explicit zero, never an implicit assumption                                                                                 |
+| Minimum observations        | Below this count the statistic is `unavailable` with a reason, not computed                                                                                   |
+| Minimum trials              | Below this count the correction is noise on noise and the statistic is `unavailable`                                                                          |
+| Trial independence          | The assumption is stated explicitly, and a study whose trials are dependent must say so                                                                       |
+| Trial dependence            | Nominal and effective trial counts are distinguished wherever the chosen correction needs them; a sweep over adjacent parameters is not an independent sample |
+| Sharpe convention           | Per-period, with the estimator and the divisor convention pinned                                                                                              |
+| Variance, skew, kurtosis    | The estimators are named, and the kurtosis convention is non-excess                                                                                           |
+| Annualisation               | Prohibited: annualised inputs are rejected at the boundary rather than divided silently                                                                       |
+| NaN handling                | Missing returns are excluded rather than zero-filled, and the horizon counts contributing periods                                                             |
+| Failed and duplicate trials | A failed trial is counted and identified; a duplicate parameter set is detected rather than counted twice                                                     |
+
+The definition is pinned in our own specification before any test is written, and no release of
+another project serves as the definition. The value is reported, never a gate (invariant 7.6).
+
+### L5 Numeric stability is a classified obligation, not a blanket one
 
 The v1.1.1 release is the evidence: a rolling standard deviation that was not stable enough to be
 trusted, a metric that used excess kurtosis where non-excess is required, expanding reductions whose
@@ -491,19 +592,28 @@ parity tests
   + adversarial numerical tests
 ```
 
-**Decision D5: adopt a numerical-stability test category for research kernels. Provenance:
-`vectorbt`.** This is a numerical-correctness mechanism and is deliberately separate from the
-engineering parity protocol (D7): D7 governs how two implementations are written and compared, D5
-governs whether a single implementation is right at the edges. Adopted cases: running-variance and
-running-mean stability over a long series against a compensated or two-pass computation; empty,
-single-element and shorter-than-window inputs; a minimum period greater than the length, which must
-yield NaN rather than a partial aggregate; NaN propagation and NaN parity; overflow and underflow;
-very large and very small magnitudes; catastrophic cancellation; monotonicity where it is
-mathematically required; invariance under constant translation and scaling where applicable; integer
-and float layouts; and a documented divisor convention. Parity alone is not the standard, because two
-implementations can agree and both be wrong.
+The obligation is classified by kernel type, because "every reducing kernel must pass the full
+adversarial suite" turns a good test category into an unbounded research audit. The classification is
+the specification:
 
-### L6 Labels are a bounded policy set, quarantined from features
+| Kernel class            | Examples                                                 | Obligation                                                                                                             |
+| ----------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `reduction`             | sum, mean, min, max, count over a window                 | Empty input, single element, NaN propagation, layout                                                                   |
+| `rolling_reduction`     | rolling mean, standard deviation, expanding variants     | The reduction cases plus running-variance stability over a long series and the minimum-period-greater-than-length case |
+| `cumulative`            | compounding, cumulative sums and products                | The reduction cases plus overflow, underflow and catastrophic cancellation                                             |
+| `normalization`         | rescaling, z-scores, ranking                             | The reduction cases plus invariance under translation and scaling, and a zero-denominator case                         |
+| `statistical_estimator` | Sharpe, Sortino, drawdown, tail ratios                   | The reduction cases plus a documented divisor convention, a minimum-observation case and an independent recomputation  |
+| `transform`             | shifts, differences, percentage changes                  | Empty input, single element, NaN edges and layout only                                                                 |
+| `label`                 | forward returns, future aggregates, first-hit thresholds | The transform cases plus the wait convention and a leakage boundary case                                               |
+
+**Decision D5: adopt a numerical-stability obligation classified by kernel type. Provenance:
+`vectorbt`.** This is a numerical-correctness mechanism, deliberately separate from the engineering
+parity protocol (D7): D7 governs how two implementations are written and compared, D5 governs whether
+a single implementation is right at the edges. A trivial element-wise kernel carries a trivial
+obligation and says so in the classification table; a running-variance kernel carries the heavy one.
+Parity alone is not the standard, because two implementations can agree and both be wrong.
+
+### L6 Label policies need an alignment convention, not only a formula
 
 vectorbt ships nine label generators on the same factory as indicators: fixed-horizon forward return,
 future-average return, and, more interestingly, a threshold-based local-extrema state machine with
@@ -516,14 +626,33 @@ reversing back and shifting, with a wait offset that excludes the current bar.
 The earlier review already proposed a Feature, Label and Dataset layer with no implementation. This
 item does not compete with it; it supplies the label policies that candidate was missing.
 
-**Decision D6: adopt a label and target policy framework, in tranches. Provenance: `vectorbt,
-extended`.** The first tranche is the fixed-horizon forward return, the future aggregates over a
-forward window, a first-hit threshold label with asymmetric thresholds, the explicit wait convention,
-and dataset-level leakage validation. Extrema and trend-state labels follow only once the dataset and
-leakage contracts exist, because the contract and its leakage guarantee matter more than the number of
-label types. Adopted in shape: the labels themselves and the wait. Rejected: reachability from the
-feature path, since every one of these constructions is look-ahead by design and must be quarantined
-to the target path; and parameter sweeps as a substitute for a dataset contract.
+The definition needs one field that is easy to omit and expensive to omit:
+
+```text
+LabelDefinition
+    label_id
+    horizon
+    direction
+    threshold
+    wait
+    aggregation
+    missing_data_policy
+    alignment_convention
+```
+
+The alignment convention is first-class because `feature[t]` paired with `label[t]` and
+`feature[t]` paired with `label[t+1]` produce materially different datasets while looking superficially
+equivalent, and the difference is invisible in the shape of either array.
+
+**Decision D6: adopt a label and target policy framework, in tranches, with alignment as part of the
+definition. Provenance: `vectorbt, extended`.** The first tranche is the fixed-horizon forward return,
+the future aggregates over a forward window, a first-hit threshold label with asymmetric thresholds,
+the explicit wait convention, the alignment convention and dataset-level leakage validation. Extrema
+and trend-state labels follow only once the dataset and leakage contracts exist, because the contract
+and its leakage guarantee matter more than the number of label types. Adopted in shape: the labels
+themselves, the wait and the alignment. Rejected: reachability from the feature path, since every one
+of these constructions is look-ahead by design and must be quarantined to the target path; and
+parameter sweeps as a substitute for a dataset contract.
 
 ### L7 Two implementations of one kernel need a written protocol
 
@@ -535,13 +664,14 @@ implementation; never make public callers import it either.
 
 **Decision D7: adopt the parity protocol as engineering policy. Provenance: `vectorbt`.** This is an
 engineering mechanism, not a research capability: it changes how a second implementation is written,
-not what a result means. It is policy now and implementation only when a second implementation exists.
-Adopted: the protocol, the test categories, and the rule that the canonical implementation never
-imports the secondary one. Rejected: the runtime engine switch, because a call-time choice that
-silently changes numerics makes every published result ambiguous, and this project already binds the
-two halves at build time by asserting the Python version prefix.
+not what a result means, and it is not a prerequisite for running research. It is policy now and
+implementation only when a second implementation exists. Adopted: the protocol, the test categories,
+and the rule that the canonical implementation never imports the secondary one. Rejected: the runtime
+engine switch, because a call-time choice that silently changes numerics makes every published result
+ambiguous, and this project already binds the two halves at build time by asserting the Python version
+prefix.
 
-### L8 Capability probing returns a code, not a sentence
+### L8 Capability results are domain-scoped, not one universal enum
 
 vectorbt decides engine support with a frozen value object carrying `supported`, a human-readable
 `reason` and a list of required array conversions. A forced engine that is unsupported raises rather
@@ -552,12 +682,27 @@ This project already does the stronger thing for order denial: a typed reason en
 whose leading token is a stable `SCREAMING_SNAKE_CASE` code, a companion enum enumerates the closed
 set, and the documented rule is that only the leading code is canonical.
 
-**Decision D8: generalize the existing capability-code pattern. Provenance: `Existing architecture,
-confirmed`.** The pattern is ours; vectorbt confirms that a capability answer is worth modelling
-explicitly rather than returning a boolean. The decision is to extend it to analytics and data
-availability queries: a capability answer is a value with a code from a closed set, a detail for
-humans, and any required precondition or conversion. Prose is for humans, codes are for control flow,
-and a boolean is never enough.
+**Decision D8: generalize the existing capability-result pattern with domain-scoped code sets.
+Provenance: `Existing architecture, confirmed`.** The pattern is ours; vectorbt confirms that a
+capability answer is worth modelling explicitly rather than returning a boolean. The contract has one
+shape and per-domain codes:
+
+```text
+CapabilityResult
+    available: bool
+    code: CapabilityCode      per domain, not universal
+    detail: human-readable
+    requirements
+
+OrderCapability       the existing OrderDeniedCode set
+AnalyticsCapability   why a statistic is not computable
+DataCapability        why a range is not covered
+ResearchCapability    why a split or a study is not representable
+```
+
+A single universal enum would accumulate every refusal reason in the system into one closed set, which
+is the opposite of a checkable taxonomy. Each domain owns its codes, the shape is shared, and no caller
+branches on the detail text.
 
 ### L9 A cache needs an identity before it needs a policy
 
@@ -568,7 +713,7 @@ an argument is unhashable instead of raising.
 **Decision D9: defer declarative research caching to a triggered capability, with an identity model.
 Provenance: `vectorbt`.** The requirement is not established today: there is no measured case of the
 same expensive computation being repeated over the same dataset, configuration and parameters. The
-cache key, if it is ever built, is an identity, not a function signature:
+cache key, if it is ever built, is an identity from section 8, not a function signature:
 
 ```text
 CacheKey
@@ -612,14 +757,19 @@ Python receives generated stubs, and a test asserts ownership of every public cl
 defined once, in the language that owns the invariants. Python-side dtype declaration would split the
 schema across the boundary and make the stub generator a second source of truth.
 
-## 9. Gaps vectorbt does not close
+## 10. Gaps vectorbt does not close
+
+The architectural purpose of this section is not to list missing features. It is to establish that
+**the absence of these prevents vectorbt from serving as the reference architecture for this
+project**, which is the discipline that keeps the rest of the document from degenerating into feature
+collection.
 
 - **Live fidelity.** No queue position, no depth-aware partial fills, no intrabar path, no venue
   rules, no live path. Its simulation is a research approximation and cannot be a model for ours.
 - **Purging and embargo mechanics.** Absent in the community edition and advertised only in the paid
   one, so the comparison supplied the requirement and not a rule.
-- **Trial provenance.** vectorbt has a trial count in the deflated Sharpe ratio and no study identity
-  around it.
+- **Identity.** No study, trial, dataset or universe identity: vectorbt has a trial count inside one
+  metric and no structure around it.
 - **Multiple testing beyond one ratio.** No overfitting probability, no combinatorial symmetric
   cross-validation, no bootstrap.
 - **Persistence.** Whole-object pickle, no catalog, no coverage, no consolidation.
@@ -627,141 +777,169 @@ schema across the boundary and make the stub generator a second source of truth.
   reconstructed object silently loses arguments that came from global defaults.
 - **Licence.** Even where a mechanism would have transferred verbatim, the Commons Clause forbids it.
 
-## 10. Dependency graph
+## 11. Dependency graph
 
-The graph shows information flow: what must exist for a result to be interpretable. It is not the work
-order; the phases in section 11 are the work order.
+The graph must obey its own definition, so there are two: the **contract graph** shows what must exist
+for a result to be interpretable, and the **work order** is section 12. The contract graph deliberately
+does *not* place D1 downstream of D4 or D3, because the metric contract does not depend on either; the
+report is what consumes all three.
+
+### Contract graph
 
 ```mermaid
 graph TD
-    DATA["Research data from the catalog"] --> D2["D2 Split contract and leakage policy"]
-    D2 --> D6["D6 Label policies"]
-    D2 --> STUDY["Validation study"]
+    DATA["Catalog, with dataset and universe identity"] --> D2["D2 Split contract and leakage policy"]
+    D2 --> D6["D6 Label definition, including alignment"]
+    D2 --> STUDY["Validation study, with study and trial identity"]
     D6 --> STUDY
     STUDY --> D4["D4 Multiple-testing-aware reporting"]
     STUDY --> D3["D3 Ambiguity policy identity"]
-    D4 --> D1["D1 Metric metadata and availability reasons"]
-    D3 --> D1
-    D1 --> RPT["Research report"]
+    D1["D1 Metric and result contract"] --> RESULT["Research result, with result identity"]
+    D3 --> RESULT
+    D4 --> RESULT
+    D3 --> RPT["Research report"]
     D4 --> RPT
-    D3 --> RPT
-
-    ENG["Engineering integrity"] --> D7["D7 Parity protocol"]
-    ENG --> D5["D5 Numerical-stability tests"]
-    ENG --> D8["D8 Capability codes"]
-
-    DEF["Deferred and relocated"] --> D9["D9 Research caching, triggered"]
-    DEF --> D10["D10 Provider adapter, moved out"]
-    D11["D11 Schema ownership, no change"] --> X["No change"]
+    D1 --> RPT
 ```
 
-D4 does not depend on D1. The correction needs per-period returns, Sharpe inputs and trial
-provenance, all of which the study supplies; the metric contract in D1 makes the correction easier to
-report, which is an integration and not a prerequisite. Where the graph shows D4 and D3 feeding D1,
-the meaning is that the *report integration* consumes the metric contract, not that the contract waits
-for them. That distinction is the reason the phases put D1 first: the contract is cheap and defines
-the result shape, while the integration follows.
+Reading: the study produces results; the result carries the assumption policy, the computation
+identity and the metric results; the report is a presentation of results and consumes the metric
+contract. Nothing in that chain requires D1 to wait for D4, and nothing requires D4 to wait for D1.
 
-## 11. Recommended order
+### Work order and independence
 
-Phase 0 defines what a result means. Phase 1 tests whether it is trustworthy. Phase 2 extends the
-research surface. Phase 3 sets engineering policy. Phase 4 is triggered work that should not start
-without evidence.
+```text
+Phase 0  identity and contracts   D2  D1  D3  study identity  dataset identity
+Phase 1  validation integrity     D4  D5
+Phase 2  research surface         D6
+Phase 3  engineering policy       D8  D7
+Phase 4  triggered                D9
 
-### Phase 0: contracts
+Independent of the above:  D10 relocated   D11 no change
+```
+
+The engineering block is independent: D7 and D8 are not prerequisites for any research phase, and the
+classification in section 4 exists so that this cannot be misread.
+
+## 12. Recommended order
+
+Phase 0 defines identity and what a result means. Phase 1 tests whether it is trustworthy. Phase 2
+extends the research surface. Phase 3 sets engineering policy. Phase 4 is triggered work that should
+not start without evidence.
+
+### Phase 0: identity and contracts
+
+The study and dataset identity contracts (section 8) are cross-cutting and are Phase 0 work, because
+every later phase records into them.
 
 1. **D2, the split contract and its leakage policy.** First, because every out-of-sample number
    depends on it and because D6 and D4 both consume it.
-2. **D1, metric identity and availability reasons.** The contract that defines the shape of a result.
+2. **D1, metric identity, status and reason codes.** The contract that defines the shape of a result.
 3. **D3, the ambiguity policy and its identity.** Because a result that cannot name its assumptions
    cannot be compared with another result.
+4. **Study identity and trial identity** (8.1, 8.2), with the selection rule included.
+5. **Dataset and universe identity** (8.3, 8.4), which consume the point-in-time and membership
+   workstream from the earlier review rather than starting a new one.
 
-### Phase 1: integrity
+### Phase 1: validation integrity
 
-4. **D4, multiple-testing-aware reporting.** The trial provenance record and the initial correction.
-5. **D5, numerical-stability tests.** Beside D4, because both decide whether a reported figure may be
-   believed.
+6. **D4, multiple-testing-aware reporting.** The trial provenance record, the statistical contract in
+   L4, and the initial correction.
+7. **D5, the classified numerical-stability obligation.** Beside D4, because both decide whether a
+   reported figure may be believed.
 
 ### Phase 2: research surface
 
-6. **D6, the first tranche of label policies.** Only after the dataset, split and leakage contracts
+8. **D6, the first tranche of label policies.** Only after the dataset, split and leakage contracts
    exist, and only the tranche specified in L6.
 
 ### Phase 3: engineering policy
 
-7. **D8, capability codes.** A generalization of an existing pattern, so it is cheap.
-8. **D7, the parity protocol.** A document; implementation only if a second implementation appears.
+9. **D8, domain-scoped capability results.** A generalization of an existing pattern, so it is cheap.
+10. **D7, the parity protocol.** A document; implementation only if a second implementation appears.
 
 ### Phase 4: triggered infrastructure
 
-9. **D9, declarative research caching.** Only when a measured case of repeated expensive computation
-   exists over an identical dataset, configuration and parameter set.
-10. **D10, the provider adapter.** Moved to the data-provider architecture review; scheduled there, not
-    here.
+11. **D9, declarative research caching.** Only when a measured case of repeated expensive computation
+    exists over an identical dataset, configuration and parameter set.
+
+### Relocated, not scheduled here
+
+D10, the provider adapter, which belongs to the data-provider architecture review.
 
 ### Not scheduled
 
 D11, which records a decision to keep the current direction.
 
-## 12. Decisions
+## 13. Decisions
 
 Each decision carries its layer, because the layers are adopted for different reasons and phased
 differently.
 
-| ID  | Decision                                           | Layer                 | Provenance                       | Status                                                            |
-| --- | -------------------------------------------------- | --------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| D1  | Metric identity, metadata and availability reasons | Research integrity    | vectorbt, extended               | Adopt                                                             |
-| D2  | Reusable split contract with a leakage policy      | Research integrity    | vectorbt, extended               | Adopt; concept mandatory, values optional                         |
-| D3  | Explicit ambiguity policy with result provenance   | Research integrity    | Comparison                       | Adopt                                                             |
-| D4  | Multiple-testing-aware research reporting          | Research integrity    | vectorbt, extended               | Adopt; the deflated Sharpe ratio is the first statistic           |
-| D5  | Numerical-stability testing                        | Numerical correctness | vectorbt                         | Adopt                                                             |
-| D6  | Label and target policy framework                  | Research integrity    | vectorbt, extended               | Adopt in tranches; the first tranche is scoped                    |
-| D7  | Secondary implementation parity protocol           | Engineering policy    | vectorbt                         | Adopt as policy; implement only if a second implementation exists |
-| D8  | Capability-result codes                            | Engineering policy    | Existing architecture, confirmed | Generalize the existing pattern                                   |
-| D9  | Declarative research caching                       | Deferred              | vectorbt                         | Deferred until a measured need; identity model specified          |
-| D10 | Provider adapter                                   | Relocated             | vectorbt, extended               | Moved to the data-provider architecture review                    |
-| D11 | Rust schema ownership                              | No change             | Comparison                       | Keep our direction; recorded disagreement                         |
+| ID  | Decision                                                                                    | Layer                 | Provenance                       | Status                                                            |
+| --- | ------------------------------------------------------------------------------------------- | --------------------- | -------------------------------- | ----------------------------------------------------------------- |
+| D1  | Metric identity, metadata, four-state status and reason codes                               | Research integrity    | vectorbt, extended               | Adopt                                                             |
+| D2  | Reusable split contract with a leakage exclusion relation                                   | Research integrity    | vectorbt, extended               | Adopt; concept mandatory, values optional                         |
+| D3  | Ambiguity policy identity, distinct from execution simulation; default is an owner decision | Research integrity    | Comparison                       | Adopt                                                             |
+| D4  | Multiple-testing-aware reporting with a specified statistical contract                      | Research integrity    | vectorbt, extended               | Adopt; the deflated Sharpe ratio is the first statistic           |
+| D5  | Numerical-stability obligation classified by kernel type                                    | Numerical correctness | vectorbt                         | Adopt                                                             |
+| D6  | Label and target policy framework, with alignment in the definition                         | Research integrity    | vectorbt, extended               | Adopt in tranches; the first tranche is scoped                    |
+| D7  | Secondary implementation parity protocol                                                    | Engineering policy    | vectorbt                         | Adopt as policy; implement only if a second implementation exists |
+| D8  | Domain-scoped capability results, sharing one shape                                         | Engineering policy    | Existing architecture, confirmed | Generalize the existing pattern                                   |
+| D9  | Declarative research caching                                                                | Deferred              | vectorbt                         | Deferred until a measured need; identity model specified          |
+| D10 | Provider adapter                                                                            | Relocated             | vectorbt, extended               | Moved to the data-provider architecture review                    |
+| D11 | Rust schema ownership                                                                       | No change             | Comparison                       | Keep our direction; recorded disagreement                         |
 
-### 12.1 Minimum acceptance per decision
+The identity contracts in section 8 carry no decision identifier. They are cross-cutting requirements
+that the decisions above express, not a twelfth decision competing with them.
+
+### 13.1 Minimum acceptance per decision
 
 The condition that makes a decision independently reviewable: the minimum that must be true before the
 item may be called done.
 
-| ID  | Minimum acceptance                                                                                                                                                                                                                                                                                                                              |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Every registered statistic declares a title, units, tags and direction, and a result reports a status and a reason code for each statistic that could not be computed                                                                                                                                                                           |
-| D2  | A split is produced by a contract that works for any series length, supports fractional and absolute set lengths, filters short windows and takes a leakage policy; a test asserts that no index appears in a test set and in its own in-sample set within the policy interval; a zero interval is permitted only with a recorded justification |
-| D3  | Each bar-derived assumption is documented, the default is pessimistic, an ambiguous configuration is rejected, and a result records the ambiguity policy identity                                                                                                                                                                               |
-| D4  | A study records the trial provenance listed in L4; the correction is computed from per-period inputs with the non-excess kurtosis convention pinned in our own terms; and the value is reported, never a gate                                                                                                                                   |
-| D5  | The stability cases listed in L5 exist for each reducing research kernel, with running variance compared against an independent method rather than against the kernel's own twin                                                                                                                                                                |
-| D6  | The first tranche exists only on the target path, a leakage test fails if a label value is read as a feature, and the first-hit label is pinned against a hand-computed asymmetric case                                                                                                                                                         |
-| D7  | A written protocol exists and is linked from the crate that owns the boundary; the checklist applies only if a second implementation appears                                                                                                                                                                                                    |
-| D8  | A probe returns a typed value with a code from a closed set, and a test asserts that no caller branches on the detail text                                                                                                                                                                                                                      |
-| D9  | No acceptance criterion while deferred; if triggered, the cache key is the identity model in L9 and a cached and an uncached run agree exactly                                                                                                                                                                                                  |
-| D10 | No acceptance criterion in this document; acceptance belongs to the data-provider architecture review                                                                                                                                                                                                                                           |
-| D11 | No acceptance criterion: the decision is to change nothing                                                                                                                                                                                                                                                                                      |
+| ID  | Minimum acceptance                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1  | Every registered statistic declares a title, units, tags and direction; a result reports a status from the four-state vocabulary and a reason code from that domain's closed set for every statistic that is not computed; a test asserts that `invalid` and `unavailable` are distinguishable on the same metric                                                                                                  |
+| D2  | A split is produced by a contract that works for any series length, supports fractional and absolute set lengths, filters short windows and takes a leakage policy capable of expressing purge before, purge after, embargo after and a label overlap rule; a test asserts that no training observation overlaps an evaluation observation's label information; a zero interval without a justification is refused |
+| D3  | Each bar-derived assumption is documented, an ambiguous configuration is rejected, and a result records the ambiguity policy identity; a test asserts that two results produced under different policy versions are distinguishable; the default is named by an owner decision and, if pessimistic, is tested as such                                                                                              |
+| D4  | A study records study and trial identity; every element of the statistical contract in L4 is specified before the first test is written; the value is reported, never a gate                                                                                                                                                                                                                                       |
+| D5  | Each kernel is classified, and the obligation for its class from the table in L5 is met, with running variance compared against an independent method rather than against the kernel's own twin                                                                                                                                                                                                                    |
+| D6  | The first tranche exists only on the target path, the definition includes the alignment convention, a leakage test fails if a label value is read as a feature, and the first-hit label is pinned against a hand-computed asymmetric case                                                                                                                                                                          |
+| D7  | A written protocol exists and is linked from the crate that owns the boundary; the checklist applies only if a second implementation appears                                                                                                                                                                                                                                                                       |
+| D8  | The shared shape exists with domain-scoped code sets, and a test asserts that no caller branches on detail text                                                                                                                                                                                                                                                                                                    |
+| D9  | No acceptance criterion while deferred; if triggered, the cache key is the identity model in L9 and a cached and an uncached run agree exactly                                                                                                                                                                                                                                                                     |
+| D10 | No acceptance criterion in this document; acceptance belongs to the data-provider architecture review                                                                                                                                                                                                                                                                                                              |
+| D11 | No acceptance criterion: the decision is to change nothing                                                                                                                                                                                                                                                                                                                                                         |
 
-## 13. Open questions
+## 14. Open questions
 
-Ordered by what they gate. The placement questions are no longer here: they are preconditions
-(section 1.3).
+Ordered by what they gate. The placement questions are preconditions (section 1.3), not open questions.
 
-1. **Does the pessimistic bar default change existing published results?** If it does, it is an owner
-   decision, not a review decision, and it needs a before-and-after comparison. This gates D3.
-2. **What leakage interval is correct, and is it per set?** A purge before each test set and an
-   embargo after it are the usual formulation, and the correct length depends on the label horizon and
-   the bar spacing. This gates D2.
-3. **What is the minimum trial count at which a correction says anything?** Below some number of
-   trials the correction is noise on noise, and the metric should be reported as unavailable with a
-   reason rather than computed. This gates D4 and depends on D1.
-4. **Does a multiple-testing correction ever become a gate?** If it does, it is a risk rule and
-   belongs with the risk caps, not with the analytics. The same question was left open by the earlier
-   review.
-5. **What is the units, tags and direction vocabulary, and is it closed?** A closed set is checkable;
+1. **Which ambiguity policy is the default?** An owner decision, because it changes published numbers
+   and needs a before-and-after comparison. This gates D3.
+2. **What observations are forbidden from training because their feature and label information
+   overlaps the evaluation information?** This is the leakage rule, and it replaces the earlier
+   time-distance framing: the answer is an exclusion relation, not a bar count. It depends on the
+   label horizon and the bar spacing, and it gates D2 and D6.
+3. **What is the minimum observation count and the minimum trial count at which a correction says
+   anything?** Below them the statistic is `unavailable` with a reason rather than computed. This
+   gates D4.
+4. **How dependent are the trials in a typical sweep, and does the chosen correction need an effective
+   trial count?** Twenty adjacent moving-average windows are not twenty independent opportunities, and
+   the study identity can express the distinction whether or not the first correction uses it. This
+   gates D4's second tranche.
+5. **Does a multiple-testing correction ever become a gate?** If it does, it is a risk rule and belongs
+   with the risk caps, under invariant 7.6. The same question was left open by the earlier review.
+6. **What is the units, tags and direction vocabulary, and is it closed?** A closed set is checkable;
    an open set is a spelling competition. This gates D1.
-6. **Which other multiple-testing diagnostics are wanted beyond the first statistic?** An overfitting
-   probability and a bootstrap are the obvious candidates, and the study record in L4 is what makes
-   them possible later. This gates D4's second tranche.
-7. **What is the minimum study identity that must be recorded before a result is comparable?** The
-   field lists in section 7.6 are a proposal, and pruning them is easier than backfilling them once
-   results exist.
+7. **Which kernel classes exist, and which class does each research kernel belong to?** The
+   classification is part of the D5 specification, so an unclassified kernel is an incomplete
+   obligation. This gates D5.
+8. **What constitutes dataset identity?** A raw-data digest, a normalised-data digest, a point-in-time
+   information state, universe membership, a corporate-action policy, a calendar, an adjustment policy
+   and a missing-data policy are all plausible constituents, and every one of them is defensible in
+   isolation. This gates the reproducibility of every study and is the largest of the open questions.
+9. **What constitutes trial identity?** Parameter values, seed, feature configuration, label
+   configuration, split assignment, objective and execution status are the candidates, and the
+   answer decides whether a trial can be re-run at all. This gates D4.
