@@ -1,6 +1,8 @@
 # VeighNa capability review: harvesting trading-system capabilities
 
-Companion to [`vnpy_lessons_implementation.md`](vnpy_lessons_implementation.md).
+Companion to [`vnpy_lessons_implementation.md`](vnpy_lessons_implementation.md). Throughout, the
+framework is called VeighNa (vn.py); the former name appears only where a path or the original
+request refers to it.
 
 **Primary invariant.** VeighNa contributes capabilities to the components of this architecture; it
 does not dictate the architecture of those components. Every item below is stated as a capability
@@ -178,23 +180,23 @@ future VeighNa-derived capability.
 Each piece of state has exactly one authority. A new capability consumes an authority or produces a
 value for one; it may not maintain an independent copy of state another component owns.
 
-| Information                    | Authority                            |
-| ------------------------------ | ------------------------------------ |
-| Order state                    | Cache and execution engine           |
-| Fill                           | Execution engine                     |
-| Position                       | Portfolio                            |
-| Realised and unrealised PnL    | Portfolio                            |
-| Account and margin             | Portfolio and the account model      |
-| Risk decision                  | Risk engine                          |
-| Bar and aggregated data        | Data engine                          |
-| Instrument definition          | Model and the instrument provider    |
-| Universe membership            | Universe actor                       |
-| Portfolio target               | Target pipeline                      |
-| Child order state              | Execution engine                     |
-| Execution algorithm scheduling | The execution algorithm instance     |
-| Strategy state                 | The strategy state contract          |
-| Period performance             | The performance frame (proposed, D3) |
-| Factor value                   | The research pipeline (proposed, D5) |
+| Information                    | Authority                                                                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Order state                    | Cache and execution engine                                                                                                         |
+| Fill                           | Execution engine                                                                                                                   |
+| Position                       | Portfolio                                                                                                                          |
+| Realised and unrealised PnL    | Portfolio                                                                                                                          |
+| Account and margin             | Portfolio and the account model                                                                                                    |
+| Risk decision                  | Risk engine                                                                                                                        |
+| Bar and aggregated data        | Data engine                                                                                                                        |
+| Instrument definition          | Model and the instrument provider                                                                                                  |
+| Universe membership            | Universe actor                                                                                                                     |
+| Portfolio target               | Target pipeline                                                                                                                    |
+| Child order state              | Execution engine                                                                                                                   |
+| Execution algorithm scheduling | The execution algorithm instance                                                                                                   |
+| Strategy state                 | The strategy state contract                                                                                                        |
+| Period performance             | Derived from the portfolio authority by the performance-period reducer (proposed, D3); the frame is a projection, not an authority |
+| Factor value                   | The research pipeline (proposed, D5)                                                                                               |
 
 The prohibition that follows: **a VeighNa-derived component may not hold a second authoritative copy
 of state that a core component already owns.** The risk counters in D1 are derived counts over events
@@ -222,6 +224,28 @@ The desktop GUI, the chart application, the Excel bridge, the web trader, the RP
 and notebook REPL, the internationalisation layer, and the account and position manager
 applications. These solve distribution and presentation problems this project does not attempt. The
 two data applications are already covered by the catalog and the catalog CLI.
+
+### 7.4 Research provenance
+
+A research value is only useful if it can be attributed. Every value produced by the research layers
+carries, or can be resolved to, the dataset digest, the feature definition digest, the membership
+digest, the as-of timestamp, the source version of the underlying data, and the experiment digest of
+the run that produced it. A pipeline may not emit a value it cannot attribute, and an experiment that
+cannot be reproduced from its recorded digests is not a result.
+
+### 7.5 Parent and child execution conservation
+
+For every execution algorithm, over the life of a parent order:
+
+```text
+parent target = executed quantity + remaining quantity + cancelled unfilled quantity
+```
+
+subject to the order state semantics of the execution engine, and the sum of child submitted
+quantities may not exceed the parent target unless the algorithm declares an overshoot policy and the
+caller authorises it for that parent. This is a hard invariant rather than a test expectation: an
+algorithm that can silently exceed its parent, or lose quantity between its schedule and its children,
+is not admissible regardless of what it does to the price.
 
 ## 8. Candidate learnings
 
@@ -256,11 +280,24 @@ hard-coding three counters. A cap is a predicate over a scope, a metric and a wi
 - metric: submit, modify, cancel, fill;
 - window: a rolling duration, or the current session where one is defined.
 
-The reset boundary must be explicit and documented, in contrast to VeighNa's process-lifetime
-counters. The repeated request guard must be a rolling window over a canonical request key, not a
-cumulative count. Every denial must be a structured record rather than a formatted string: the rule
-identity, the scope, the observed value, the limit, the window and the timestamp, alongside the
-strategy and instrument already carried by `OrderDenied`.
+Counters and the decision are separate things, and the separation is what keeps the subsystem
+extensible when notional, exposure, volatility, drawdown and concentration limits are added:
+
+```text
+RiskCounter  ->  rule evaluation  ->  RiskDecision  ->  OrderDenied or order accepted
+```
+
+A counter is state: the observed count for one scope and one metric, timestamped, and derived from
+events the risk engine already receives. A rule holds the limit and the window. A decision is an
+immutable record: the rule identity, the scope, the observed value, the limit, the window, the
+timestamp and the outcome, alongside the strategy and instrument that `OrderDenied` already carries.
+The counter is never the decision, and the decision is never a formatted string.
+
+The reset question is resolved by construction rather than by a boundary: a window is a rolling
+duration evaluated from event timestamps, so there is no reset to define and no process-lifetime
+accumulation. Where a window is the session, the boundary comes from the trading calendar rather than
+from a wall-clock day. The repeated request guard is the same mechanism with a canonical request key
+as its scope, not a cumulative count that blocks a request shape forever.
 
 ### L2. Execution algorithms: passive and aggressive quoting
 
@@ -322,11 +359,21 @@ frame itself, drawdown duration, the exponentially weighted Sharpe, and any aggr
 commission or slippage.
 
 **Decision D3: adopt the frame and four statistics, reject the composite.** The frame is a
-`PerformancePeriod` record with the period bounds, starting and ending equity, realised and
-unrealised PnL, net PnL, gross profit and gross loss, commission and fees, slippage, turnover and
-volume, trade count with winning and losing counts, open position count, gross and net exposure, and
-drawdown with its percentage. Statistics are views over that frame rather than independent
-reductions, so that backtest, live, portfolio and strategy reporting do not each reconstruct PnL.
+`PerformancePeriod` record whose fields are grouped by what they are, so that the contract is not a
+flat bag of numbers:
+
+- **accounting**: period bounds, starting equity, ending equity, realised PnL, unrealised PnL,
+  commission, fees, slippage;
+- **trading activity**: volume, turnover, trade count, winning trades, losing trades;
+- **exposure**: open position count, gross exposure, net exposure;
+- **derived performance**: net PnL, net return, drawdown, drawdown percentage.
+
+The period is emitted by an interval trigger rather than by a backtest callback: a calendar boundary
+of day, ISO week or month computed from the configuration and the trading calendar, plus an explicit
+flush on shutdown and on demand. A backtest runs the same trigger off the simulated clock, so a live
+run and a backtest produce the same rows for the same period and the same accounting. Statistics are
+views over that frame rather than independent reductions, so that backtest, live, portfolio and
+strategy reporting do not each reconstruct PnL.
 
 Three rules apply. The frame reduces the authorities in section 7.1 and may not become a second
 ledger. Undefined is not zero: a statistic that cannot be computed stays unavailable, matching the
@@ -351,17 +398,40 @@ because United States listed equity options are American while index options are
 volatility surface, so that implied volatility can be interpolated, compared against a quote, and
 used by a quoting rule.
 
-**Decision D4A: adopt an early exercise model** selected by an exercise style declared on the option
-instrument, defaulting to the market convention for the instrument class, so that pricing never
-assumes one style for a whole chain.
+**Decision D4A: adopt an early exercise model,** selected by an exercise style declared on the option
+instrument and defaulted to the market convention of the instrument class, so that pricing never
+assumes one style for a whole chain. The first implementation is a Cox-Ross-Rubinstein binomial tree
+with a configurable step count and a documented convergence bound, which is the smallest thing that
+prices an American option correctly. The pricing interface stays model agnostic, so a finite
+difference or a more general exercise framework can replace the tree without changing callers. The
+interface is the deliverable; the tree is an implementation.
 
 **Decision D4B: adopt a volatility surface as a separate subsystem**, specified rather than named:
-the source of observations and its filters (bid and ask rather than mid, crossed and stale quotes,
-minimum volume), the coordinates (strike or log moneyness by time to expiry), interpolation,
-extrapolation limits, smoothing, calibration frequency and trigger, an arbitrage check, and a
-confidence or fit error exposed with every query so a caller can refuse a surface value. Spline
-interpolation is not adopted merely because VeighNa uses it; the scheme is an open question in
-section 13. The parity implied forward is adopted as a diagnostic input to both parts.
+
+- **observations and filters**: bid and ask rather than mid, a minimum bid, a maximum spread, a
+  minimum time to expiry, a minimum volume where available, rejected crossed markets, and stale
+  quotes rejected by age;
+- **coordinates**: total implied variance against log moneyness, with time to expiry as the second
+  axis, because total variance in log moneyness is the parameterisation in which the no-arbitrage
+  conditions are statements about monotonicity and convexity rather than about the quoted price;
+- **interpolation**: monotone and convexity preserving within the quoted region, so the surface
+  cannot introduce a butterfly arbitrage that was not in the data;
+- **calendar consistency**: for each log moneyness, total variance must be non-decreasing in time to
+  expiry;
+- **extrapolation**: flat total variance beyond the quoted range rather than a continuation of the
+  interpolant, since flat total variance preserves no-arbitrage while an extrapolated spline does
+  not, and every extrapolated query is flagged;
+- **arbitrage validation**: the monotonicity, convexity and calendar conditions are checked and
+  reported, never silently repaired; a surface that fails is refused rather than served;
+- **calibration**: on a timer, on new quotes, or on demand, with the trigger and the minimum
+  observation count recorded, and a refusal when the observation set is too thin to fit;
+- **confidence**: every query returns a fit error from the residuals at the observed points and the
+  number of observations contributing.
+
+An arbitrage-free parameterised family, such as a stochastic volatility inspired parameterisation, is
+the fallback if the interpolation family cannot satisfy the validation conditions in practice; the
+validation conditions, not the interpolation scheme, are the requirement. The parity implied forward
+is adopted as a diagnostic input to both parts.
 
 ### L5. A factor pipeline between the catalog and a model
 
@@ -392,6 +462,10 @@ digests stably, so a definition can be pinned by a regression scenario and appea
 digest. A string expression evaluated with `eval` is unacceptable here. The pipeline lives outside
 the event driven engine and execution stays on the normal strategy and execution path. Section 7.1
 applies: the factor value is authoritative in the research pipeline and nowhere else.
+
+The factor pipeline is a general research primitive and does not replace existing domain specific
+score engines or their contracts. A deterministic score and a learned factor may consume the same
+data infrastructure, but they are not one subsystem, and neither may absorb the other.
 
 ### L6. Notifications
 
@@ -432,13 +506,19 @@ release made the genetic hyperparameters user controllable.
 This project defines a `SearchStrategy` protocol, ships grid search only, and already has canonical
 parameter digests, memory driven fan out, stages, persistence and a report.
 
-**Decision D8: adopt, behind the existing protocol,** and treat the objective as first class rather
-than implicit. The run is described by its parameter space, objective, constraints, dataset,
-experiment digest, seed, search strategy, evaluation cache, results and report; the objective
-supports composite and constrained forms over return, risk, drawdown, turnover, trade count and
-stability, since a single ratio is an inadequate objective for a trading system. Random and
-evolutionary strategies are added, deterministic under a seed, with a memo cache keyed by the
-existing digest.
+**Decision D8: adopt, behind the existing protocol.** The objective and constraint model already
+exists in the analyzer, so this item is the search itself plus two contract additions. The run is
+described by its parameter space, objective, constraints, dataset, validation scheme, experiment
+digest, seed, search strategy, evaluation cache, results and report. The objective supports composite
+and constrained forms over return, risk, drawdown, turnover, trade count and stability, since a
+single ratio is an inadequate objective for a trading system.
+
+The validation scheme is part of the run rather than a convention a caller applies afterwards: which
+portion of the dataset is used for search, what is held out, and whether the evaluation is a single
+split or a walk-forward sequence of fits and out-of-sample windows. Without it, in-sample and
+out-of-sample results are indistinguishable in the report, which is the failure mode that makes an
+optimizer dangerous. Random and evolutionary strategies are added, deterministic under a seed, with a
+memo cache keyed by the existing digest, and a held-out evaluation is never scored by the search.
 
 ### L9. Portfolio construction: the mechanism exists, the cross-sectional layer does not
 
@@ -477,11 +557,24 @@ Neither project has a shared contract above its algorithms. VeighNa's five algor
 their own parameters, and this project's TWAP takes its own parameters at submit time, so nothing
 expresses what the caller actually wants from an execution.
 
-**Decision D11: adopt an execution intent** as the contract shared by every algorithm: urgency,
-participation rate, a price or slippage constraint, a passive or aggressive preference, and a
-duration or horizon. An intent is what a strategy declares; an algorithm is one way to satisfy it.
-TWAP, VWAP, percentage of volume, arrival price, iceberg, pegged and sniper then implement the same
-higher level contract rather than each inventing a parameter vocabulary. This is a self-generated
+**Decision D11: adopt three separate concepts,** because collapsing them is how an algorithm becomes
+a dumping ground for strategy specific parameters.
+
+```text
+ExecutionIntent   = what the caller wants            (buy 10,000 shares)
+ExecutionPolicy   = the constraints and preferences  (maximise passive, 30 minutes, 15 bps)
+ExecutionAlgorithm = how the system attempts it      (iceberg)
+```
+
+An intent is the order the strategy wants executed. A policy carries urgency, a participation rate, a
+price or slippage constraint, a passive or aggressive preference, and a duration or horizon. An
+algorithm is one way to satisfy the pair, and it declares which parts of a policy it can honour. An
+algorithm that cannot honour a policy must refuse the order rather than silently relax the
+constraint, and the policy is validated at submit time in the same way TWAP validates its parameters
+today, with a denial that names the offending field.
+
+TWAP, VWAP, percentage of volume, arrival price, iceberg, pegged and sniper then implement one higher
+level contract rather than each inventing a parameter vocabulary. This is a self-generated
 requirement exposed by the comparison, not a VeighNa lesson, and it is the reason D2's algorithms are
 worth building once rather than five times.
 
@@ -505,10 +598,17 @@ its factor data cannot express which instruments were eligible at a past timesta
 runtime membership but no research panel.
 
 **Decision D13: adopt the dataset contract** as part of D5, carrying membership, point in time
-timestamps, the train and test split, and the metadata needed to reproduce the panel, so that
-survivorship and look-ahead bias are structural impossibilities rather than review findings. Whether
-membership history is stored data or a rule re-evaluated at a historical timestamp is an open
-question in section 13.
+timestamps, the train and test split, and the metadata needed to reproduce the panel. The panel
+cannot guarantee that the underlying source data is point in time correct, so the claim is not that
+bias is impossible; the claim is that membership and timestamps are dataset invariants that are
+checked rather than left to review. A panel that cannot state the membership applying at each of its
+timestamps is rejected.
+
+Membership history is stored data, not a rule re-evaluated at a past timestamp: a rule evaluated
+today cannot represent an instrument that has since delisted, and the instrument definition needed to
+evaluate it may itself no longer be available. The membership rule remains the mechanism that
+produces the stored series, and the series is what a panel is built from, persisted in the catalog
+alongside the data it describes.
 
 ### L14. Execution analytics: measure what the algorithms do
 
@@ -523,9 +623,13 @@ single algorithm is unmeasured beyond the fill realism models in the backtest.
 - parent and child metrics: completion time, child count, child churn, mean child lifetime, partial
   fill ratio and price improvement.
 
-Every metric requires a stated reference price and a stated denominator, because the metric is
-otherwise ambiguous. This is a self-generated requirement exposed by the comparison, not a VeighNa
-lesson: adopting D2 without D14 would leave the algorithms unverifiable in production.
+Every metric requires a stated reference price, a stated denominator and a stated reference
+timestamp, because the metric is otherwise ambiguous. The reference timestamp is one of: the decision
+timestamp, the arrival timestamp, the parent submission timestamp, the first child timestamp, or the
+benchmark interval start, and it is declared per metric rather than assumed, since "arrival price"
+without a timestamp convention is not a definition. This is a self-generated requirement exposed by
+the comparison, not a VeighNa lesson: adopting D2 without D14 would leave the algorithms unverifiable
+in production.
 
 ## 9. Gaps the comparison exposes that VeighNa does not close
 
@@ -542,7 +646,10 @@ accepted by this review; each would need its own justification.
 
 ## 10. Dependency graph
 
-The layers and their direction of dependency. Nothing below the research layers may depend on them.
+The layers and their direction of dependency. Core execution, risk and accounting infrastructure must
+never depend on the research subsystem: the research layers produce values that reach execution as
+data at the application level, through a target, and never as a code dependency from an execution
+component back into research.
 
 ```mermaid
 flowchart TD
@@ -593,6 +700,10 @@ Phased so that each phase's acceptance tests can exercise the phase before it.
 2. **D3, the performance frame.** Second, because it establishes the single accounting truth the
    later analytics depend on.
 
+The ordering is logical, not a serialisation of effort: the D3 field and trigger contract can be
+developed while D1 is implemented, and D1's denial events are useful input for the accounting event
+path that D3 will consume.
+
 ### Phase 2: execution
 
 3. **D11, execution intent.** The contract first, so the algorithms are written against it once.
@@ -633,10 +744,33 @@ Provenance distinguishes a capability VeighNa supplies from one the comparison e
 | D8       | Optimization                 | VeighNa, extended | Adopt random and evolutionary strategies with a digest memo cache, and a first class objective and constraint model                                                                                  |
 | D9       | Portfolio construction       | Comparison        | No VeighNa change; the mechanism exists and the cross-sectional layer is recorded as an adjacent gap                                                                                                 |
 | D10      | Universe                     | Comparison        | No change; runtime membership exists and historical point in time membership is folded into D5 and D13                                                                                               |
-| D11      | Execution intent             | Comparison        | Adopt a shared execution intent contract above the algorithms                                                                                                                                        |
+| D11      | Execution intent             | Comparison        | Adopt three types above the algorithms: an intent, a policy of constraints and preferences, and an algorithm that refuses a policy it cannot honour                                                  |
 | D12      | Canonical accounting         | Comparison        | Formalise: the portfolio and account model is the authority for position and PnL state, and the D3 frame is its only periodic reduction                                                              |
 | D13      | Point in time dataset        | Comparison        | Adopt the dataset contract for membership, timestamps and splits as part of D5                                                                                                                       |
 | D14      | Execution analytics          | Comparison        | Adopt arrival price, execution quality and parent and child metrics alongside D2                                                                                                                     |
+
+### 12.1 Minimum acceptance per decision
+
+Each decision is independently reviewable against one minimum condition. The detailed tests and
+evidence are in the companion record; this table is the design contract.
+
+| Decision | Minimum acceptance                                                                                                                                                      |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1       | A repeated request cannot bypass the rolling guard, and a denial record carries rule, scope, observed value, limit and window                                           |
+| D2       | The parent target equals executed plus remaining plus cancelled unfilled, and the sum of child submissions never exceeds the parent without a declared overshoot policy |
+| D3       | Frame equity reconciles exactly to the portfolio totals for the same run                                                                                                |
+| D4A      | American and European instruments follow their declared exercise style, and the tree price converges as the step count rises                                            |
+| D4B      | The surface rejects invalid and stale observations, refuses a failing arbitrage check, and exposes a fit confidence on every query                                      |
+| D5       | The same factor definition produces the same digest across processes                                                                                                    |
+| D6       | A notification cannot block the trading path, and a saturated sink drops rather than stalls the caller                                                                  |
+| D7       | No change required                                                                                                                                                      |
+| D8       | The same seed and digest produce the same search sequence, and a held-out evaluation is never scored by the search                                                      |
+| D9       | No change required                                                                                                                                                      |
+| D10      | No change required                                                                                                                                                      |
+| D11      | An algorithm refuses a policy it cannot honour, and a migrated TWAP reproduces its schedule for an equivalent intent                                                    |
+| D12      | No component recomputes PnL from prices, and the frame is the only periodic reduction                                                                                   |
+| D13      | A panel for a past timestamp cannot contain an instrument that joined later                                                                                             |
+| D14      | Every metric declares its reference price, its denominator and its reference timestamp                                                                                  |
 
 Cross-cutting constraints on every accepted item: the United States rule of section 1.1; the
 state-ownership invariant of section 7.1; the prohibition on a second ledger or a second targeting
@@ -645,24 +779,29 @@ independent reference for the numerical items (D3, D4A, D4B, D5, D14).
 
 ## 13. Remaining open questions
 
-1. **The reset boundary for D1.** A trading day is not the same interval for every venue and this
-   project does not require one. A rolling window with an explicit duration, defaulted from the
-   session calendar where one exists, is the likely answer, but it changes the meaning of the cap and
-   must be decided before implementation.
-2. **Where the D3 frame is produced.** The portfolio is the authority for PnL, so the reducer belongs
-   next to it, but it must also be available to live runs, which implies an interval trigger rather
-   than a backtest callback.
-3. **Whether the realised and unrealised split is a frame column or a statistic.** The frame is the
-   more general choice, since the portfolio already exposes both.
-4. **The D4B interpolation scheme.** Spline fitting is what VeighNa does, but arbitrage free
-   alternatives exist and the choice affects every downstream number. The arbitrage check and the
-   extrapolation policy are the constraints that should decide it.
-5. **Whether the D5 factor layer belongs in this repository** or in a sibling package that depends on
-   it, given that it has no runtime dependency from the engine.
-6. **Historical point in time membership (D10, D13).** Whether membership history is data the catalog
-   should hold, or a rule re-evaluated at each historical timestamp, and which of the two a research
-   panel needs.
-7. **Whether the D1 caps and the D2 algorithms share a configuration surface**, or whether caps stay
-   in the risk engine configuration and algorithms take parameters at submit time as TWAP does.
-8. **Whether D11's intent is a new type or a refinement of the existing execution algorithm
-   parameters**, which affects the migration of the shipped TWAP.
+Five questions were resolved by this revision rather than carried forward: the D1 reset boundary is a
+rolling window over event timestamps, so there is no reset to define; the D3 frame is produced by an
+interval trigger next to the portfolio authority, with the realised and unrealised split a frame
+column rather than a statistic; D4B's interpolation is a monotone and convexity preserving family over
+total implied variance in log moneyness, gated by the arbitrage conditions, with a parameterised
+family as the fallback; historical membership is stored data rather than a re-evaluated rule; and D11
+is three types, with the shipped TWAP migrating onto them.
+
+What remains, in the order it must be settled:
+
+1. **The concrete cap values and their default windows for D1.** The mechanism is settled; the
+   numbers are not, and a default that is too low will deny legitimate strategies. Settle before
+   implementation, with the values documented next to the configuration.
+2. **The D2 policy vocabulary.** Which constraints an algorithm must honour, and which it may refuse.
+   This defines how much of D11 an algorithm can implement, so it precedes the algorithms.
+3. **The D4B calibration trigger and minimum observation count**, since they decide when a surface is
+   refused rather than served, and a refusal must not stop a quoting strategy unexpectedly.
+4. **Whether the D5 and D13 research layer belongs in this repository** or in a sibling package that
+   depends on it, given that nothing in the engine depends on it.
+5. **Whether the D9 cross-sectional layer should be scheduled at all.** It remains a recorded
+   adjacent gap with no stated research requirement behind it.
+6. **Whether the D1 caps and the D2 algorithms share a configuration surface**, or whether caps stay
+   in the risk engine configuration and the algorithm takes its policy at submit time.
+7. **The D14 metric thresholds, if any.** Whether the analytics merely report and pin values, or
+   whether any metric becomes a gate, which would make it a risk rule and place it in D1 rather than
+   in the analytics.
