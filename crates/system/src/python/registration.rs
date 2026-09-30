@@ -38,10 +38,11 @@ use nautilus_model::identifiers::{
     ActorId, ComponentId, ExecAlgorithmId, StrategyId, normalize_order_id_tag,
 };
 use nautilus_trading::{
-    ImportableControllerConfig, ImportableStrategyConfig,
+    ImportableControllerConfig, ImportableStrategyConfig, Universe,
     python::{
         algorithm::PyExecutionAlgorithm,
         strategy::{PyStrategy, PyStrategyInner},
+        universe::PyUniverse,
     },
 };
 use pyo3::{
@@ -111,6 +112,65 @@ impl Trader {
         self.register_python_data_actor(actor, ComponentId::from(actor_id))?;
 
         self.add_actor_id_for_lifecycle::<PyDataActorInner>(actor_id)
+    }
+
+    /// Adds a constructed Python universe component to the trader.
+    ///
+    /// The universe is registered under its own name, which identifies both the component and its
+    /// membership topic. The trader drives the component's lifecycle, so its selection and
+    /// subscription claims start and stop with the run.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the trader already tracks a component under the universe's ID, or if
+    /// the universe cannot be registered or tracked.
+    pub fn add_python_universe_instance(
+        &mut self,
+        universe: &Py<PyAny>,
+        actor_id: ActorId,
+    ) -> anyhow::Result<()> {
+        let component_id = ComponentId::from(actor_id);
+        self.ensure_component_id_available(component_id)?;
+
+        if let Err(e) = self.register_python_universe(universe, actor_id, component_id) {
+            // Leave no clock, registry entry, or lifecycle entry behind from a failed attempt
+            self.release_component(component_id);
+            return Err(e);
+        }
+
+        log::info!(
+            "Registered Python universe {actor_id} with trader {}",
+            self.trader_id
+        );
+        Ok(())
+    }
+
+    fn register_python_universe(
+        &mut self,
+        universe: &Py<PyAny>,
+        actor_id: ActorId,
+        component_id: ComponentId,
+    ) -> anyhow::Result<()> {
+        let clock = self.create_component_clock(component_id);
+        let trader_id = self.trader_id;
+        let cache = self.cache.clone();
+
+        Python::attach(|py| -> anyhow::Result<()> {
+            let py_universe = universe
+                .bind(py)
+                .cast::<PyUniverse>()
+                .map_err(|e| anyhow::anyhow!("Failed to downcast to Universe: {e}"))?;
+
+            py_universe
+                .borrow()
+                .register_component(trader_id, clock, cache)
+                .map_err(|e| anyhow::anyhow!("Failed to register Universe: {e}"))?;
+
+            py_universe.borrow().register_in_global_registries();
+            Ok(())
+        })?;
+
+        self.add_actor_id_for_lifecycle::<Universe>(actor_id)
     }
 
     /// Adds an importable Python controller to the trader.

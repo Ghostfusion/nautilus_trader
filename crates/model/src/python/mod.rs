@@ -37,6 +37,7 @@ pub mod orders;
 pub mod position;
 pub mod reports;
 pub mod types;
+pub mod universe;
 
 #[cfg(feature = "defi")]
 pub mod defi;

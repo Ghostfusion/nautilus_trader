@@ -49,6 +49,14 @@ pub type SharedUniverseRule = Rc<RefCell<dyn UniverseRule>>;
 
 /// A rule with the same membership set at every instant.
 #[derive(Clone, Debug)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", unsendable, from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct StaticUniverseRule {
     name: Ustr,
     instruments: Vec<InstrumentId>,
@@ -115,6 +123,14 @@ impl ScheduledUniverseSet {
 /// asked about, and nothing before the first set. A schedule is input data to a run, so the same
 /// schedule always produces the same membership at the same instant.
 #[derive(Clone, Debug)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", unsendable, from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct ScheduledUniverseRule {
     name: Ustr,
     sets: Vec<ScheduledUniverseSet>,

@@ -216,6 +216,17 @@ impl BacktestNode {
         PyBacktestEngine::add_python_actor(engine, &actor.clone().unbind())
     }
 
+    /// Adds a constructed Python universe component to the engine for the given run config.
+    #[pyo3(name = "add_universe")]
+    fn py_add_universe(
+        &mut self,
+        run_config_id: &str,
+        universe: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let engine = self.require_engine_mut(run_config_id)?;
+        PyBacktestEngine::add_python_universe(engine, &universe.clone().unbind())
+    }
+
     /// Adds an actor from an importable config to the engine for the given run config.
     #[pyo3(name = "add_actor_from_config")]
     #[expect(clippy::needless_pass_by_value)]

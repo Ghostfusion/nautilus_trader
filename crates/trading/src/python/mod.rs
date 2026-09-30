@@ -24,6 +24,7 @@ pub mod algorithm;
 pub mod controller;
 pub mod sessions;
 pub mod strategy;
+pub mod universe;
 
 #[cfg(feature = "examples")]
 mod examples;
@@ -50,6 +51,12 @@ pub fn trading(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<algorithm::PyExecutionAlgorithm>()?;
     m.add_class::<crate::algorithm::ExecutionAlgorithmConfig>()?;
     m.add_class::<crate::algorithm::ImportableExecutionAlgorithmConfig>()?;
+    m.add_class::<universe::PyUniverse>()?;
+    m.add_class::<crate::universe::UniverseDefinition>()?;
+    m.add_class::<crate::universe::StaticUniverseRule>()?;
+    m.add_class::<crate::universe::ScheduledUniverseRule>()?;
+    m.add_class::<crate::universe::UniverseSubscription>()?;
+    m.add_class::<crate::universe::UniverseRemovalPolicy>()?;
     #[cfg(feature = "examples")]
     m.add_class::<crate::examples::strategies::CompositeMarketMakerConfig>()?;
     #[cfg(feature = "examples")]

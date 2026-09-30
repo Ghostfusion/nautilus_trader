@@ -28,6 +28,12 @@ Instrument definitions for tradable assets and contracts.
 Session schedules, holidays, and early closes as immutable data, including the bundled
 foreign exchange and equity calendars and how they answer tradeability queries.
 
+## Universes
+
+[Universes](universes.md) describes runtime instrument membership: the definition, the
+clock-driven selection step, and the removal process that releases a departing member's
+subscriptions.
+
 ## Synthetics
 
 User-defined instruments whose prices are computed by evaluating a numeric expression over component instrument prices.

@@ -321,34 +321,58 @@ currently partial; the residual risk is the unimplemented steps above.
 **Objective.** A selection model and membership lifecycle that add and remove instruments at runtime
 through the existing subscription machinery.
 
-**Steps.**
+**What is implemented.**
 
-1. Add a `Universe` component under `crates/trading/src/universe/`, modelled on the existing actor
-   lifecycle, with a definition (rule and settings), a clock-driven selection step, and an explicit
-   membership state machine: `ADDED`, `ACTIVE`, `REMOVING`, `REMOVED`.
-2. Implement removal as a process, not an immediate unsubscribe: membership moves to `REMOVING`,
-   open orders are cancelled or reconciled, the position policy is evaluated, the data subscription
-   is released, then membership becomes `REMOVED`. Refuse removal while a position is non-flat and
-   report the condition.
-3. Route subscriptions through the existing data command path, respecting the ownership tracking in
-   `crates/data/src/subscription.rs`, so a departing instrument releases only its own claims.
-4. Request instrument metadata through the existing `request_instruments` flow, not a new provider
-   interface.
-5. Publish membership changes on a new bus topic in
-   `crates/common/src/msgbus/switchboard.rs` and surface an `on_universe_changed` callback alongside
-   the existing `on_instrument` callbacks.
-6. Expose the component through `crates/trading/src/python/` and `nautilus_trader.trading`.
-7. Add a golden scenario with deterministic scheduled membership.
+1. `crates/trading/src/universe/` holds the `Universe` component: an actor with a definition
+   (`definition.rs`), selection rules (`rule.rs`: `StaticUniverseRule` and `ScheduledUniverseRule`),
+   the component-side member record (`membership.rs`), and the component itself (`component.rs`).
+   The membership values, the change record, and the transition table live in
+   `crates/model/src/universe.rs`, because a change crosses component boundaries.
+2. Removal is a process, not an immediate unsubscribe: a departing member moves to `REMOVING` and
+   keeps its claims. The universe reports the open orders and positions it can see once per blocking
+   condition, and completes the removal on a later selection step or on request.
+   `UniverseRemovalPolicy::RequireFlat` is the default and `ReleaseRegardless` is opt-in. The
+   universe never submits or cancels orders: the owning component acts on the change.
+3. Member subscriptions go through the existing data command path, so a departing member releases
+   only the claims the universe holds, and stopping the component releases every claim it holds.
+   Unit tests assert the subscribe and unsubscribe balance per claim over an add, remove, and stop
+   lifecycle.
+4. Instrument definitions are requested through the existing flow: `request_instrument` per added
+   member and `request_instruments` for the venue when the component starts.
+5. Changes are published on `events.universe.{name}` and delivered to actors and strategies through
+   `DataActor::on_universe_changed`, subscribed with `subscribe_universe_changes` and released with
+   the component's other subscriptions.
+6. The component is exposed through `crates/trading/src/python/universe.rs` and
+   `nautilus_trader.trading`, and registered with a run through `add_universe` on the backtest engine
+   and the backtest node.
+7. A golden scenario (`python/tests/regression/cases/universe_membership.py`) covers a scheduled
+   universe whose membership decides which instruments trade, and a Python integration test covers
+   delivery to a subscribed strategy and the held removal of a departing member.
+8. `docs/concepts/universes.md` documents the definition, the selection step, the removal process,
+   and the subscription ownership rules.
+
+**Not implemented yet.**
+
+- The live node does not expose `add_universe` to Python. The live path uses the same data command
+  path the unit tests exercise, but the binding itself is outstanding.
+- The per-event cost comparison for an unused universe is not measured. What is asserted is that an
+  unconfigured universe holds no claims and arms no timer, and that the existing scenarios keep
+  their digests unchanged.
 
 **Boundary.** Engine.
 
-**Acceptance.** A scheduled universe backtest reproduces the same result across reruns; a live
-sandbox node can add and remove instruments without leaking subscriptions; removal with an open
-position is refused with a clear log; an unused universe adds no measurable per-event cost.
+**Acceptance.** The component's unit tests cover the transition table, canonical selection, the held
+removal, both removal policies, and the claim balance of an add, remove, and stop lifecycle. The
+golden scenario and its committed expectations prove a scheduled universe reproduces its result
+across runs, and the scenarios that predate it keep their digests unchanged. The Python integration
+test covers delivery to a subscribed strategy through a real run. Outstanding: the live sandbox
+subscription-leak run (the same command path is covered by the unit tests) and a measured per-event
+cost comparison for an unused universe.
 
-**Risks.** Subscription ownership bugs and live metadata gaps. Mitigation: explicit ownership tests
-in `crates/data/src/subscription.rs` and a capability check letting an adapter report that it cannot
-supply metadata.
+**Risks.** Subscription ownership bugs and live metadata gaps. Mitigation: the claim-balance tests
+over the data command path, a definition that declares its subscriptions explicitly, and the fact
+that a member only becomes `ACTIVE` once the run knows its definition, so a member without metadata
+is visible as `ADDED` rather than silently tradable.
 
 ## 8. W6: execution realism (L10)
 

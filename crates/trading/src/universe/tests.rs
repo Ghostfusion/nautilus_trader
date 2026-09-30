@@ -703,3 +703,42 @@ fn test_defined_subscription_set_is_released_in_full() {
     all_claims.extend(released);
     assert_claims_balanced(&all_claims);
 }
+
+#[rstest]
+fn test_universe_without_members_holds_no_claims_or_timer() {
+    let setup = Setup::new(static_definition("equities", &[]));
+    let mut universe = setup.universe();
+
+    DataActor::on_start(&mut *universe).unwrap();
+
+    assert_eq!(universe.member_count(), 0);
+    assert!(claims(&setup.commands()).is_empty());
+
+    let timer_name = Ustr::from(universe.selection_timer_name().as_str());
+    assert!(!setup.clock.borrow().timer_exists(&timer_name));
+}
+
+#[rstest]
+fn test_definition_with_an_interval_arms_one_selection_timer() {
+    let definition = static_definition("equities", &[AUDUSD])
+        .with_selection_interval(nautilus_core::DurationNanos::from_mins(5))
+        .unwrap();
+    let setup = Setup::new(definition);
+    let mut universe = setup.universe();
+
+    DataActor::on_start(&mut *universe).unwrap();
+    DataActor::on_start(&mut *universe).unwrap();
+
+    let timer_name = Ustr::from(universe.selection_timer_name().as_str());
+    assert!(setup.clock.borrow().timer_exists(&timer_name));
+    assert_eq!(
+        setup
+            .clock
+            .borrow()
+            .timer_names()
+            .iter()
+            .filter(|name| name.starts_with("UNIVERSE-SELECT"))
+            .count(),
+        1
+    );
+}

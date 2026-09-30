@@ -669,7 +669,12 @@ impl Universe {
         let now = self.clock_api().timestamp_ns();
 
         for instrument_id in members {
-            if self.state(&instrument_id) == Some(UniverseMembershipState::Added) {
+            let holding = matches!(
+                self.state(&instrument_id),
+                Some(UniverseMembershipState::Added | UniverseMembershipState::Active)
+            );
+
+            if holding {
                 self.apply(
                     instrument_id,
                     UniverseMembershipState::Removing,

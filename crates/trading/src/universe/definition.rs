@@ -37,6 +37,21 @@ use super::{membership::validate_universe_name, rule::SharedUniverseRule};
     Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, strum::Display, strum::AsRefStr,
 )]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.trading",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.trading")
+)]
 pub enum UniverseSubscription {
     /// The instrument definition for the venue.
     Instrument,
@@ -113,6 +128,21 @@ impl UniverseBarSpec {
     Clone, Copy, Debug, Default, PartialEq, Eq, strum::Display, strum::AsRefStr, strum::EnumString,
 )]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.trading",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.trading")
+)]
 pub enum UniverseRemovalPolicy {
     /// Removal completes once the member has no open orders and no open position.
     #[default]
@@ -130,6 +160,17 @@ impl UniverseRemovalPolicy {
 }
 
 /// The rule and settings that describe which instruments are eligible.
+///
+/// Cloning a definition copies its settings and shares the selection rule.
+#[derive(Clone)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", unsendable, from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct UniverseDefinition {
     name: Ustr,
     venue: Venue,

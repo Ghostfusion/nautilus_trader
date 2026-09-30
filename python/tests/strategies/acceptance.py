@@ -1154,3 +1154,75 @@ class SessionEventStrategy(Strategy):
         """
         On stop.
         """
+
+
+class UniverseMembershipConfig(StrategyConfig):
+    """
+    Trade each instrument as it becomes an active member of a universe.
+    """
+
+    def __init__(
+        self,
+        *,
+        universe: str,
+        trade_size: str,
+        **_kwargs: object,
+    ) -> None:
+        """
+        Initialize the instance.
+        """
+        super().__init__()
+        self.universe = universe
+        self.trade_size = trade_size
+
+
+class UniverseMembership(Strategy):
+    """
+    Subscribe to a universe and submit one market order per instrument that becomes active.
+
+    The order is placed when a member becomes ACTIVE, so the membership schedule decides which
+    instruments trade, and when. The strategy never selects instruments itself: it reacts to the
+    membership changes the universe publishes.
+    """
+
+    def __init__(self, config: UniverseMembershipConfig) -> None:
+        """
+        Initialize the instance.
+        """
+        super().__init__(config)
+        from nautilus_trader.model import UniverseMembershipState
+
+        self._universe = config.universe
+        self._qty = Quantity.from_str(config.trade_size)
+        self._active = UniverseMembershipState.ACTIVE
+        self._traded: list[str] = []
+        self.changes: list[str] = []
+
+    def on_start(self) -> None:
+        """
+        On start.
+        """
+        self.subscribe_universe_changes(self._universe)
+
+    def on_universe_changed(self, change) -> None:
+        """
+        On universe membership change.
+        """
+        self.changes.append(str(change))
+
+        if change.state != self._active:
+            return
+
+        instrument_id = change.instrument_id
+
+        if str(instrument_id) in self._traded:
+            return
+
+        self._traded.append(str(instrument_id))
+        self.subscribe_quotes(instrument_id)
+        self.submit_order(_market_order(self, instrument_id, OrderSide.BUY, self._qty))
+
+    def on_stop(self) -> None:
+        """
+        On stop.
+        """

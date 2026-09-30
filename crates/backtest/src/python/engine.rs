@@ -62,7 +62,7 @@ use nautilus_trading::examples::{
 use nautilus_trading::{
     ImportableExecutionAlgorithmConfig, ImportableStrategyConfig,
     algorithm::{TwapAlgorithm, TwapAlgorithmConfig},
-    python::algorithm::PyExecutionAlgorithm,
+    python::{algorithm::PyExecutionAlgorithm, universe::PyUniverse},
 };
 use pyo3::prelude::*;
 use rust_decimal::Decimal;
@@ -340,6 +340,16 @@ impl PyBacktestEngine {
     fn py_add_actor(&mut self, actor: &Bound<'_, PyAny>) -> PyResult<()> {
         log::debug!("`add_actor` with a constructed instance");
         Self::add_python_actor(&mut self.0, &actor.clone().unbind())
+    }
+
+    /// Adds a universe component to the engine.
+    ///
+    /// The universe is registered with the trader under its own name, so its selection step and
+    /// its member subscriptions start and stop with the run.
+    #[pyo3(name = "add_universe")]
+    fn py_add_universe(&mut self, universe: &Bound<'_, PyAny>) -> PyResult<()> {
+        log::debug!("`add_universe` with a constructed instance");
+        Self::add_python_universe(&mut self.0, &universe.clone().unbind())
     }
 
     /// Adds an actor from an importable config.
@@ -946,6 +956,33 @@ impl PyBacktestEngine {
             .map_err(to_pyruntime_err)?;
 
         log::info!("Registered Python actor {actor_id}");
+        Ok(())
+    }
+
+    /// Registers a constructed Python universe component with the engine's trader.
+    ///
+    /// Shared by `add_universe` on the engine and on the node.
+    pub(crate) fn add_python_universe(
+        engine: &mut BacktestEngine,
+        universe: &Py<PyAny>,
+    ) -> PyResult<()> {
+        let actor_id = Python::attach(|py| -> PyResult<ActorId> {
+            let py_universe = universe
+                .bind(py)
+                .extract::<PyRef<PyUniverse>>()
+                .map_err(Into::<PyErr>::into)?;
+
+            Ok(py_universe.actor_id())
+        })?;
+
+        engine
+            .kernel_mut()
+            .trader
+            .borrow_mut()
+            .add_python_universe_instance(universe, actor_id)
+            .map_err(to_pyruntime_err)?;
+
+        log::info!("Registered Python universe {actor_id}");
         Ok(())
     }
 
