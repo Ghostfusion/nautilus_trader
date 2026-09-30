@@ -1151,6 +1151,7 @@ pub fn instrument_close_type_to_capnp(
     match value {
         InstrumentCloseType::EndOfSession => enums_capnp::InstrumentCloseType::EndOfSession,
         InstrumentCloseType::ContractExpired => enums_capnp::InstrumentCloseType::ContractExpired,
+        InstrumentCloseType::Delisted => enums_capnp::InstrumentCloseType::Delisted,
     }
 }
 
@@ -1161,6 +1162,7 @@ pub fn instrument_close_type_from_capnp(
     match value {
         enums_capnp::InstrumentCloseType::EndOfSession => InstrumentCloseType::EndOfSession,
         enums_capnp::InstrumentCloseType::ContractExpired => InstrumentCloseType::ContractExpired,
+        enums_capnp::InstrumentCloseType::Delisted => InstrumentCloseType::Delisted,
     }
 }
 

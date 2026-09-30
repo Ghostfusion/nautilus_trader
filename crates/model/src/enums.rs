@@ -838,6 +838,8 @@ pub enum InstrumentCloseType {
     EndOfSession = 1,
     /// When the instrument expiration was reached.
     ContractExpired = 2,
+    /// When the instrument was delisted.
+    Delisted = 3,
 }
 
 /// Convert the given `value` to an [`InstrumentCloseType`].
@@ -2645,6 +2647,7 @@ mod tests {
         "InstrumentClass::Swap=SWAP",
         "InstrumentClass::Warrant=WARRANT",
         "InstrumentCloseType::ContractExpired=CONTRACT_EXPIRED",
+        "InstrumentCloseType::Delisted=DELISTED",
         "InstrumentCloseType::EndOfSession=END_OF_SESSION",
         "LiquiditySide::Maker=MAKER",
         "LiquiditySide::NoLiquiditySide=NO_LIQUIDITY_SIDE",
@@ -2873,6 +2876,7 @@ mod tests {
             InstrumentCloseType, from_u8, u8,
             1 => InstrumentCloseType::EndOfSession,
             2 => InstrumentCloseType::ContractExpired,
+            3 => InstrumentCloseType::Delisted,
         );
         assert_numeric_mapping!(
             PositionAdjustmentType, from_u8, u8,

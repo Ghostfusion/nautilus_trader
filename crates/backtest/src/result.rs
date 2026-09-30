@@ -22,6 +22,7 @@ use nautilus_analysis::PortfolioStatistics;
 use nautilus_core::{UUID4, UnixNanos};
 use nautilus_model::{
     accounts::{AccountAny, margin_model::MarginModel},
+    data::PriceRepresentation,
     events::{OrderEventAny, PortfolioSnapshot, PositionAdjusted},
     identifiers::InstrumentId,
     orders::{Order, OrderAny},
@@ -111,6 +112,33 @@ pub struct BacktestResult {
     pub stats_returns: AHashMap<String, f64>,
     pub stats_general: AHashMap<String, f64>,
     pub returns_series: BTreeMap<UnixNanos, f64>,
+    /// The price representation the run consumed per instrument, keyed by instrument ID.
+    ///
+    /// Populated from the run's data configuration. Empty, and omitted when serialized, unless a
+    /// configured data source requested a corporate action adjustment.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub data_representations: BTreeMap<String, DataRepresentation>,
+}
+
+/// The price representation a run consumed for one configured data source.
+///
+/// `input` is the representation the catalog held and `output` the representation the run
+/// consumed. Both are recorded even when they are equal, because the run still consumed the
+/// catalog representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.backtest", frozen, eq, skip_from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.backtest")
+)]
+pub struct DataRepresentation {
+    /// The representation the catalog held.
+    pub input: PriceRepresentation,
+    /// The representation the run consumed.
+    pub output: PriceRepresentation,
 }
 
 /// Versioned deterministic projection of observable backtest state.
@@ -175,6 +203,7 @@ pub(crate) struct CanonicalBacktestState {
     pub strategy_ids: Vec<String>,
     pub exec_algorithm_ids: Vec<String>,
     pub summary: BTreeMap<String, String>,
+    pub data_representations: BTreeMap<String, DataRepresentation>,
     pub orders: Vec<OrderAny>,
     pub positions: Vec<Position>,
     pub position_snapshots: Vec<Position>,
@@ -303,6 +332,11 @@ impl CanonicalBacktestResult {
             "statistics": canonical_statistics(state.statistics),
             "summary": state.summary,
         });
+
+        if !state.data_representations.is_empty() {
+            document["run"]["data_representations"] =
+                serde_json::to_value(&state.data_representations)?;
+        }
 
         canonicalize_document(&mut document)?;
         validate_document(&document)?;
@@ -433,21 +467,22 @@ fn validate_run(value: &Value) -> anyhow::Result<()> {
     let object = value
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("canonical result run must be an object"))?;
-    validate_fields(
-        object,
-        &[
-            "backtest_end_ns",
-            "backtest_start_ns",
-            "iterations",
-            "outcome",
-            "run_config_id",
-            "total_events",
-            "total_orders",
-            "total_positions",
-            "trader_id",
-        ],
-        "canonical result run",
-    )?;
+    let mut fields = vec![
+        "backtest_end_ns",
+        "backtest_start_ns",
+        "iterations",
+        "outcome",
+        "run_config_id",
+        "total_events",
+        "total_orders",
+        "total_positions",
+        "trader_id",
+    ];
+    if let Some(representations) = object.get("data_representations") {
+        validate_data_representations(representations)?;
+        fields.push("data_representations");
+    }
+    validate_fields(object, &fields, "canonical result run")?;
 
     for key in [
         "iterations",
@@ -478,6 +513,36 @@ fn validate_run(value: &Value) -> anyhow::Result<()> {
         ),
         "unsupported canonical run outcome"
     );
+    Ok(())
+}
+
+fn validate_data_representations(value: &Value) -> anyhow::Result<()> {
+    let representations = value
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("canonical run data representations must be an object"))?;
+    for (instrument_id, representation) in representations {
+        anyhow::ensure!(
+            !instrument_id.is_empty(),
+            "canonical run data representation instrument ID must not be empty"
+        );
+        let representation = representation.as_object().ok_or_else(|| {
+            anyhow::anyhow!("canonical run data representation must be an object")
+        })?;
+        validate_fields(
+            representation,
+            &["input", "output"],
+            "canonical run data representation",
+        )?;
+        for key in ["input", "output"] {
+            anyhow::ensure!(
+                matches!(
+                    representation.get(key).and_then(Value::as_str),
+                    Some("RAW" | "ADJUSTED")
+                ),
+                "unsupported canonical price representation"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1134,6 +1199,7 @@ mod tests {
             stats_returns,
             stats_general,
             returns_series: BTreeMap::from([(UnixNanos::new(3), 0.25)]),
+            data_representations: BTreeMap::new(),
         };
 
         let value = serde_json::to_value(&result).unwrap();
@@ -1157,6 +1223,7 @@ mod tests {
         );
         assert_eq!(value["stats_general"]["Long Ratio"], json!(1.0));
         assert_eq!(value["returns_series"]["3"], json!(0.25));
+        assert!(value.get("data_representations").is_none());
     }
 
     #[rstest]

@@ -42,6 +42,7 @@ pub mod order_list_id;
 pub mod position_id;
 pub mod strategy_id;
 pub mod symbol;
+pub mod symbol_map;
 pub mod trade_id;
 pub mod trader_id;
 pub mod venue;
@@ -66,6 +67,7 @@ pub use crate::identifiers::{
         StrategyId, UNASSIGNED_ORDER_ID_TAG, check_order_id_tag, normalize_order_id_tag,
     },
     symbol::Symbol,
+    symbol_map::{SYMBOL_MAP_SCHEMA, SymbolMap, SymbolMapEntry},
     trade_id::TradeId,
     trader_id::TraderId,
     venue::Venue,

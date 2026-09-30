@@ -52,9 +52,9 @@ use nautilus_indicators::{
 use nautilus_model::{
     accounts::{Account, AccountAny},
     data::{
-        Bar, BarSpecification, BarType, BookOrder, CustomData, Data, DataBatch, DataType,
-        FundingRateUpdate, HasTsInit, IndexPriceUpdate, InstrumentClose, MarkPriceUpdate,
-        OrderBookDelta, QuoteTick, TradeTick,
+        Bar, BarSpecification, BarType, BookOrder, CorporateAction, CorporateActionType,
+        CustomData, Data, DataBatch, DataType, FundingRateUpdate, HasTsInit, IndexPriceUpdate,
+        InstrumentClose, MarkPriceUpdate, OrderBookDelta, QuoteTick, TradeTick,
         stubs::{StubCustomData, stub_custom_data},
     },
     enums::{
@@ -2578,6 +2578,75 @@ fn test_instrument_close_precedes_expiration_timer_at_same_timestamp(
         expiration_fill_price(&engine, venue, option_id),
         close_price
     );
+}
+
+#[rstest]
+fn test_delisting_corporate_action_closes_position_through_instrument_close() {
+    let venue = Venue::from("SIM");
+    let instrument = option_underlying_equity(venue);
+    let instrument_id = instrument.id();
+    let mut engine = BacktestEngine::new(BacktestEngineConfig::default()).unwrap();
+    engine
+        .add_venue(
+            SimulatedVenueConfig::builder()
+                .venue(venue)
+                .oms_type(OmsType::Netting)
+                .account_type(AccountType::Margin)
+                .book_type(BookType::L1_MBP)
+                .starting_balances(vec![Money::from("1_000_000 USD")])
+                .fee_model(FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into())
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+    engine.add_instrument(&instrument).unwrap();
+    engine
+        .add_strategy(OpenOnEveryQuote::new(instrument_id, Quantity::from("100")))
+        .unwrap();
+
+    let quote_ns = 1_000_000_000u64;
+    let delisting_ns = 2_000_000_000u64;
+    let data = vec![
+        quote_with_size(instrument_id, "99.99", "100.00", "100", quote_ns),
+        Data::CorporateAction(CorporateAction::new(
+            instrument_id,
+            CorporateActionType::Delisting,
+            Decimal::ZERO,
+            None,
+            delisting_ns.into(),
+            delisting_ns.into(),
+            delisting_ns.into(),
+        )),
+    ];
+
+    engine.add_data(data, None, true, true).unwrap();
+    engine.run(None, None, None, false).unwrap();
+
+    let cache = engine.kernel().cache.borrow();
+    assert!(
+        cache
+            .positions_open(None, Some(&instrument_id), None, None, None)
+            .is_empty(),
+        "a delisted position must be closed"
+    );
+    let closed = cache.positions_closed(None, Some(&instrument_id), None, None, None);
+    assert_eq!(closed.len(), 1);
+    assert_eq!(closed[0].quantity, Quantity::from("0"));
+
+    let orders = cache.orders(None, Some(&instrument_id), None, None, None);
+    let closing = orders
+        .iter()
+        .find(|order| {
+            order
+                .client_order_id()
+                .to_string()
+                .starts_with("EXPIRATION-")
+        })
+        .expect("a terminal closing order must have been emitted");
+    assert!(closing.is_reduce_only());
+    assert!(closing.is_closed());
+    assert_eq!(closing.order_side(), OrderSide::Sell);
+    assert_eq!(closing.instrument_id(), instrument_id);
 }
 
 #[rstest]

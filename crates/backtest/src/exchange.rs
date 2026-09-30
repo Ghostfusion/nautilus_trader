@@ -49,10 +49,13 @@ use nautilus_execution::{
 use nautilus_model::{
     accounts::{Account, AccountAny, margin_model::MarginModelHandle},
     data::{
-        Bar, Data, FundingRateUpdate, InstrumentClose, InstrumentStatus, OrderBookDelta,
-        OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
+        Bar, CorporateAction, CorporateActionType, Data, FundingRateUpdate, InstrumentClose,
+        InstrumentStatus, OrderBookDelta, OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
     },
-    enums::{AccountType, AggressorSide, BookType, OmsType, OrderStatus, PositionAdjustmentType},
+    enums::{
+        AccountType, AggressorSide, BookType, InstrumentCloseType, OmsType, OrderStatus,
+        PositionAdjustmentType,
+    },
     events::{FundingSettlement, OrderEventAny, OrderUpdated, PositionAdjusted, PositionEvent},
     identifiers::{AccountId, InstrumentId, Venue},
     instruments::{Instrument, InstrumentAny},
@@ -1136,6 +1139,41 @@ impl SimulatedExchange {
             anyhow::bail!("Matching engine should be initialized");
         }
         Ok(())
+    }
+
+    /// Routes a corporate action to the matching engine.
+    ///
+    /// A `Delisting` closes any open position through the existing instrument close path, using
+    /// the most recent quote or trade price as the close price; every other action kind is
+    /// auxiliary data and is ignored here.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if processing the instrument close fails.
+    pub fn process_corporate_action(&mut self, action: &CorporateAction) -> anyhow::Result<()> {
+        if action.action != CorporateActionType::Delisting {
+            return Ok(());
+        }
+
+        let Some(close_price) = self
+            .matching_engines
+            .get(&action.instrument_id)
+            .and_then(OrderMatchingEngine::last_price)
+        else {
+            log::warn!(
+                "No close price available for delisting of {}",
+                action.instrument_id
+            );
+            return Ok(());
+        };
+
+        self.process_instrument_close(InstrumentClose::new(
+            action.instrument_id,
+            close_price,
+            InstrumentCloseType::Delisted,
+            action.effective_ns,
+            action.effective_ns,
+        ))
     }
 
     /// Processes a funding rate update.

@@ -39,7 +39,7 @@ use nautilus_model::{
     accounts::margin_model::{MarginModelAny, MarginModelHandle},
     data::{BarSpecification, BarType, NautilusDataType, PriceRepresentation},
     enums::{AccountType, BookType, OmsType, OtoTriggerMode},
-    identifiers::{ClientId, InstrumentId, TraderId, Venue},
+    identifiers::{ClientId, InstrumentId, SymbolMap, TraderId, Venue},
     types::{Currency, Money},
 };
 #[cfg(feature = "streaming")]
@@ -1189,6 +1189,11 @@ pub struct BacktestRunConfig {
     /// The end datetime (UTC) for the backtest run.
     /// If `None` engine runs to the end of the data.
     end: Option<UnixNanos>,
+    /// The optional symbol map used to resolve configured instrument symbols to their canonical
+    /// identities before instruments are loaded for the run.
+    ///
+    /// `None` (the default) leaves the configured IDs untouched.
+    symbol_map: Option<SymbolMap>,
 }
 
 impl<S: backtest_run_config_builder::IsComplete> BacktestRunConfigBuilder<S> {
@@ -1282,6 +1287,12 @@ impl BacktestRunConfig {
     #[must_use]
     pub fn end(&self) -> Option<UnixNanos> {
         self.end
+    }
+
+    /// Returns the optional symbol map for the run.
+    #[must_use]
+    pub fn symbol_map(&self) -> Option<&SymbolMap> {
+        self.symbol_map.as_ref()
     }
 }
 

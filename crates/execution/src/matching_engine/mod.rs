@@ -1339,6 +1339,25 @@ impl OrderMatchingEngine {
         self.book.best_ask_price()
     }
 
+    /// Returns a representative last-known price for the instrument.
+    ///
+    /// Prefers the midpoint of the most recent quote, then the last traded price, then the
+    /// best bid or ask. Used to settle a terminal instrument close when the venue supplies no
+    /// explicit close price.
+    #[must_use]
+    pub fn last_price(&self) -> Option<Price> {
+        if let (Some(bid), Some(ask)) = (self.last_quote_bid, self.last_quote_ask) {
+            let midpoint = (bid.as_decimal() + ask.as_decimal()) / Decimal::from(2);
+            if let Ok(price) = Price::from_decimal_dp(midpoint, bid.precision.max(ask.precision)) {
+                return Some(price);
+            }
+        }
+
+        self.last_quote_bid
+            .or(self.last_quote_ask)
+            .or(self.core.last)
+    }
+
     #[must_use]
     /// Returns a reference to the internal order book.
     pub const fn get_book(&self) -> &OrderBook {
@@ -2551,7 +2570,7 @@ impl OrderMatchingEngine {
 
     /// Processes an instrument close event.
     ///
-    /// For `ContractExpired` close types, stores the close and triggers expiration
+    /// For `ContractExpired` and `Delisted` close types, stores the close and triggers expiration
     /// processing which cancels all open orders and closes all open positions.
     pub fn process_instrument_close(&mut self, close: InstrumentClose) {
         if close.instrument_id != self.instrument.id() {
@@ -2562,7 +2581,10 @@ impl OrderMatchingEngine {
             return;
         }
 
-        if close.close_type == InstrumentCloseType::ContractExpired {
+        if matches!(
+            close.close_type,
+            InstrumentCloseType::ContractExpired | InstrumentCloseType::Delisted
+        ) {
             self.instrument_close = Some(close);
             self.iterate(close.ts_init, AggressorSide::NoAggressor);
         }

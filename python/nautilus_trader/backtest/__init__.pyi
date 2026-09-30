@@ -30,6 +30,7 @@ __all__ = [
     "CfdSwapModule",
     "CfdSwapRate",
     "DataAdjustment",
+    "DataRepresentation",
     "FXRolloverInterestModule",
     "InterestRateRecord",
     "SimulationModule",
@@ -251,6 +252,8 @@ class BacktestResult:
     def stats_general(self) -> dict[str, float]: ...
     @property
     def returns_series(self) -> dict[int, float]: ...
+    @property
+    def data_representations(self) -> dict[str, DataRepresentation]: ...
 
 @typing.final
 class BacktestRunConfig:
@@ -430,6 +433,9 @@ class DataAdjustment:
     def __new__(
         cls, input: model.PriceRepresentation, output: model.PriceRepresentation
     ) -> DataAdjustment: ...
+
+@typing.final
+class DataRepresentation: ...
 
 @typing.final
 class FXRolloverInterestModule(SimulationModule):

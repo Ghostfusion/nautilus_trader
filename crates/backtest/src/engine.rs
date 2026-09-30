@@ -18,6 +18,7 @@
 use std::{
     any::Any,
     cell::RefCell,
+    collections::BTreeMap,
     fmt::Debug,
     rc::{Rc, Weak},
     sync::Arc,
@@ -76,7 +77,7 @@ use crate::{
     execution_client::BacktestExecutionClient,
     result::{
         BacktestResult, CanonicalBacktestResult, CanonicalBacktestState, CanonicalDiagnostic,
-        CanonicalDiagnosticCode, CanonicalRunOutcome,
+        CanonicalDiagnosticCode, CanonicalRunOutcome, DataRepresentation,
     },
 };
 
@@ -123,6 +124,7 @@ pub struct BacktestEngine {
     backtest_start: Option<UnixNanos>,
     backtest_end: Option<UnixNanos>,
     funding_error: Option<String>,
+    data_representations: BTreeMap<InstrumentId, DataRepresentation>,
 }
 
 impl Debug for BacktestEngine {
@@ -192,6 +194,7 @@ impl BacktestEngine {
             backtest_start: None,
             backtest_end: None,
             funding_error: None,
+            data_representations: BTreeMap::new(),
         })
     }
 
@@ -234,6 +237,18 @@ impl BacktestEngine {
     #[must_use]
     pub fn run_config_id(&self) -> Option<&str> {
         self.run_config_id.as_deref()
+    }
+
+    /// Records the price representation the run consumed per instrument.
+    ///
+    /// Populated from the run's data configuration by [`crate::node::BacktestNode`]. A run that
+    /// configures no corporate action adjustment leaves this empty, and the canonical result then
+    /// omits the field entirely.
+    pub fn set_data_representations(
+        &mut self,
+        representations: BTreeMap<InstrumentId, DataRepresentation>,
+    ) {
+        self.data_representations = representations;
     }
 
     /// Returns the last run ID, if any.
@@ -1209,6 +1224,7 @@ impl BacktestEngine {
         self.backtest_start = None;
         self.backtest_end = None;
         self.funding_error = None;
+        self.data_representations.clear();
         self.iteration = 0;
         self.force_stop = false;
         self.last_ns = UnixNanos::default();
@@ -1365,6 +1381,11 @@ impl BacktestEngine {
             stats_returns,
             stats_general,
             returns_series,
+            data_representations: self
+                .data_representations
+                .iter()
+                .map(|(instrument_id, representation)| (instrument_id.to_string(), *representation))
+                .collect(),
         }
     }
 
@@ -1463,6 +1484,7 @@ impl BacktestEngine {
             strategy_ids,
             exec_algorithm_ids,
             summary: result.summary.into_iter().collect(),
+            data_representations: result.data_representations,
             orders,
             positions,
             position_snapshots,
@@ -1586,7 +1608,6 @@ impl BacktestEngine {
                 | DataRef::MarkPrice(_)
                 | DataRef::IndexPrice(_)
                 | DataRef::OptionGreeks(_)
-                | DataRef::CorporateAction(_)
                 | DataRef::Custom(_)
         ) {
             return Ok(());
@@ -1632,7 +1653,10 @@ impl BacktestEngine {
                 DataRef::InstrumentClose(close) => {
                     exchange_ref.process_instrument_close(*close)?;
                 }
-                DataRef::Instrument(_) | DataRef::Custom(_) | DataRef::CorporateAction(_) => {
+                DataRef::CorporateAction(action) => {
+                    exchange_ref.process_corporate_action(action)?;
+                }
+                DataRef::Instrument(_) | DataRef::Custom(_) => {
                     unreachable!("filtered before exchange routing")
                 }
                 #[cfg(feature = "defi")]
@@ -2481,7 +2505,7 @@ mod tests {
         models::fee::{FeeModelAny, MakerTakerFeeModel},
     };
     use nautilus_model::{
-        data::{Data, InstrumentStatus, QuoteTick},
+        data::{Data, InstrumentStatus, PriceRepresentation, QuoteTick},
         enums::{
             AccountType, BookType, LiquiditySide, MarketStatus, MarketStatusAction, OmsType,
             OrderSide, OrderStatus, OrderType, PositionSide, TriggerType,
@@ -3941,5 +3965,80 @@ mod tests {
             .unwrap()
             .market_status;
         assert_eq!(market_status, MarketStatus::Closed);
+    }
+
+    #[rstest]
+    fn test_canonical_result_omits_data_representations_when_unconfigured() {
+        let mut engine = create_engine();
+        engine.run(None, None, None, false).unwrap();
+
+        let canonical = engine.get_canonical_result().unwrap();
+        let bytes = canonical.to_bytes().unwrap();
+
+        assert!(
+            !String::from_utf8(bytes)
+                .unwrap()
+                .contains("data_representations"),
+            "an unconfigured run must not encode a data representation field"
+        );
+        let run = canonical.as_value()["run"].as_object().unwrap();
+        assert!(
+            run.get("data_representations").is_none(),
+            "an unconfigured run must not add a data representation field"
+        );
+        assert_eq!(run.len(), 9);
+    }
+
+    #[rstest]
+    fn test_canonical_result_reports_consumed_data_representations() {
+        let mut engine = create_engine();
+        engine.set_data_representations(BTreeMap::from([
+            (
+                InstrumentId::from("ETH/USDT.BINANCE"),
+                DataRepresentation {
+                    input: PriceRepresentation::Raw,
+                    output: PriceRepresentation::Adjusted,
+                },
+            ),
+            (
+                InstrumentId::from("AUD/USD.SIM"),
+                DataRepresentation {
+                    input: PriceRepresentation::Raw,
+                    output: PriceRepresentation::Raw,
+                },
+            ),
+        ]));
+        engine.run(None, None, None, false).unwrap();
+
+        let result = engine.get_result();
+        assert_eq!(result.data_representations.len(), 2);
+
+        let canonical = engine.get_canonical_result().unwrap();
+        let run = canonical.as_value()["run"].as_object().unwrap();
+        assert_eq!(run.len(), 10);
+        let representations = &run["data_representations"];
+
+        assert_eq!(
+            representations["ETH/USDT.BINANCE"]["input"].as_str(),
+            Some("RAW")
+        );
+        assert_eq!(
+            representations["ETH/USDT.BINANCE"]["output"].as_str(),
+            Some("ADJUSTED")
+        );
+        assert_eq!(
+            representations["AUD/USD.SIM"]["input"].as_str(),
+            Some("RAW")
+        );
+        assert_eq!(
+            representations["AUD/USD.SIM"]["output"].as_str(),
+            Some("RAW")
+        );
+
+        let bytes = canonical.to_bytes().unwrap();
+        assert_eq!(
+            CanonicalBacktestResult::from_slice(&bytes).unwrap(),
+            canonical
+        );
     }
 }

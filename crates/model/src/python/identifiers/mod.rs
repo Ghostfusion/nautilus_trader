@@ -18,6 +18,7 @@
 pub mod instrument_id;
 pub mod option_series_id;
 pub mod symbol;
+pub mod symbol_map;
 pub mod trade_id;
 
 use nautilus_core::python::to_pyvalue_err;

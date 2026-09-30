@@ -210,6 +210,7 @@ enum CurrencyType {
 enum InstrumentCloseType {
     endOfSession @0;
     contractExpired @1;
+    delisted @2;
 }
 
 enum OptionalBool {

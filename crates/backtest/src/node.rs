@@ -15,14 +15,14 @@
 
 //! Provides a [`BacktestNode`] that orchestrates catalog-driven backtests.
 
-use std::iter::Peekable;
+use std::{collections::BTreeMap, iter::Peekable};
 
 use ahash::{AHashMap, AHashSet};
 use nautilus_core::{Params, UnixNanos};
 use nautilus_model::{
     data::{CorporateAction, Data, HasTsInit, NautilusDataType},
     enums::{BookType, OtoTriggerMode},
-    identifiers::{InstrumentId, Venue},
+    identifiers::{InstrumentId, SymbolMap, Venue},
     types::Money,
 };
 use nautilus_persistence::{
@@ -34,7 +34,7 @@ use crate::{
     adjustment::{action_records, active_adjustment, apply_to_vec, build_series, convert_data},
     config::{BacktestDataConfig, BacktestRunConfig, SimulatedVenueConfig},
     engine::BacktestEngine,
-    result::BacktestResult,
+    result::{BacktestResult, DataRepresentation},
 };
 
 /// Orchestrates catalog-driven backtests from run configurations.
@@ -216,7 +216,7 @@ impl BacktestNode {
         start: Option<UnixNanos>,
         end: Option<UnixNanos>,
     ) -> anyhow::Result<Vec<Data>> {
-        load_data(config, start, end)
+        load_data(config, start, end, None)
     }
 
     /// Disposes all engines and releases resources.
@@ -319,7 +319,13 @@ fn build_engine(config: &BacktestRunConfig) -> anyhow::Result<BacktestEngine> {
 
     for data_config in config.data() {
         let mut catalog = create_catalog(data_config)?;
-        let instr_ids: Vec<InstrumentId> = data_config.get_instrument_ids()?;
+        let configured_ids: Vec<InstrumentId> = data_config.get_instrument_ids()?;
+        let instr_ids = resolve_instrument_ids(
+            &configured_ids,
+            config.symbol_map(),
+            config.start(),
+            data_config.start_time(),
+        );
         let filter: Option<Vec<String>> = if instr_ids.is_empty() {
             None
         } else {
@@ -343,6 +349,62 @@ fn build_engine(config: &BacktestRunConfig) -> anyhow::Result<BacktestEngine> {
     }
 
     Ok(engine)
+}
+
+/// Resolves configured instrument symbols through an optional symbol map.
+///
+/// The identity in force at the run start (or the data config start) is used when a date is
+/// known, otherwise the map's canonical identity for the symbol. With no map, the configured IDs
+/// are returned unchanged.
+fn resolve_instrument_ids(
+    configured: &[InstrumentId],
+    symbol_map: Option<&SymbolMap>,
+    run_start: Option<UnixNanos>,
+    data_start: Option<UnixNanos>,
+) -> Vec<InstrumentId> {
+    let Some(map) = symbol_map else {
+        return configured.to_vec();
+    };
+    let ts = run_start.or(data_start);
+
+    configured
+        .iter()
+        .map(|id| {
+            ts.and_then(|ts| map.resolve_at(&id.symbol, ts))
+                .or_else(|| map.identity(&id.symbol))
+                .unwrap_or(*id)
+        })
+        .collect()
+}
+
+/// Returns the catalog identifiers for a data config, resolving configured symbols through the
+/// optional symbol map.
+///
+/// Returns `None` when no map is supplied, when the config addresses data by bar type (whose
+/// identifier embeds the bar specification), or when the config names no instruments, so the
+/// caller leaves the query untouched.
+fn resolved_query_identifiers(
+    config: &BacktestDataConfig,
+    symbol_map: Option<&SymbolMap>,
+    run_start: Option<UnixNanos>,
+    data_start: Option<UnixNanos>,
+) -> Option<Vec<String>> {
+    let map = symbol_map?;
+    if *config.data_type() == NautilusDataType::Bar {
+        return None;
+    }
+
+    let resolved = resolve_instrument_ids(
+        &config.get_instrument_ids().ok()?,
+        Some(map),
+        run_start,
+        data_start,
+    );
+    if resolved.is_empty() {
+        return None;
+    }
+
+    Some(resolved.iter().map(ToString::to_string).collect())
 }
 
 fn validate_configs(configs: &[BacktestRunConfig]) -> anyhow::Result<()> {
@@ -419,15 +481,58 @@ fn validate_configs(configs: &[BacktestRunConfig]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Collects the price representation the run consumed per instrument from its data configuration.
+///
+/// Only data sources that configure an adjustment contribute. A configured no-op
+/// (`input == output`) is recorded, because the run still consumed that catalog representation.
+fn data_representations(
+    data_configs: &[BacktestDataConfig],
+) -> anyhow::Result<BTreeMap<InstrumentId, DataRepresentation>> {
+    let mut representations = BTreeMap::new();
+
+    for data_config in data_configs {
+        let Some(adjustment) = data_config.data_adjustment() else {
+            continue;
+        };
+        for instrument_id in data_config.get_instrument_ids()? {
+            representations.insert(
+                instrument_id,
+                DataRepresentation {
+                    input: adjustment.input,
+                    output: adjustment.output,
+                },
+            );
+        }
+    }
+
+    Ok(representations)
+}
+
 fn run_oneshot(engine: &mut BacktestEngine, config: &BacktestRunConfig) -> anyhow::Result<()> {
     for data_config in config.data() {
-        let mut data = load_data(data_config, config.start(), config.end())?;
+        let resolved = resolved_query_identifiers(
+            data_config,
+            config.symbol_map(),
+            config.start(),
+            data_config.start_time(),
+        );
+        let mut data = load_data(
+            data_config,
+            config.start(),
+            config.end(),
+            resolved.as_deref(),
+        )?;
         if data.is_empty() {
             log::warn!("No data found for config: {:?}", data_config.data_type());
             continue;
         }
         if let Some(adjustment) = active_adjustment(data_config.data_adjustment()) {
-            let actions = load_corporate_actions(data_config, config.start(), config.end())?;
+            let actions = load_corporate_actions(
+                data_config,
+                config.start(),
+                config.end(),
+                resolved.as_deref(),
+            )?;
             data = apply_to_vec(data, &actions, adjustment)?;
         }
         engine.add_data(data, data_config.client_id(), false, false)?;
@@ -439,7 +544,9 @@ fn run_oneshot(engine: &mut BacktestEngine, config: &BacktestRunConfig) -> anyho
         config.end(),
         Some(config.id().to_string()),
         false,
-    )
+    )?;
+    engine.set_data_representations(data_representations(config.data())?);
+    Ok(())
 }
 
 fn run_streaming(
@@ -459,19 +566,41 @@ fn run_streaming(
 
     for (catalog, data_config) in catalogs.iter_mut().zip(data_configs) {
         let adjustment = active_adjustment(data_config.data_adjustment());
+        let resolved = resolved_query_identifiers(
+            data_config,
+            config.symbol_map(),
+            config.start(),
+            data_config.start_time(),
+        );
         let mut actions = Vec::new();
-        let result: Box<dyn Iterator<Item = anyhow::Result<Data>>> = if let Some(adjustment) =
-            adjustment
-        {
-            actions = load_corporate_actions(data_config, config.start(), config.end())?;
-            let series = build_series(&actions)?;
-            Box::new(
-                dispatch_query(catalog, data_config, config.start(), config.end())?
+        let result: Box<dyn Iterator<Item = anyhow::Result<Data>>> =
+            if let Some(adjustment) = adjustment {
+                actions = load_corporate_actions(
+                    data_config,
+                    config.start(),
+                    config.end(),
+                    resolved.as_deref(),
+                )?;
+                let series = build_series(&actions)?;
+                Box::new(
+                    dispatch_query(
+                        catalog,
+                        data_config,
+                        config.start(),
+                        config.end(),
+                        resolved.as_deref(),
+                    )?
                     .map(move |item| item.and_then(|data| convert_data(data, adjustment, &series))),
-            )
-        } else {
-            dispatch_query(catalog, data_config, config.start(), config.end())?
-        };
+                )
+            } else {
+                dispatch_query(
+                    catalog,
+                    data_config,
+                    config.start(),
+                    config.end(),
+                    resolved.as_deref(),
+                )?
+            };
         let mut stream = result.peekable();
 
         match stream.peek() {
@@ -498,7 +627,9 @@ fn run_streaming(
         config,
         merge_streams(streams).peekable(),
         chunk_size,
-    )
+    )?;
+    engine.set_data_representations(data_representations(data_configs)?);
+    Ok(())
 }
 
 // Merges the data streams of every config in ascending `ts_init` order, taking one
@@ -620,9 +751,16 @@ fn load_data(
     config: &BacktestDataConfig,
     run_start: Option<UnixNanos>,
     run_end: Option<UnixNanos>,
+    resolved_identifiers: Option<&[String]>,
 ) -> anyhow::Result<Vec<Data>> {
     let mut catalog = create_catalog(config)?;
-    let result = dispatch_query(&mut catalog, config, run_start, run_end)?;
+    let result = dispatch_query(
+        &mut catalog,
+        config,
+        run_start,
+        run_end,
+        resolved_identifiers,
+    )?;
     result.collect::<Result<Vec<_>, _>>()
 }
 
@@ -634,12 +772,16 @@ fn load_corporate_actions(
     config: &BacktestDataConfig,
     run_start: Option<UnixNanos>,
     run_end: Option<UnixNanos>,
+    resolved_identifiers: Option<&[String]>,
 ) -> anyhow::Result<Vec<CorporateAction>> {
-    let identifiers: Vec<String> = config
-        .get_instrument_ids()?
-        .iter()
-        .map(ToString::to_string)
-        .collect();
+    let identifiers: Vec<String> = match resolved_identifiers {
+        Some(identifiers) => identifiers.to_vec(),
+        None => config
+            .get_instrument_ids()?
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+    };
     if identifiers.is_empty() {
         return Ok(Vec::new());
     }
@@ -676,10 +818,14 @@ fn dispatch_query(
     config: &BacktestDataConfig,
     start: Option<UnixNanos>,
     end: Option<UnixNanos>,
+    resolved_identifiers: Option<&[String]>,
 ) -> anyhow::Result<Box<dyn Iterator<Item = anyhow::Result<Data>>>> {
+    let identifiers = resolved_identifiers
+        .map(<[String]>::to_vec)
+        .or_else(|| config.query_identifiers());
     catalog.reset_session();
     let mut query = CatalogQuery::new(config.data_type().clone())
-        .with_identifiers(config.query_identifiers())
+        .with_identifiers(identifiers)
         .with_range(
             max_opt(config.start_time(), start),
             min_opt(config.end_time(), end),
@@ -738,7 +884,7 @@ mod tests {
     #[cfg(feature = "python")]
     use nautilus_execution::models::fee::{FeeModelAny, MakerTakerFeeModel};
     use nautilus_model::{
-        data::{QuoteTick, TradeTick},
+        data::{PriceRepresentation, QuoteTick, TradeTick},
         enums::{AccountType, AggressorSide, OmsType},
         identifiers::{InstrumentId, TradeId},
         types::{Price, Quantity},
@@ -748,7 +894,9 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::config::{BacktestVenueConfig, MAX_BACKTEST_CHUNK_SIZE};
+    use crate::config::{
+        BacktestDataConfig, BacktestVenueConfig, DataAdjustment, MAX_BACKTEST_CHUNK_SIZE,
+    };
     #[cfg(feature = "python")]
     use crate::{
         modules::SimulationModuleAny,
@@ -781,6 +929,80 @@ mod tests {
 
     fn stream_failure() -> anyhow::Error {
         anyhow::anyhow!("injected stream failure")
+    }
+
+    fn utc_nanos(year: i16, month: i8, day: i8) -> UnixNanos {
+        use jiff::{civil::date, tz::TimeZone};
+        let ts = date(year, month, day)
+            .at(0, 0, 0, 0)
+            .to_zoned(TimeZone::UTC)
+            .unwrap()
+            .timestamp();
+        UnixNanos::from(u64::try_from(ts.as_nanosecond()).unwrap())
+    }
+
+    #[rstest]
+    fn resolve_instrument_ids_uses_the_symbol_map_when_supplied() {
+        let map = SymbolMap::from_json_str(
+            r#"{
+                "schema": "nautilus-symbol-map/v1",
+                "entries": [
+                    {
+                        "symbol": "OLD",
+                        "instrument_id": "NEW.XNYS",
+                        "valid_from": "2020-01-01",
+                        "valid_until": "2024-05-31"
+                    },
+                    {
+                        "symbol": "NEW",
+                        "instrument_id": "NEW.XNYS",
+                        "valid_from": "2024-06-01"
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let configured = vec![InstrumentId::from("OLD.XNYS")];
+        let canonical = vec![InstrumentId::from("NEW.XNYS")];
+
+        // With no map the configured IDs pass through untouched.
+        assert_eq!(
+            resolve_instrument_ids(&configured, None, None, None),
+            configured
+        );
+        // A run start inside the old symbol's validity resolves to the canonical identity.
+        assert_eq!(
+            resolve_instrument_ids(&configured, Some(&map), Some(utc_nanos(2023, 1, 1)), None),
+            canonical
+        );
+        // With no date the symbol's canonical identity is used.
+        assert_eq!(
+            resolve_instrument_ids(&configured, Some(&map), None, None),
+            canonical
+        );
+        // An unknown symbol is left untouched.
+        let unknown = vec![InstrumentId::from("ZZZ.XNYS")];
+        assert_eq!(
+            resolve_instrument_ids(&unknown, Some(&map), None, None),
+            unknown
+        );
+
+        // A data config addressed by the old symbol resolves its catalog query identifiers.
+        let data_config = BacktestDataConfig::builder()
+            .data_type(NautilusDataType::QuoteTick)
+            .catalog_path("/tmp/catalog".to_string())
+            .instrument_id(InstrumentId::from("OLD.XNYS"))
+            .build()
+            .unwrap();
+        assert_eq!(
+            resolved_query_identifiers(&data_config, None, None, None),
+            None
+        );
+        assert_eq!(
+            resolved_query_identifiers(&data_config, Some(&map), None, None),
+            Some(vec!["NEW.XNYS".to_string()])
+        );
     }
 
     #[rstest]
@@ -975,6 +1197,61 @@ mod tests {
         assert!(
             err.to_string().contains("explicit fee_model"),
             "unexpected error: {err}"
+        );
+    }
+
+    fn data_config(instrument: &str, adjustment: Option<DataAdjustment>) -> BacktestDataConfig {
+        BacktestDataConfig::builder()
+            .data_type(NautilusDataType::TradeTick)
+            .catalog_path("catalog".to_string())
+            .instrument_id(InstrumentId::from(instrument))
+            .maybe_data_adjustment(adjustment)
+            .build()
+            .unwrap()
+    }
+
+    #[rstest]
+    fn data_representations_ignores_sources_without_an_adjustment() {
+        let configs = vec![data_config("EUR/USD.SIM", None)];
+
+        assert!(data_representations(&configs).unwrap().is_empty());
+    }
+
+    #[rstest]
+    fn data_representations_records_configured_adjustments_including_noop() {
+        let configs = vec![
+            data_config(
+                "EUR/USD.SIM",
+                Some(DataAdjustment::new(
+                    PriceRepresentation::Raw,
+                    PriceRepresentation::Adjusted,
+                )),
+            ),
+            data_config(
+                "AUD/USD.SIM",
+                Some(DataAdjustment::new(
+                    PriceRepresentation::Raw,
+                    PriceRepresentation::Raw,
+                )),
+            ),
+        ];
+
+        let records = data_representations(&configs).unwrap();
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(
+            records[&InstrumentId::from("EUR/USD.SIM")],
+            DataRepresentation {
+                input: PriceRepresentation::Raw,
+                output: PriceRepresentation::Adjusted,
+            }
+        );
+        assert_eq!(
+            records[&InstrumentId::from("AUD/USD.SIM")],
+            DataRepresentation {
+                input: PriceRepresentation::Raw,
+                output: PriceRepresentation::Raw,
+            }
         );
     }
 }

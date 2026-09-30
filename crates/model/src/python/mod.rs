@@ -98,6 +98,8 @@ pub fn model(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::calendars::SessionEventKind>()?;
     m.add_class::<crate::calendars::SessionEvent>()?;
     m.add_class::<crate::calendars::SessionScheduleConfig>()?;
+    m.add_class::<crate::identifiers::SymbolMap>()?;
+    m.add_class::<crate::identifiers::SymbolMapEntry>()?;
     m.add_class::<crate::python::common::EnumIterator>()?;
     // Data
     m.add_class::<data::PyNautilusDataType>()?;

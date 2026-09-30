@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 use nautilus_core::{UUID4, python::to_pyruntime_err};
 use pyo3::{Py, PyResult, Python, pybacked::PyBackedBytes, types::PyBytes};
 
-use crate::result::{BacktestResult, CanonicalBacktestResult};
+use crate::result::{BacktestResult, CanonicalBacktestResult, DataRepresentation};
 
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 #[pyo3::pymethods]
@@ -156,6 +156,16 @@ impl BacktestResult {
         self.returns_series
             .iter()
             .map(|(timestamp, value)| (timestamp.as_u64(), *value))
+            .collect()
+    }
+
+    /// Returns the price representation the run consumed per instrument, keyed by instrument ID.
+    #[getter]
+    #[pyo3(name = "data_representations")]
+    fn py_data_representations(&self) -> HashMap<String, DataRepresentation> {
+        self.data_representations
+            .iter()
+            .map(|(instrument_id, representation)| (instrument_id.clone(), *representation))
             .collect()
     }
 
