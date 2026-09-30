@@ -1073,7 +1073,7 @@ impl Clone for CompetitionAwareFillModel {
 
 impl Default for CompetitionAwareFillModel {
     fn default() -> Self {
-        Self::new(1.0, 0.0, None, 0.3).unwrap()
+        Self::new(1.0, 0.0, None, DEFAULT_LIQUIDITY_FACTOR).unwrap()
     }
 }
 
@@ -1441,6 +1441,201 @@ impl Display for FillModelAny {
             Self::CompetitionAware(_) => write!(f, "CompetitionAwareFillModel"),
             Self::VolumeSensitive(_) => write!(f, "VolumeSensitiveFillModel"),
             Self::MarketHours(_) => write!(f, "MarketHoursFillModel"),
+        }
+    }
+}
+
+// The `CompetitionAwareFillModel` default liquidity factor, applied when a fill model
+// configuration does not supply one.
+const DEFAULT_LIQUIDITY_FACTOR: f64 = 0.3;
+
+/// The built-in fill models selectable by configuration.
+///
+/// The variants correspond one-for-one with the [`FillModelAny`] runtime variants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.execution",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.execution")
+)]
+pub enum FillModelKind {
+    /// The default model: fills against the matching engine's recorded book.
+    Default,
+    /// Fills at the best bid or ask with unlimited size.
+    BestPrice,
+    /// Fills one tick beyond the best bid or ask with unlimited size.
+    OneTickSlippage,
+    /// Chooses the best price or one tick worse.
+    Probabilistic,
+    /// Fills 10 units at best, then the remainder one tick worse.
+    TwoTier,
+    /// Fills 50, 30, and 20 units across three levels.
+    ThreeTier,
+    /// Fills 5 units at best, then the remainder one tick worse.
+    LimitOrderPartialFill,
+    /// Changes the synthetic book shape at an order size of 10 units.
+    SizeAware,
+    /// Exposes a configurable fraction of 1,000 units at best.
+    CompetitionAware,
+    /// Exposes 25% of its recent volume at best.
+    VolumeSensitive,
+    /// Uses a normal or one-tick-wider synthetic spread.
+    MarketHours,
+}
+
+/// A configuration description of a built-in fill model.
+///
+/// This is the description side of the fill model set. [`FillModelKind`] names one of the
+/// built-in models and the remaining fields carry the parameters that model's constructor
+/// takes, so a fill model can be described as data, compared, and resolved once with
+/// [`FillModelConfig::resolve`].
+///
+/// Resolution delegates to the existing model constructors: no fill behaviour lives here, and
+/// the resolved model is exactly the one its constructor builds. A model object passed
+/// directly (a [`FillModelAny`], or a Python model object) remains accepted wherever a fill
+/// model is configured, so existing configurations are unaffected.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.execution", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.execution")
+)]
+pub struct FillModelConfig {
+    /// Which built-in fill model to resolve to.
+    pub kind: FillModelKind,
+    /// The probability a limit order fills when the market touches, but does not cross, its price.
+    pub prob_fill_on_limit: f64,
+    /// The probability a fill is slipped by one tick on an L1 book.
+    pub prob_slippage: f64,
+    /// The optional seed for the model's random draws.
+    pub random_seed: Option<u64>,
+    /// The liquidity factor for [`FillModelKind::CompetitionAware`].
+    ///
+    /// `None` uses the model default. Supplying a factor for any other kind is an error
+    /// rather than a silently ignored setting.
+    pub liquidity_factor: Option<f64>,
+}
+
+impl Default for FillModelConfig {
+    fn default() -> Self {
+        Self {
+            kind: FillModelKind::Default,
+            prob_fill_on_limit: 1.0,
+            prob_slippage: 0.0,
+            random_seed: None,
+            liquidity_factor: None,
+        }
+    }
+}
+
+impl FillModelConfig {
+    /// Resolves the configuration into the built-in fill model implementation.
+    ///
+    /// Each kind is constructed with that model's own constructor, so parameter validation and
+    /// the resulting model are exactly those of the corresponding model type. The default
+    /// configuration resolves to the default fill model.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `prob_fill_on_limit`, `prob_slippage`, or `liquidity_factor` is
+    /// outside `[0, 1]`, or if `liquidity_factor` is supplied for a kind that does not
+    /// consume it.
+    pub fn resolve(&self) -> anyhow::Result<FillModelAny> {
+        if self.liquidity_factor.is_some() && self.kind != FillModelKind::CompetitionAware {
+            anyhow::bail!(
+                "liquidity_factor is only consumed by the CompetitionAware fill model, was supplied for {}",
+                self.kind
+            );
+        }
+
+        let prob_fill_on_limit = self.prob_fill_on_limit;
+        let prob_slippage = self.prob_slippage;
+        let random_seed = self.random_seed;
+
+        Ok(match self.kind {
+            FillModelKind::Default => FillModelAny::Default(DefaultFillModel::new(
+                prob_fill_on_limit,
+                prob_slippage,
+                random_seed,
+            )?),
+            FillModelKind::BestPrice => FillModelAny::BestPrice(BestPriceFillModel::new(
+                prob_fill_on_limit,
+                prob_slippage,
+                random_seed,
+            )?),
+            FillModelKind::OneTickSlippage => FillModelAny::OneTickSlippage(
+                OneTickSlippageFillModel::new(prob_fill_on_limit, prob_slippage, random_seed)?,
+            ),
+            FillModelKind::Probabilistic => FillModelAny::Probabilistic(
+                ProbabilisticFillModel::new(prob_fill_on_limit, prob_slippage, random_seed)?,
+            ),
+            FillModelKind::TwoTier => FillModelAny::TwoTier(TwoTierFillModel::new(
+                prob_fill_on_limit,
+                prob_slippage,
+                random_seed,
+            )?),
+            FillModelKind::ThreeTier => FillModelAny::ThreeTier(ThreeTierFillModel::new(
+                prob_fill_on_limit,
+                prob_slippage,
+                random_seed,
+            )?),
+            FillModelKind::LimitOrderPartialFill => FillModelAny::LimitOrderPartialFill(
+                LimitOrderPartialFillModel::new(prob_fill_on_limit, prob_slippage, random_seed)?,
+            ),
+            FillModelKind::SizeAware => FillModelAny::SizeAware(SizeAwareFillModel::new(
+                prob_fill_on_limit,
+                prob_slippage,
+                random_seed,
+            )?),
+            FillModelKind::CompetitionAware => {
+                let liquidity_factor = self.liquidity_factor.unwrap_or(DEFAULT_LIQUIDITY_FACTOR);
+
+                FillModelAny::CompetitionAware(CompetitionAwareFillModel::new(
+                    prob_fill_on_limit,
+                    prob_slippage,
+                    random_seed,
+                    liquidity_factor,
+                )?)
+            }
+            FillModelKind::VolumeSensitive => FillModelAny::VolumeSensitive(
+                VolumeSensitiveFillModel::new(prob_fill_on_limit, prob_slippage, random_seed)?,
+            ),
+            FillModelKind::MarketHours => FillModelAny::MarketHours(MarketHoursFillModel::new(
+                prob_fill_on_limit,
+                prob_slippage,
+                random_seed,
+            )?),
+        })
+    }
+}
+
+impl Display for FillModelKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Default => write!(f, "DefaultFillModel"),
+            Self::BestPrice => write!(f, "BestPriceFillModel"),
+            Self::OneTickSlippage => write!(f, "OneTickSlippageFillModel"),
+            Self::Probabilistic => write!(f, "ProbabilisticFillModel"),
+            Self::TwoTier => write!(f, "TwoTierFillModel"),
+            Self::ThreeTier => write!(f, "ThreeTierFillModel"),
+            Self::LimitOrderPartialFill => write!(f, "LimitOrderPartialFillModel"),
+            Self::SizeAware => write!(f, "SizeAwareFillModel"),
+            Self::CompetitionAware => write!(f, "CompetitionAwareFillModel"),
+            Self::VolumeSensitive => write!(f, "VolumeSensitiveFillModel"),
+            Self::MarketHours => write!(f, "MarketHoursFillModel"),
         }
     }
 }
@@ -1942,5 +2137,171 @@ mod tests {
                 vec![(ask, dec!(500))]
             );
         }
+    }
+
+    #[rstest]
+    fn test_fill_model_config_default_resolves_to_default_model() {
+        let config = FillModelConfig::default();
+        let model = config.resolve().unwrap();
+
+        assert_eq!(config, FillModelConfig::default());
+        assert!(matches!(model, FillModelAny::Default(_)));
+        assert_eq!(
+            format!("{model}"),
+            "DefaultFillModel(prob_fill_on_limit=1, prob_slippage=0)"
+        );
+    }
+
+    #[rstest]
+    #[case(FillModelKind::BestPrice)]
+    #[case(FillModelKind::OneTickSlippage)]
+    #[case(FillModelKind::Probabilistic)]
+    #[case(FillModelKind::TwoTier)]
+    #[case(FillModelKind::ThreeTier)]
+    #[case(FillModelKind::LimitOrderPartialFill)]
+    #[case(FillModelKind::SizeAware)]
+    #[case(FillModelKind::CompetitionAware)]
+    #[case(FillModelKind::VolumeSensitive)]
+    #[case(FillModelKind::MarketHours)]
+    fn test_fill_model_config_resolves_each_kind(#[case] kind: FillModelKind) {
+        let config = FillModelConfig {
+            kind,
+            ..Default::default()
+        };
+
+        assert_eq!(format!("{}", config.resolve().unwrap()), kind.to_string());
+    }
+
+    #[rstest]
+    fn test_fill_model_config_forwards_probabilities() {
+        let config = FillModelConfig {
+            prob_slippage: 1.0,
+            ..Default::default()
+        };
+        let mut model = config.resolve().unwrap();
+
+        assert!(model.is_limit_filled().unwrap());
+        assert!(model.is_slipped().unwrap());
+
+        let config = FillModelConfig {
+            prob_fill_on_limit: 0.0,
+            ..Default::default()
+        };
+        let mut model = config.resolve().unwrap();
+
+        assert!(!model.is_limit_filled().unwrap());
+        assert!(!model.is_slipped().unwrap());
+    }
+
+    #[rstest]
+    fn test_fill_model_config_resolves_spread_fill_behavior() {
+        let best_price = FillModelConfig {
+            kind: FillModelKind::BestPrice,
+            ..Default::default()
+        };
+
+        assert!(
+            best_price
+                .resolve()
+                .unwrap()
+                .fill_limit_inside_spread()
+                .unwrap()
+        );
+
+        let default = FillModelConfig::default();
+
+        assert!(
+            !default
+                .resolve()
+                .unwrap()
+                .fill_limit_inside_spread()
+                .unwrap()
+        );
+    }
+
+    #[rstest]
+    fn test_fill_model_config_seed_reproduces_draws() {
+        let config = FillModelConfig {
+            prob_fill_on_limit: 0.5,
+            prob_slippage: 0.5,
+            random_seed: Some(42),
+            ..Default::default()
+        };
+        let mut first = config.resolve().unwrap();
+        let mut second = config.resolve().unwrap();
+        let draws: Vec<bool> = (0..16).map(|_| first.is_slipped().unwrap()).collect();
+        let repeated: Vec<bool> = (0..16).map(|_| second.is_slipped().unwrap()).collect();
+
+        assert_eq!(draws, repeated);
+    }
+
+    #[rstest]
+    fn test_fill_model_config_param_out_of_range_error() {
+        let config = FillModelConfig {
+            prob_slippage: 1.1,
+            ..Default::default()
+        };
+        let error = config.resolve().unwrap_err();
+
+        assert_eq!(
+            error.downcast_ref::<CorrectnessError>(),
+            Some(&CorrectnessError::OutOfRange {
+                param: "prob_slippage".to_string(),
+                min: "0".to_string(),
+                max: "1".to_string(),
+                value: "1.1".to_string(),
+                type_name: "f64",
+            })
+        );
+    }
+
+    #[rstest]
+    fn test_fill_model_config_competition_aware_liquidity_factor() {
+        let default_factor = FillModelConfig {
+            kind: FillModelKind::CompetitionAware,
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            default_factor.resolve().unwrap(),
+            FillModelAny::CompetitionAware(_)
+        ));
+
+        let explicit = FillModelConfig {
+            kind: FillModelKind::CompetitionAware,
+            liquidity_factor: Some(0.5),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            explicit.resolve().unwrap(),
+            FillModelAny::CompetitionAware(_)
+        ));
+
+        let out_of_range = FillModelConfig {
+            kind: FillModelKind::CompetitionAware,
+            liquidity_factor: Some(1.5),
+            ..Default::default()
+        };
+
+        assert!(out_of_range.resolve().is_err());
+    }
+
+    #[rstest]
+    #[case(FillModelKind::Default)]
+    #[case(FillModelKind::ThreeTier)]
+    #[case(FillModelKind::VolumeSensitive)]
+    fn test_fill_model_config_rejects_liquidity_factor_for_other_kinds(
+        #[case] kind: FillModelKind,
+    ) {
+        let config = FillModelConfig {
+            kind,
+            liquidity_factor: Some(0.5),
+            ..Default::default()
+        };
+        let error = config.resolve().unwrap_err().to_string();
+
+        assert!(error.contains("liquidity_factor"));
+        assert!(error.contains(&kind.to_string()));
     }
 }

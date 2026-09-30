@@ -39,9 +39,13 @@ from nautilus_trader.core import UUID4
 from nautilus_trader.data import DataEngineConfig
 from nautilus_trader.execution import BestPriceFillModel
 from nautilus_trader.execution import CappedOptionFeeModel
+from nautilus_trader.execution import DefaultFillModel
 from nautilus_trader.execution import ExecutionEngineConfig
 from nautilus_trader.execution import FeeModel
+from nautilus_trader.execution import FillModelConfig
+from nautilus_trader.execution import FillModelKind
 from nautilus_trader.execution import StaticLatencyModel
+from nautilus_trader.execution import ThreeTierFillModel
 from nautilus_trader.execution import TieredNotionalOptionFeeModel
 from nautilus_trader.live import PortfolioConfig
 from nautilus_trader.model import AccountType
@@ -421,6 +425,65 @@ def test_venue_config_optional_params() -> None:
     assert isinstance(config.modules[0], FXRolloverInterestModule)
     assert config.fee_model is None
     assert config.price_protection_points == 7
+
+
+def test_venue_config_accepts_a_fill_model_config() -> None:
+    """
+    Test a fill model can be described by configuration.
+    """
+    config = BacktestVenueConfig(
+        name="SIM",
+        oms_type=OmsType.NETTING,
+        account_type=AccountType.CASH,
+        starting_balances=["100_000 USD"],
+        fill_model=FillModelConfig(
+            kind=FillModelKind.THREE_TIER,
+            prob_fill_on_limit=0.75,
+            prob_slippage=0.25,
+            random_seed=7,
+        ),
+    )
+
+    assert isinstance(config.fill_model, ThreeTierFillModel)
+
+
+def test_venue_config_default_fill_model_config_resolves_to_the_default_model() -> None:
+    """
+    Test the default configuration describes the default fill model.
+    """
+    fill_model = FillModelConfig()
+
+    config = BacktestVenueConfig(
+        name="SIM",
+        oms_type=OmsType.NETTING,
+        account_type=AccountType.CASH,
+        starting_balances=["100_000 USD"],
+        fill_model=fill_model,
+    )
+
+    assert fill_model.kind == FillModelKind.DEFAULT
+    assert fill_model.prob_fill_on_limit == 1.0
+    assert fill_model.prob_slippage == 0.0
+    assert fill_model.random_seed is None
+    assert fill_model.liquidity_factor is None
+    assert isinstance(config.fill_model, DefaultFillModel)
+
+
+def test_venue_config_rejects_a_fill_model_config_liquidity_factor_for_other_kinds() -> None:
+    """
+    Test a liquidity factor is only accepted by the competition aware model.
+    """
+    with pytest.raises(RuntimeError, match="liquidity_factor"):
+        BacktestVenueConfig(
+            name="SIM",
+            oms_type=OmsType.NETTING,
+            account_type=AccountType.CASH,
+            starting_balances=["100_000 USD"],
+            fill_model=FillModelConfig(
+                kind=FillModelKind.SIZE_AWARE,
+                liquidity_factor=0.5,
+            ),
+        )
 
 
 @pytest.mark.parametrize("margin_model", [StandardMarginModel(), LeveragedMarginModel()])

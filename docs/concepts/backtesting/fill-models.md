@@ -55,8 +55,8 @@ the scale of the instrument before using a tiered model.
 and clamps the calculated size to at least one instrument quantity unit.
 
 The current Python bindings do not expose the state setters for `VolumeSensitiveFillModel` or
-`MarketHoursFillModel`. From Python, they retain their initial values of 1,000 recent-volume units
-and normal-liquidity mode.
+`MarketHoursFillModel`, and `FillModelConfig` does not carry them either. From Python they retain
+their initial values of 1,000 recent-volume units and normal-liquidity mode.
 
 ## Configuration
 
@@ -118,6 +118,51 @@ venue = BacktestVenueConfig(
 
 The current high-level venue configuration accepts built-in fill models. It does not load fill
 models from import-path configuration objects.
+
+### Describing a model by configuration
+
+Every place that accepts a fill model also accepts `FillModelConfig`, which describes one of the
+built-in models as data:
+
+```python
+from decimal import Decimal
+
+from nautilus_trader.config import BacktestVenueConfig
+from nautilus_trader.execution import FillModelConfig
+from nautilus_trader.execution import FillModelKind
+from nautilus_trader.execution import MakerTakerFeeModel
+
+venue = BacktestVenueConfig(
+    name="SIM",
+    oms_type=OmsType.NETTING,
+    account_type=AccountType.CASH,
+    book_type=BookType.L1_MBP,
+    starting_balances=["100_000 USD"],
+    fill_model=FillModelConfig(
+        kind=FillModelKind.THREE_TIER,
+        prob_fill_on_limit=1.0,
+        prob_slippage=0.0,
+        random_seed=42,
+    ),
+    fee_model=MakerTakerFeeModel(
+        maker_rate=Decimal("0"),
+        taker_rate=Decimal("0"),
+    ),
+)
+```
+
+`kind` selects the model, one of `FillModelKind.DEFAULT`, `BEST_PRICE`, `ONE_TICK_SLIPPAGE`,
+`PROBABILISTIC`, `TWO_TIER`, `THREE_TIER`, `LIMIT_ORDER_PARTIAL_FILL`, `SIZE_AWARE`,
+`COMPETITION_AWARE`, `VOLUME_SENSITIVE`, or `MARKET_HOURS`. The other fields carry the parameters
+that model's constructor takes. `liquidity_factor` is consumed by `COMPETITION_AWARE` only, and
+supplying it for any other kind is an error rather than a silently ignored setting. Omitted
+parameters use the same defaults as the model classes, so `FillModelConfig()` describes the
+default model.
+
+The configuration resolves to the model it names when the configuration that carries it is
+constructed, using that model's own constructor. It holds no behaviour of its own, so it is not a
+second fill implementation: passing the model object directly remains supported and equivalent, and
+`config.fill_model` reads back the resolved model object either way.
 
 ### Custom fill models
 
@@ -221,6 +266,13 @@ The `FillModel` trait (`crates/execution/src/models/fill.rs:42-94`) has three de
 | `VolumeSensitiveFillModel`   | `max(recent_volume * 0.25, 1)` at best (default `recent_volume=1000`), then unlimited one tick worse.                                         | `fill.rs:1126-1214`       |
 | `MarketHoursFillModel`       | Normal: 500 at best bid/ask; low-liquidity period: 500 one tick worse (toggle via `set_low_liquidity_period`).                                | `fill.rs:1230-1317`       |
 
+Configuration layer:
+
+- `FillModelKind` names the eleven variants (`crates/execution/src/models/fill.rs:1453-1494`) and `FillModelConfig` carries the kind plus `prob_fill_on_limit`, `prob_slippage`, `random_seed`, and the `CompetitionAware`-only `liquidity_factor` (`fill.rs:1496-1530`).
+- `FillModelConfig::resolve` constructs the named model with that model's own constructor, so validation and behaviour are the constructor's, and an omitted `liquidity_factor` uses `DEFAULT_LIQUIDITY_FACTOR` (`fill.rs:1448-1450,1544-1623`). The default configuration resolves to the default model (`fill.rs:1532-1542`).
+- `resolve` errors if `liquidity_factor` is supplied for any kind other than `CompetitionAware`, rather than ignoring it.
+- The description is accepted wherever a fill model is accepted from Python, because `pyobject_to_fill_model_any` resolves it before the model bindings (`crates/execution/src/python/fill.rs:157-160`; the class methods are `crates/execution/src/python/fill.rs:321-392`). `BacktestVenueConfig`, `BacktestEngine.add_venue`, `BacktestEngine.change_fill_model`, and the sandbox client config all convert through that adapter, so a model object and a configuration are interchangeable inputs. Nothing downstream of the adapter changed.
+
 Default and selection:
 
 - The default is `FillModelAny::Default(DefaultFillModel::default())` (`fill.rs:1424-1427`), which is also what `FillModelHandle::default()` yields (`fill.rs:153-157`).
@@ -300,5 +352,8 @@ All randomness is confined to the fill models; latency, fees, and the matching e
 | Venue/position IDs                    | `IdGen::generate*` uses `UUID4::new()` when `use_random_ids` is true                                  | `OrderMatchingEngineConfig.use_random_ids` (default `false`); trade IDs are always deterministic                                        | `config.rs:44-45`; `crates/execution/src/matching_engine/ids_generator.rs:194-197,242-243,267-268` |
 | Order submit/update/delete latency    | `ts_init + fixed duration`                                                                            | deterministic; no randomness                                                                                                            | `exchange.rs:859-886`                                                                              |
 | Fee and price arithmetic              | fee models, matching-engine price logic                                                               | deterministic; no randomness or wall-clock reads                                                                                        | `fee.rs:135-660`; `mod.rs:4357-4548`                                                               |
+
+A `FillModelConfig` forwards `random_seed` to the model it resolves to (`fill.rs:1544-1623`), so a
+seeded configuration reproduces its draws across resolutions.
 
 No fill, fee, latency, or queue-position path reads the wall clock; the engine advances time only from supplied data timestamps and explicit latency durations.

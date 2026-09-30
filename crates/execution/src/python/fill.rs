@@ -27,9 +27,9 @@ use pyo3::prelude::*;
 
 use crate::models::fill::{
     BestPriceFillModel, CompetitionAwareFillModel, DefaultFillModel, FillModel, FillModelAny,
-    FillModelHandle, LimitOrderPartialFillModel, MarketHoursFillModel, OneTickSlippageFillModel,
-    ProbabilisticFillModel, SizeAwareFillModel, ThreeTierFillModel, TwoTierFillModel,
-    VolumeSensitiveFillModel,
+    FillModelConfig, FillModelHandle, FillModelKind, LimitOrderPartialFillModel,
+    MarketHoursFillModel, OneTickSlippageFillModel, ProbabilisticFillModel, SizeAwareFillModel,
+    ThreeTierFillModel, TwoTierFillModel, VolumeSensitiveFillModel,
 };
 
 #[pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.execution")]
@@ -147,10 +147,18 @@ fn call_bool_method(obj: &Py<PyAny>, method_name: &str) -> anyhow::Result<bool> 
 
 /// Extracts a Python fill model object into a Rust [`FillModelAny`].
 ///
+/// A [`FillModelConfig`] is resolved into the built-in model it describes. The built-in model
+/// bindings themselves are converted as before.
+///
 /// # Errors
 ///
-/// Returns an error if `obj` is not a supported built-in fill model binding.
+/// Returns an error if `obj` is not a supported built-in fill model binding, or if a
+/// configuration description fails to resolve.
 pub fn pyobject_to_fill_model_any(obj: &Bound<'_, PyAny>) -> PyResult<FillModelAny> {
+    if let Ok(config) = obj.extract::<FillModelConfig>() {
+        return config.resolve().map_err(to_pyruntime_err);
+    }
+
     if let Ok(m) = obj.extract::<DefaultFillModel>() {
         return Ok(FillModelAny::Default(m));
     }
@@ -307,6 +315,79 @@ impl CompetitionAwareFillModel {
 
     fn __repr__(&self) -> String {
         format!("{self:?}")
+    }
+}
+
+#[pymethods]
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+impl FillModelConfig {
+    /// A configuration description of a built-in fill model.
+    ///
+    /// This is the description side of the fill model set. `FillModelKind` names one of the
+    /// built-in models and the remaining fields carry the parameters that model's constructor
+    /// takes, so a fill model can be described as data, compared, and resolved once with
+    /// `FillModelConfig.resolve`.
+    ///
+    /// Resolution delegates to the existing model constructors: no fill behaviour lives here, and
+    /// the resolved model is exactly the one its constructor builds. A model object passed
+    /// directly (a `FillModelAny`, or a Python model object) remains accepted wherever a fill
+    /// model is configured, so existing configurations are unaffected.
+    #[new]
+    #[pyo3(signature = (
+        kind=FillModelKind::Default,
+        prob_fill_on_limit=1.0,
+        prob_slippage=0.0,
+        random_seed=None,
+        liquidity_factor=None,
+    ))]
+    fn py_new(
+        kind: FillModelKind,
+        prob_fill_on_limit: f64,
+        prob_slippage: f64,
+        random_seed: Option<u64>,
+        liquidity_factor: Option<f64>,
+    ) -> Self {
+        Self {
+            kind,
+            prob_fill_on_limit,
+            prob_slippage,
+            random_seed,
+            liquidity_factor,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+
+    #[getter]
+    #[pyo3(name = "kind")]
+    fn py_kind(&self) -> FillModelKind {
+        self.kind
+    }
+
+    #[getter]
+    #[pyo3(name = "prob_fill_on_limit")]
+    fn py_prob_fill_on_limit(&self) -> f64 {
+        self.prob_fill_on_limit
+    }
+
+    #[getter]
+    #[pyo3(name = "prob_slippage")]
+    fn py_prob_slippage(&self) -> f64 {
+        self.prob_slippage
+    }
+
+    #[getter]
+    #[pyo3(name = "random_seed")]
+    fn py_random_seed(&self) -> Option<u64> {
+        self.random_seed
+    }
+
+    #[getter]
+    #[pyo3(name = "liquidity_factor")]
+    fn py_liquidity_factor(&self) -> Option<f64> {
+        self.liquidity_factor
     }
 }
 

@@ -396,41 +396,60 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
 `OrderMatchingEngineConfig`; margin models in `crates/model/src/accounts/margin_model.rs`;
 `MarketStatusAction::Halt`.
 
-**Inventory.** `docs/concepts/backtesting/fill-models.md` carries an `## Execution realism
-inventory` section that maps every fee model, fill model, latency model, queue position, liquidity
-consumption setting, market status handling, and partial-fill path to the source lines that run, and
-closes with the paths that are random or time dependent and whether they take a seed. It describes
-the code as it stands, so it is a step of this workstream rather than a settled contract: the later
-steps must keep it true.
+**What is implemented.**
 
-**Steps.**
+1. The realism inventory. `docs/concepts/backtesting/fill-models.md` carries an `## Execution
+   realism inventory` section that maps every fee model, fill model, latency model, queue position,
+   liquidity consumption setting, market status handling, and partial-fill path to the source lines
+   that run, and closes with the paths that are random or time dependent and whether they take a
+   seed. It describes the code as it stands, so it is a step of this workstream rather than a settled
+   contract: the later steps must keep it true. It also describes the configuration layer below.
 
-1. Inventory and document the matrix of fee, fill, latency, queue, and liquidity behaviour per venue
-   and instrument class, in `docs/concepts/backtesting/fill-models.md` and the matching engine
-   documentation.
-2. Stage A, abstraction without behaviour change (D14): introduce a configuration layer around the
-   existing models and prove the default path is unchanged. Wrap the eleven existing fill variants
-   rather than rewriting them, and migrate them incrementally through a compatibility adapter.
-3. Implement model selection as an inheritance chain: global defaults, then venue defaults, then
-   matching-engine defaults, then instrument overrides, then order-specific overrides. Each level
-   overrides only what it changes; do not duplicate configuration at every level.
-4. Stage B, independent components (D15): make fill, slippage, and fee independently configurable,
-   with semantics ordered as fill eligibility, then fill quantity, then base fill price, then
-   slippage adjustment, then final fill price, then fees. Stage B lands only after Stage A is proven.
-5. Evaluate each candidate addition independently and opt-in: market impact, spread, partial-fill
-   policy, borrow and locate availability for short selling, and auction and halt policy. Prefer
-   extending `OrderMatchingEngineConfig` and adding a `FillModel` implementation over a new
-   abstraction.
-6. Ensure every addition is deterministic, taking an explicit seed where randomness is involved.
-7. Add one golden scenario per added model.
+2. Stage A, the configuration layer (D14). `FillModelKind` names the eleven fill variants and
+   `FillModelConfig` describes one of them as data: the kind, `prob_fill_on_limit`, `prob_slippage`,
+   `random_seed`, and the `CompetitionAware`-only `liquidity_factor`
+   (`crates/execution/src/models/fill.rs:1453-1530`). `FillModelConfig::resolve` constructs the
+   named model through that model's own constructor (`fill.rs:1544-1623`), so the configuration
+   holds no fill behaviour of its own: it is a description that resolves to the existing
+   implementation rather than a second one. A `liquidity_factor` supplied for any other kind is an
+   error rather than a silently ignored setting, and an omitted factor uses the model default. The
+   default configuration (`fill.rs:1532-1542`) resolves to `FillModelAny::default()`, so the default
+   path is unchanged.
+3. The compatibility adapter is the existing conversion path.
+   `pyobject_to_fill_model_any` resolves a configuration before the model bindings
+   (`crates/execution/src/python/fill.rs:157-160`), so `BacktestVenueConfig`,
+   `BacktestEngine.add_venue`, `BacktestEngine.change_fill_model`, and the sandbox client
+   configuration accept either a model object or a configuration. Nothing downstream of the adapter
+   changed: the venue configuration still carries a `FillModelAny`, the exchange still carries a
+   `FillModelHandle`, and the eleven model implementations are untouched.
+4. `FillModelConfig` and `FillModelKind` are exposed through `nautilus_trader.execution`
+   (`crates/execution/src/python/mod.rs:42-43`), with the Python stubs regenerated.
+5. The unit tests in `crates/execution/src/models/fill.rs` cover that each kind resolves to the
+   model it names, that the probabilistic parameters and the seed are forwarded, and that
+   `CompetitionAware` alone consumes `liquidity_factor`. Python tests cover a venue configured by
+   description and the rejection of a liquidity factor for another kind.
+
+**Not implemented yet.**
+
+- Step 3, the selection inheritance chain: global defaults, then venue defaults, then matching-engine
+  defaults, then instrument overrides, then order-specific overrides. A configuration is not yet
+  layered, and no level inherits from another.
+- Step 4, Stage B independent components (D15): fill, slippage, and fee are not yet independently
+  configurable.
+- Step 5, the optional model additions: market impact, spread, partial-fill policy, borrow and locate
+  availability for short selling, and auction and halt policy.
+- Steps 6 and 7 apply to those additions: each must be deterministic, taking an explicit seed where
+  randomness is involved, and each added model needs a golden scenario.
 
 **Boundary.** Engine and research. Models are used by both backtest and sandbox execution.
 
 **Acceptance.** The inventory document matches the code. Stage A is complete only when
-`old_digest == new_digest` for every existing golden scenario. Stage B is complete only when
-independently configured slippage reproduces the composite behaviour it replaces. Each new model is
-independently selectable and leaves the default path byte-identical, seeded models reproduce across
-runs, and existing fill variants continue to pass their tests unchanged.
+`old_digest == new_digest` for every existing golden scenario: the scenarios in
+`python/tests/regression` pass with their committed expectations unchanged, and the default path
+resolves as before. Stage B is complete only when independently configured slippage reproduces the
+composite behaviour it replaces. Each new model is independently selectable and leaves the default
+path byte-identical, seeded models reproduce across runs, and existing fill variants continue to
+pass their tests unchanged.
 
 **Migration invariant.** Separating an abstraction must not automatically change simulation
 semantics. This is the acceptance criterion that makes the staged migration safe.
