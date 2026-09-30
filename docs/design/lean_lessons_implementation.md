@@ -921,6 +921,57 @@ schema; omitting the feature entirely leaves all other workstreams unaffected.
 **Risks.** A second input surface drifting from the typed configs. Mitigation: the schema-drift test,
 or omit the feature.
 
+**Delivered** in four commits, and the feature was built rather than omitted. Steps 1 to 3 and 5
+(`f82aa68c8b`) are `crates/system/src/config_file.rs` with `save_config` and `load_config` over
+pretty JSON, and the schema is the serde surface of the typed configs themselves - `KernelConfig`,
+`BacktestEngineConfig` and `LiveNodeConfig` gained `Serialize`/`Deserialize` with `serde(default,
+deny_unknown_fields)` - so there is no second configuration model to drift, only a deliberately
+pinned key list. Layering lives inside the loader and is limited to the built-in defaults, then the
+file, then explicit overrides; no environment profile and no environment variable is a
+configuration source. Errors are typed, carry the path, and are raised at load time. The
+schema-drift test pins the key set of each config's file representation and genuinely fails on an
+addition: with a temporary `temp_drift_probe: bool` field added to `KernelConfig`, the test failed
+with `assertion left == right failed: KernelConfig file schema drifted` and the left set containing
+`temp_drift_probe` while the right did not; the field was then removed and the suite returned to
+1404 passed. Round-trip evidence is a real file: `KernelConfig::default()` serializes to the 28-key
+document with `environment`, `trader_id`, the timeouts, `streaming` and `catalogs`, and loading it
+back reproduces an equal serialization plus typed field equality.
+
+Step 4 is the exposure, on both surfaces. Python (`914c1b0fa3`) gained `to_file` and `from_file` on
+`BacktestEngineConfig` and `LiveNodeConfig`, bound over the same Rust loader through
+`crates/system/src/python/config_file.rs`, with `KernelConfig` out of scope because it has no Python
+pyclass and no Python file surface was invented for it. The round trip is asserted on non-default
+values (`load_state=True`, `timeout_connection=45`, `run_analysis=False`), so it cannot pass
+vacuously, and an unknown key raises `ValueError` quoting the loader: `unknown field
+\`unknown_field\`, expected one of \`environment\`, ..., \`run_analysis\``. The CLI (`d9641533b7`)
+gained `nautilus config validate` and `nautilus config resolve`, each taking a file and a `--schema`
+flag selecting `kernel` (the default), `backtest` or `live`, delegating to `load_config` with no
+second loader and emitting one JSON document under envelope schema `nautilus.config.cli/v1`.
+
+Two defects were found in review and fixed in `04f661f95d` rather than shipped, both of which the
+original slice's own evidence could not have caught because it validated files produced by the same
+build:
+
+- the schema is feature-gated. `BacktestEngineConfig` carries `streaming` and `catalogs` behind
+  `#[cfg(feature = "streaming")]`, which the Python extension always enables and the CLI did not, so
+  a file written by the Python package was rejected by the CLI with `unknown field \`streaming\``.
+  The CLI now enables the same schema features (`nautilus-backtest/streaming`,
+  `nautilus-live/streaming`), and a Python-written `BacktestEngineConfig` validates through the CLI
+  with `status: ok` and exit 0, which is the cross-surface check that was missing. A test pins the
+  alignment by asserting the CLI's `BacktestEngineConfig` schema contains the feature-gated keys;
+- a failure raised before the JSON envelope was built was reported only through the logging layer,
+  which these subcommands silence, so `catalog inspect` or `catalog validate` on a nonexistent path
+  exited 1 with an empty stdout and an empty stderr. Failures are now always reported, either inside
+  the envelope (`status: error` with the message) or on stderr when logging is silenced, and a test
+  covers it.
+
+Acceptance: a serialized file round-trips to an equal typed config, per build and now across
+surfaces; an unknown key fails validation with the loader's typed message, observed in Rust and in
+Python; the schema-drift test fails when a typed config field is added without updating the schema,
+observed with the failure text above; and omitting the feature was not needed, so nothing else
+depends on it. Not verified: the `defi` feature build was not exercised, and the CLI's newer
+feature set means its binary now links the streaming dependencies of the backtest and live crates.
+
 ## 13. W11: data CLI (L9B)
 
 **Objective.** A small data surface in `nautilus-cli` that extends the existing `catalog` command
@@ -989,6 +1040,21 @@ fails on this Windows host with `os error 123` from a `\\?\` path normalisation 
 store rejects; its own unmodified test fails identically, independently confirmed, so it is a
 pre-existing persistence defect rather than a regression, and it is why the acceptance evidence above
 used a catalog built in process and from Python.
+
+One defect was found in review and fixed in `04f661f95d` rather than shipped: a failure raised before
+the JSON envelope was built travelled out through the logging layer, which these subcommands silence,
+so `catalog inspect` or `catalog validate` on a catalog path that does not exist exited 1 with an
+empty stdout and an empty stderr - undiagnosable for the CI consumer the machine-readable output is
+for. The data subcommands now report such a failure as the same envelope with `status: error` and the
+message, and the top-level path prints an error to stderr when a command that silenced logging fails
+without having written a document, which also covers `optimize` with no resolvable interpreter.
+`crates/cli/tests/failure_reporting.rs` covers the behaviour. The acceptance evidence was collected
+independently: `inspect` of a catalog built from the repository fixture reports the bars data type
+with identifier `BTCUSDT.BINANCE-1-MINUTE-LAST-EXTERNAL` and the coverage interval above,
+`convert` reports 120 bars and one instrument and the converted directory reads back 120 bars with a
+first close of `46377.00` through the existing Python catalog path, and `validate` of a deliberately
+corrupted file exits 1 with the Parquet reader's own `Invalid Parquet file. Corrupt footer` error
+while a clean catalog exits 0 with an empty `problems` array.
 
 ## 14. Sequencing
 
