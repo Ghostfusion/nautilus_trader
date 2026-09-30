@@ -429,7 +429,7 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
    changed: the venue configuration still carries a `FillModelAny`, the exchange still carries a
    `FillModelHandle`, and the eleven model implementations are untouched.
 4. `FillModelConfig` and `FillModelKind` are exposed through `nautilus_trader.execution`
-   (`crates/execution/src/python/mod.rs:42-43`), with the Python stubs regenerated.
+   (`crates/execution/src/python/mod.rs:44-45`), with the Python stubs regenerated.
 5. The unit tests in `crates/execution/src/models/fill.rs` cover that each kind resolves to the
    model it names, that the probabilistic parameters and the seed are forwarded, and that
    `CompetitionAware` alone consumes `liquidity_factor`. Python tests cover a venue configured by
@@ -444,14 +444,14 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
    holds, which `OrderMatchingEngine::set_fill_model` replaces at runtime.
    `SimulatedExchange` and the sandbox client both carry a `FillModelSelection` and resolve it once,
    when the matching engine for an instrument is created
-   (`crates/backtest/src/exchange.rs:325-344,531`, `crates/adapters/sandbox/src/execution.rs:144-155,1010`).
+   (`crates/backtest/src/exchange.rs:325-345,531`, `crates/adapters/sandbox/src/execution.rs:145-158,1017`).
    A venue-level `set_fill_model` replaces the venue default for every instrument without an
    override and leaves the overrides in place (`exchange.rs:325-336`), and
    `SimulatedExchange::fill_model_for` exposes the resolution for an instrument
    (`exchange.rs:343-344`). The overrides are configured exactly like `leverages`:
-   `SimulatedVenueConfig.instrument_fill_models` (`crates/backtest/src/config.rs:295-300`) and
-   `BacktestVenueConfig.instrument_fill_models` (`config.rs:543-547`), mapped on the node path
-   (`crates/backtest/src/node.rs:271-276,304`) and accepted by `BacktestEngine.add_venue` and
+   `SimulatedVenueConfig.instrument_fill_models` (`crates/backtest/src/config.rs:296-301`) and
+   `BacktestVenueConfig.instrument_fill_models` (`config.rs:550-554`), mapped on the node path
+   (`crates/backtest/src/node.rs:267-277,306`) and accepted by `BacktestEngine.add_venue` and
    `SandboxExecutionClientConfig`. The sandbox field serializes as runtime-only, like its other
    models, and an empty map is omitted.
 
@@ -462,16 +462,16 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
    `random_seed` and drawing from the same `ProbabilisticFillState` the fill models use, so a
    seeded model reproduces its draws and a decomposed configuration reproduces a composite one
    draw for draw. The matching engine carries an optional independent slippage model
-   (`crates/execution/src/matching_engine/mod.rs:116,554-562,5124-5142`) and consults it in place
+   (`crates/execution/src/matching_engine/mod.rs:117,557-564,5137-5156`) and consults it in place
    of the fill model's own slippage when one is set; when none is set the fill model decides,
    which is the default path. Fill and fee were already independently configurable, and slippage
    joins them as `slippage_model`, a venue-level field on `SimulatedVenueConfig`
-   (`crates/backtest/src/config.rs:301-306`), `BacktestVenueConfig` (`config.rs:549-554`),
+   (`crates/backtest/src/config.rs:302-307`), `BacktestVenueConfig` (`config.rs:555-560`),
    `BacktestEngine.add_venue`, and `SandboxExecutionClientConfig`
-   (`crates/adapters/sandbox/src/config.rs:101-114`), mapped on the node path
-   (`crates/backtest/src/node.rs:290-291,305`), so backtest and sandbox stay at parity.
+   (`crates/adapters/sandbox/src/config.rs:104-115`), mapped on the node path
+   (`crates/backtest/src/node.rs:291-292,308`), so backtest and sandbox stay at parity.
    `ProbabilisticSlippageModel` is exposed through `nautilus_trader.execution`
-   (`crates/execution/src/python/mod.rs:57`).
+   (`crates/execution/src/python/mod.rs:58`).
 
    The ordering the engine implements, and that the configuration documents, is: fill
    eligibility, then fill quantity, then base fill price, then the slippage adjustment, then the
@@ -534,8 +534,8 @@ probabilistic fills via `ProbabilisticFillState`; `liquidity_consumption` and `q
 
    Step 6 for the adopted model: it is deterministic (no seed is required), opt-in (absent by
    default), and unit tested for exactness, capping, and repeatability
-   (`market_impact.rs:214-280`), with the engine hook covered by
-   `matching_engine/mod.rs:12174-12202`: the default path fills at the best ask and a configured
+   (`market_impact.rs:198-273`), with the engine hook covered by
+   `matching_engine/mod.rs:12164-12193`: the default path fills at the best ask and a configured
    model of one increment per 10 units fills three increments above it, reproducibly.
 
 9. Step 7, the golden scenarios for the added models. Three declared scenarios in
