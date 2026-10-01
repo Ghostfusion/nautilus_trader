@@ -58,6 +58,23 @@ from nautilus_trader.optimization.runner import CanonicalRun as CanonicalRun
 from nautilus_trader.optimization.runner import FailedExperiment as FailedExperiment
 from nautilus_trader.optimization.search import GridSearch as GridSearch
 from nautilus_trader.optimization.search import SearchStrategy as SearchStrategy
+from nautilus_trader.optimization.significance import DivisorConvention as DivisorConvention
+from nautilus_trader.optimization.significance import ReturnCompounding as ReturnCompounding
+from nautilus_trader.optimization.significance import ReturnMoments as ReturnMoments
+from nautilus_trader.optimization.significance import SharpeEstimate as SharpeEstimate
+from nautilus_trader.optimization.significance import SharpeFrequency as SharpeFrequency
+from nautilus_trader.optimization.significance import SharpeSample as SharpeSample
+from nautilus_trader.optimization.significance import SignificanceReport as SignificanceReport
+from nautilus_trader.optimization.significance import SignificanceResult as SignificanceResult
+from nautilus_trader.optimization.significance import StatisticalContract as StatisticalContract
+from nautilus_trader.optimization.significance import TrialDependence as TrialDependence
+from nautilus_trader.optimization.significance import deflated_sharpe_ratio as deflated_sharpe_ratio
+from nautilus_trader.optimization.significance import per_period_sharpe as per_period_sharpe
+from nautilus_trader.optimization.significance import return_moments as return_moments
+from nautilus_trader.optimization.significance import significance_report as significance_report
+from nautilus_trader.optimization.significance import (
+    trial_provenance_from_runs as trial_provenance_from_runs,
+)
 from nautilus_trader.optimization.space import Experiment as Experiment
 from nautilus_trader.optimization.space import Parameter as Parameter
 from nautilus_trader.optimization.space import ParameterSpace as ParameterSpace
@@ -86,6 +103,7 @@ __all__ = [
     "ConcurrencyPolicy",
     "ConfigError",
     "DatasetIdentity",
+    "DivisorConvention",
     "ExecutionStatus",
     "Experiment",
     "ExperimentResult",
@@ -103,14 +121,23 @@ __all__ = [
     "Parameter",
     "ParameterSpace",
     "ResearchResult",
+    "ReturnCompounding",
+    "ReturnMoments",
     "SearchReport",
     "SearchStrategy",
     "SelectionRule",
+    "SharpeEstimate",
+    "SharpeFrequency",
+    "SharpeSample",
+    "SignificanceReport",
+    "SignificanceResult",
     "Split",
     "SplitContract",
     "SplitDirection",
+    "StatisticalContract",
     "StudyIdentity",
     "TrainStage",
+    "TrialDependence",
     "TrialIdentity",
     "TrialProvenance",
     "TriggerFill",
@@ -122,11 +149,16 @@ __all__ = [
     "WalkForwardResult",
     "WalkForwardStage",
     "WalkForwardWindow",
+    "deflated_sharpe_ratio",
     "load_config",
     "objective_definition_from_terms",
+    "per_period_sharpe",
+    "return_moments",
     "run_config",
+    "significance_report",
     "split_contract_digest",
     "statistic_values",
     "trial_identity",
+    "trial_provenance_from_runs",
     "walk_forward_windows",
 ]

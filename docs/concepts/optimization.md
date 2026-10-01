@@ -201,6 +201,78 @@ Two boundaries are stated rather than implied:
   than re-evaluated. Until then a study can state its membership, and the statement is auditable but
   not enforced.
 
+## Multiple-testing-aware reporting
+
+The best of a sweep is a selection, not an estimate. A study that ran five hundred parameter sets and
+reports the winner's Sharpe ratio has reported the maximum of five hundred estimates, and the expected
+maximum of many estimates is positive even when none of them has skill. `significance.py` carries the
+correction and, before the correction, the statistical contract it is computed under: the contract
+declares every element rather than leaving any of them to the implementation, carries an identity and a
+digest, and is recorded with every result.
+
+| Element                     | Declared as                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------- |
+| Return definition           | The per-period excess return series, with the compounding convention stated (`simple` by default) |
+| Risk-free treatment         | An explicit rate or an explicit zero, never an implicit assumption                                |
+| Minimum observations        | Twenty contributing periods: below it the statistic is `unavailable`, not computed                |
+| Minimum trials              | Ten trial estimates: below it the correction is noise on noise and the statistic is `unavailable` |
+| Trial independence          | Declared by the study, not inferred: a dependent study must supply its effective trial count      |
+| Trial dependence            | The nominal and effective counts are distinguished, and the counted one is recorded               |
+| Sharpe convention           | Per-period, with the sample or population divisor pinned                                          |
+| Variance, skew, kurtosis    | The estimators are named, and the kurtosis convention is non-excess                               |
+| Annualisation               | Prohibited: an annualised input is refused at the boundary rather than divided silently           |
+| Missing returns             | Excluded rather than zero-filled, and the horizon counts contributing periods                     |
+| Failed and duplicate trials | A duplicate parameter set is refused; a failed trial is counted and identified                    |
+
+The initial statistic is the deflated Sharpe ratio, the probability that the selected trial's Sharpe
+ratio exceeds the maximum that the declared number of trials would have produced with no skill:
+
+```text
+SR0 = sqrt(V[SR]) * ((1 - gamma) * Phi^-1(1 - 1/N) + gamma * Phi^-1(1 - 1/(N * e)))
+DSR = Phi((SR - SR0) * sqrt(T - 1) / sqrt(1 - skew * SR + ((kurtosis - 1) / 4) * SR^2))
+```
+
+`V[SR]` is the cross-trial variance of the Sharpe estimates, `N` the counted trial count, `T` the
+contributing periods and `gamma` the Euler-Mascheroni constant. The value is a probability in
+`[0, 1]`, and it falls as the trial count grows: that is the correction, not an artifact of it.
+
+```python
+estimate = per_period_sharpe(run.returns_series, risk_free_rate=0.0)
+moments = return_moments(run.returns_series)
+sample = SharpeSample(
+    sharpe=estimate.value,
+    trial_sharpes=[...],  # one per-period Sharpe per trial that produced one
+    observations=estimate.observations,
+    skew=moments.skew,
+    kurtosis=moments.kurtosis,
+    dependence=TrialDependence.INDEPENDENT,
+)
+result = deflated_sharpe_ratio(sample)
+report = significance_report(study, runs, sample)
+```
+
+The statuses are the analysis statistics' own four-state vocabulary, so a correction is read the same
+way a metric is. Below a minimum count, or with fewer than two trial estimates, the result is
+`unavailable` with `insufficient_data`; a variance factor that is not positive is `invalid` with
+`undefined_result`; and a result that is not computed always carries a reason and no value.
+
+Three boundaries are enforced rather than documented:
+
+- **An annualised input is refused.** The built-in `Sharpe Ratio (252 days)` statistic is annualised
+  and tagged `Annualised`, and a correction defined per period would silently divide it. The sample
+  declares its frequency, and the annualised declaration is an error.
+- **The kurtosis convention is non-excess.** The fourth standardized moment is at least 1 for any
+  distribution, so an excess kurtosis of 0, which is the wrong convention, is refused rather than
+  reinterpreted.
+- **Dependence is declared.** A sweep over adjacent parameters is not an independent sample, and the
+  correction cannot tell from the values alone. A dependent study supplies its effective trial count;
+  an independent study may not.
+
+**The value is reported, never a gate.** Nothing here is consulted by a strategy, an order or a risk
+check. The correction is also not wired into the emitted result document: the configuration declares
+no dataset, and a run record retains its metric values and canonical document rather than its return
+series, so a sweep cannot be corrected from what it currently keeps.
+
 ## The statistics bridge
 
 A default run reports its returns statistics in `BacktestResult.stats_returns`, but that set is the
