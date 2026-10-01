@@ -7,7 +7,7 @@ numbering introduced in revision 2 of this record.
 
 ## 1. Status and scope
 
-### 1.1 Six decisions and the identity contracts are implemented, the rest are not
+### 1.1 Seven decisions, the identity contracts and the parity protocol are implemented, the rest are not
 
 This document records a probe, a comparison and a set of specified decisions. The probe changed no
 production code: the authorising instruction permitted changes only for defects, no defect was found
@@ -39,7 +39,10 @@ with its claims re-derived from this repository rather than restated; section 4.
 states and what was corrected. **D8, domain-scoped capability results, is implemented**
 (`crates/core/src/capability.rs` with its Python binding, plus one producer in each of the order,
 analysis, data and research domains): one shape, four closed code sets, and a source test that no
-caller branches on a detail; section 4.8 records what was built. **D6, the first tranche of the label policies, is
+caller branches on a detail; section 4.8 records what was built. **D9 remains deferred, and its trigger is now measured rather than assumed**
+(section 4.9): a ledger at the runner boundary shows the richest shipped composition executing nine
+runs with no repeat, while the control composition reports exactly one, so the measurement is
+sensitive and the condition is unmet. **D6, the first tranche of the label policies, is
 implemented** (`python/nautilus_trader/optimization/labels.py`): a label definition carries the
 outcome, the forward window, the wait, the missing-data policy and the alignment convention; the
 fixed-horizon forward return, the forward aggregates of the window's per-bar returns and a first-hit
@@ -72,8 +75,9 @@ pairings, the zero-wait case, the two missing-data policies, the leakage refusal
 and the two quarantine tests. D8: `cargo nextest run` over the core, model, analysis and persistence
 crates passes, including 13 tests for the capability shape and the four producers, `cargo clippy`
 with `-D warnings` is clean on all four, and on the Python side 9 capability tests pass, including
-the source scan; the extension was rebuilt and the stubs regenerated for the new binding. The
-statement that no test was run applies to the probe alone.
+the source scan; the extension was rebuilt and the stubs regenerated for the new binding. D9:
+`pytest tests/integration/test_optimization.py` runs 11 tests, all passing, including the trigger
+measurement and its control. The statement that no test was run applies to the probe alone.
 
 ### 1.2 Revision history
 
@@ -91,6 +95,7 @@ statement that no test was run applies to the probe alone.
 | 10      | D6 was implemented, first tranche only: `python/nautilus_trader/optimization/labels.py` declares a `LabelDefinition` carrying the outcome, the forward window in observations, the wait, the missing-data policy and the alignment convention as part of the definition; computes the fixed-horizon forward return, the forward aggregates of the window's per-bar returns with the sample divisor of the D5 dispersion kernel, and a first-hit label over two independent thresholds measured from the entry; and measures the forward reach of every produced label from the series rather than deriving it, so a `LeakagePolicy` shorter than the reach is refused with the shortfall in nanoseconds. The target path is quarantined by a source test over the live packages and by refusing a label series offered as market data. The second tranche (extrema and trend-state labels) is not built, because the dataset contract of the earlier review is not implemented and the leakage intervals remain a study decision                                                                                                                   |
 | 11      | D7 was implemented as a document: `docs/developer_guide/parity_protocol.md` states the seven rules (one reference implementation, mirroring argument order and return shape, refusal over degradation, benchmarks after parity, the import direction, the build-time version agreement and the status as policy rather than a research prerequisite) with a nine-step checklist. It is linked from `crates/pyo3/README.md`, which owns the boundary, and listed in the developer guide's contents. Its version-agreement claim was re-derived from `crates/core/build.rs` rather than assumed, and the reference-generation claim from `scripts/benchmark-backtest-versions.py`, so the document records what this repository does rather than what the source library does                                                                                                                                                                                                                                                                                                                                                                        |
 | 12      | D8 was implemented: `Capability` in `crates/core/src/capability.rs` is the shared shape (availability, a canonical code, a human-readable detail and the requirements not met), exposed to Python as `nautilus_trader.core.Capability` with the code validated where it is built from a string. The code sets are per domain: order reuses `OrderDeniedCode`, analysis reuses `MetricReason`, data declares coverage codes and research declares `ResearchCapabilityCode` with three probes. A source test rejects any comparison, membership test or prefix search on a detail, in either language                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 13      | D9's trigger was measured and remains unmet: a ledger at the runner boundary recorded every executed run of the richest shipped composition (a walk-forward study plus a search), which executed nine runs with no repeat, while the control composition, validating an experiment the search already ran on the same window, reported exactly one. The identity half of the cache key exists in `ExperimentStore`, which writes and can load by digest, and the policy half does not: `Optimizer.optimize` never consults a store to skip a run. The item stays deferred, and the test would report the day that changes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ### 1.3 Reference maps
 
@@ -925,7 +930,33 @@ set. Until then the item is a recorded intent, not work.
 cached and an uncached run agree exactly, a test that changing the dataset digest misses the cache, a
 test that an unhashable argument returns a result, and a test that clearing invalidates.
 
-**Not implemented and not scheduled.**
+**Not implemented, and its trigger is now measured rather than assumed (revision 13).** The condition
+the item waits for is a measured case of the same expensive computation repeated over an identical
+dataset, configuration and parameter set. That was measured rather than reasoned about:
+`test_a_composed_study_runs_every_experiment_on_each_window_once` in
+`python/tests/integration/test_optimization.py` runs the richest shipped composition, a walk-forward
+study plus a search, through the real runner with a ledger at the runner boundary, which is where the
+expensive work happens, recording the window and the experiment digest of every executed run. The
+composed study executed nine runs with no repeat: four search experiments, four in-session searches
+across the two windows and one out-of-sample evaluation.
+
+The measurement carries its own control, because an empty result is worth nothing without one: the
+second half of the same test composes the one pattern that does repeat, an experiment the search has
+already run being validated again on the same window, and asserts that the ledger reports exactly one
+repeated run. The detector works, so the empty result above is a fact about the compositions rather
+than about the detector.
+
+**What exists already is the identity half.** `ExperimentStore` writes an experiment, a result and a
+report under a digest-keyed directory and can load them back, which is the cache-key model of the
+specification's item 1; `Optimizer.optimize` passes a store through to write the report and never
+consults one to skip an experiment, so the policy half, which the specification's items 2 to 5
+describe, does not exist. The item stays deferred: it becomes work when a composition repeats an
+identical run, and the test above is what would report that.
+
+**Not measured**: no repeat was measured in any shipped composition, which is the finding rather than
+a gap; what remains unmeasured is whether a *caller's* composition outside the shipped stages would
+repeat one, since a study assembled by hand can ask for anything, including the redundant validation
+the control exercises.
 
 ### 4.10 D10 Provider adapter, relocated
 
@@ -1109,7 +1140,7 @@ what makes the design independently reviewable, is stated in `design 13.1`.
 | D6 Labels                           | The first tranche exists only on the target path, the definition includes the alignment convention, a leakage test fails if a label value is read as a feature                        | Hand-computed asymmetric case, wait case, both alignment pairings, leakage test; per-instrument test in the second tranche                                | Implemented (4.6); 19 label tests pass, including the hand-computed asymmetric first-hit case, the cumulative-barrier case, both alignment pairings, the zero-wait case, the leakage refusal with its shortfall and the two quarantine tests |
 | D7 Parity protocol                  | A written protocol exists and is linked from the owning crate; not a research prerequisite                                                                                            | The document and its link; the checklist applies only if a second implementation appears                                                                  | Implemented (4.7); the document exists, is linked from `crates/pyo3/README.md` and listed in the developer guide, and its checklist applies only when a second implementation appears                                                        |
 | D8 Capability results               | One shared shape with domain-scoped closed code sets; nothing branches on detail text                                                                                                 | Two refusal cases per domain, and a source test against detail matching                                                                                   | Implemented (4.8); the shared shape is `nautilus_trader.core.Capability`, the four domain sets are closed and owned, 13 Rust and 9 Python capability tests pass, and a source test rejects any match on a detail                             |
-| D9 Cache                            | No acceptance criterion while deferred; if triggered, the key is the identity model and cached and uncached runs agree                                                                | Deferred                                                                                                                                                  | Not implemented                                                                                                                                                                                                                              |
+| D9 Cache                            | No acceptance criterion while deferred; if triggered, the key is the identity model and cached and uncached runs agree                                                                | Deferred                                                                                                                                                  | Deferred, and the trigger is measured as unmet (4.9); a ledger at the runner boundary reports no repeated run in the shipped compositions, with a control that proves the ledger detects one                                                 |
 | D10 Provider adapter                | No acceptance criterion in this document                                                                                                                                              | Belongs to the data-provider architecture review                                                                                                          | Not implemented                                                                                                                                                                                                                              |
 | D11 Schema ownership                | No acceptance criterion: the decision is to change nothing                                                                                                                            | Not applicable                                                                                                                                            | Not implemented                                                                                                                                                                                                                              |
 | Identity contracts (no decision id) | A result cannot be produced without a study identity; the trial identity is sufficient to re-run a trial; field lists are pruned, not filled in                                       | Construction-level assertion, digest stability, kernel-version change reflected in the implementation identity, trial re-run                              | Implemented (4.11); 68 optimization unit tests and 10 integration tests pass, including the two-sweep digest equality; the field lists were pruned and each pruning is justified in 4.11                                                     |
@@ -1190,3 +1221,8 @@ what makes the design independently reviewable, is stated in `design 13.1`.
    not exist.
 10. The vectorbt clone was deleted, so any cited line must be re-derived from the pinned revision. The
     revision is recorded in section 2 and the re-derivation is a single shallow clone.
+11. The caching trigger is measured as unmet (section 4.9) for the compositions the shipped stages
+    build, and remains unmeasured for a composition a caller assembles by hand: a study can ask for
+    the same experiment on the same window twice, and the control in the trigger test does exactly
+    that. Whether a cache should serve a caller that asks twice is the policy question D9 defers,
+    and the measurement gives it a starting point rather than an answer.

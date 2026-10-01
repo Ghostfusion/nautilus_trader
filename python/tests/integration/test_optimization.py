@@ -25,9 +25,12 @@ process fan-out and sequential execution agree on the best result and the digest
 from __future__ import annotations
 
 import dataclasses
+from collections import Counter
+from collections.abc import Iterable
 from decimal import Decimal
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -75,6 +78,10 @@ from nautilus_trader.persistence import ParquetDataCatalog
 from nautilus_trader.trading import ImportableStrategyConfig
 from tests.providers import TestDataProvider
 from tests.providers import TestInstrumentProvider
+
+
+if TYPE_CHECKING:
+    from nautilus_trader.optimization.runner import RunOutcome
 
 
 INSTRUMENT = TestInstrumentProvider.btcusdt_binance()
@@ -625,3 +632,92 @@ def test_walk_forward_splits_and_evaluates_out_of_sample(tmp_path: Path) -> None
     print(  # noqa: T201
         f"out_of_sample_digest={window.out_of_sample.digest} score={window.out_of_sample.score!r}",
     )
+
+
+@dataclasses.dataclass
+class RunLedger:
+    """
+    Record every run a composition executes, as the window and the experiment digest.
+    """
+
+    runs: list[tuple[int | None, int | None, str]] = dataclasses.field(default_factory=list)
+
+    def repeats(self) -> list[tuple[int | None, int | None, str]]:
+        """
+        Return the runs that were executed more than once.
+        """
+        counts = Counter(self.runs)
+        return sorted(key for key, count in counts.items() if count > 1)
+
+
+@dataclasses.dataclass(frozen=True)
+class RecordingRunner:
+    """
+    Delegate to a runner and record every run it executes.
+    """
+
+    inner: BacktestRunner
+    ledger: RunLedger
+
+    def windowed(self, start: int | None, end: int | None) -> RecordingRunner:
+        """
+        Return a recording runner restricted to the given window.
+        """
+        return RecordingRunner(self.inner.windowed(start, end), self.ledger)
+
+    def run(self, experiment: Experiment, metrics: Iterable[str] | None = None) -> RunOutcome:
+        """
+        Record the run and execute it.
+        """
+        self.ledger.runs.append((self.inner.start, self.inner.end, experiment.digest))
+        return self.inner.run(experiment, metrics)
+
+
+def test_a_composed_study_runs_every_experiment_on_each_window_once(tmp_path: Path) -> None:
+    """
+    Test no shipped composition executes an identical run twice.
+
+    This is the measurement the declarative caching item waits for: the same expensive computation
+    repeated over an identical dataset, configuration and parameter set. The ledger records the
+    window and the experiment digest at the runner boundary, where the expensive work happens, so a
+    repeat in any composed stage would appear here. The second half of the test validates the
+    detector itself, by composing the one pattern that does repeat, an experiment the search already
+    ran being validated again on the same window, so the empty result above cannot be vacuous.
+    """
+    catalog_path = _build_catalog(tmp_path / "catalog")
+    bars = _bars(MAX_ROWS)
+    start = bars[0].ts_init
+    end = bars[-1].ts_init
+    span = end - start
+
+    ledger = RunLedger()
+    optimizer = Optimizer(
+        runner=RecordingRunner(_runner(catalog_path), ledger),
+        objective=_objective(),
+        concurrency=ConcurrencyPolicy.sequential(),
+    )
+
+    report = OptimizeStage(optimizer).run(_space())
+    best = report.best()
+    assert best is not None
+    WalkForwardStage(in_sample=optimizer, out_of_sample=optimizer).run(
+        _space(),
+        walk_forward_windows(start, end, in_sample=span // 2, out_of_sample=span // 4),
+    )
+
+    print(f"composed_runs={len(ledger.runs)} repeats={ledger.repeats()}")  # noqa: T201
+    assert ledger.repeats() == []
+
+    repeated = RunLedger()
+    redundant = Optimizer(
+        runner=RecordingRunner(_runner(catalog_path), repeated),
+        objective=_objective(),
+        concurrency=ConcurrencyPolicy.sequential(),
+    )
+    rerun = OptimizeStage(redundant).run(_space()).best()
+    assert rerun is not None
+    ValidateStage(redundant).run(rerun.experiment)
+
+    print(f"redundant_runs={len(repeated.runs)} repeats={repeated.repeats()}")  # noqa: T201
+    assert len(repeated.repeats()) == 1
+    assert repeated.repeats()[0][2] == rerun.experiment.digest
