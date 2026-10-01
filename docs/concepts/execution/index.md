@@ -454,6 +454,9 @@ cross or immediately match. Other venue rejections leave it `false`.
 | `ORDER_LIST_DENIED`                              | The order was denied because its order list failed risk checks.                       |
 | `TRADING_HALTED`                                 | Trading is halted; new submissions and modifications are denied.                      |
 | `TRADING_STATE_REDUCING`                         | Trading is reducing; only eligible reduce-only submissions are permitted.             |
+| `ORDER_COUNT_LIMIT_REACHED`                      | The configured order count limit for the scope was reached.                           |
+| `ACTIVE_ORDER_LIMIT_REACHED`                     | The configured active order limit for the scope was reached.                          |
+| `REPEATED_REQUEST_LIMIT_REACHED`                 | The configured repeated request limit for the scope was reached.                      |
 | `RATE_LIMIT_EXCEEDED`                            | The order submission rate limit was exceeded.                                         |
 | `STREAM_RECONCILING`                             | The execution stream is unavailable or recovering; retry after recovery.              |
 | `NO_EXECUTION_CLIENT`                            | No execution client was found for the routed command.                                 |

@@ -21,9 +21,14 @@ use nautilus_common::{
     throttler::RateLimit,
 };
 use nautilus_core::DurationNanos;
-use nautilus_model::identifiers::{InstrumentId, Venue};
+use nautilus_model::{
+    identifiers::{InstrumentId, Venue},
+    risk::RiskCapMetric,
+};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+
+use super::cap::RiskCap;
 
 /// Configuration for `RiskEngineConfig` instances.
 #[cfg_attr(
@@ -57,6 +62,13 @@ pub struct RiskEngineConfig {
     /// Maximum notional per order by instrument, in each instrument's quote currency.
     #[builder(default)]
     pub max_notional_per_order: AHashMap<InstrumentId, Decimal>,
+    /// Count caps, each a predicate over a scope, a metric and a window.
+    ///
+    /// A cap refuses the actions that increase exposure when the count it observes reaches its
+    /// limit, and it never refuses a cancellation. Caps are evaluated in configuration order, so
+    /// the first reached cap names the refusal.
+    #[builder(default)]
+    pub count_caps: Vec<RiskCap>,
     /// Venues whose execution clients enforce whole-position conditional exits.
     ///
     /// Validated exits skip bounds that apply only to their placeholder quantity and notional.
@@ -101,6 +113,54 @@ impl RiskEngineConfig {
             );
         }
 
+        let mut seen_caps = AHashSet::new();
+
+        for cap in &self.count_caps {
+            errors.check(
+                cap.limit > 0,
+                ConfigError::range(
+                    "count_caps",
+                    format!(
+                        "the {} limit for {} must be positive, was {}",
+                        cap.metric, cap.scope, cap.limit
+                    ),
+                ),
+            );
+
+            match (cap.metric, cap.window) {
+                (RiskCapMetric::Active, None) => {}
+                (RiskCapMetric::Active, Some(window)) => errors.check(
+                    false,
+                    ConfigError::invalid_value(
+                        "count_caps",
+                        format!(
+                            "an ACTIVE cap counts the open order set and takes no window, was {} ns",
+                            window.as_u64()
+                        ),
+                    ),
+                ),
+                (metric, None) => errors.check(
+                    false,
+                    ConfigError::invalid_value(
+                        "count_caps",
+                        format!("a {metric} cap requires a window"),
+                    ),
+                ),
+                (metric, Some(window)) => errors.check(
+                    !window.is_zero(),
+                    ConfigError::range(
+                        "count_caps",
+                        format!("the {metric} window for {} must be positive", cap.scope),
+                    ),
+                ),
+            }
+
+            errors.check(
+                seen_caps.insert(cap),
+                ConfigError::duplicate("count_caps", Some(format!("{}/{}", cap.scope, cap.metric))),
+            );
+        }
+
         errors.into_result()
     }
 }
@@ -115,6 +175,7 @@ impl Default for RiskEngineConfig {
 
 #[cfg(test)]
 mod tests {
+    use nautilus_model::risk::RiskCapScope;
     use rstest::rstest;
 
     use super::*;
@@ -165,5 +226,131 @@ mod tests {
         assert!(errors.iter().all(
             |e| matches!(e, ConfigError::Range { field, .. } if field == "max_notional_per_order")
         ));
+    }
+
+    #[rstest]
+    fn test_caps_default_to_empty() {
+        assert!(RiskEngineConfig::default().count_caps.is_empty());
+    }
+
+    #[rstest]
+    fn test_a_count_cap_is_accepted() {
+        let result = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new(
+                RiskCapMetric::Submit,
+                RiskCapScope::Instrument,
+                10,
+                Some(DurationNanos::from_secs(60)),
+            )])
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn test_a_zero_limit_is_rejected() {
+        let result = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new(
+                RiskCapMetric::Submit,
+                RiskCapScope::Global,
+                0,
+                Some(DurationNanos::from_secs(60)),
+            )])
+            .build();
+
+        assert!(matches!(result, Err(ConfigError::Range { field, .. }) if field == "count_caps"));
+    }
+
+    #[rstest]
+    fn test_a_repeated_request_cap_is_accepted() {
+        let result = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new(
+                RiskCapMetric::RepeatedRequest,
+                RiskCapScope::Global,
+                10,
+                Some(DurationNanos::from_secs(60)),
+            )])
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn test_a_repeated_request_cap_requires_a_window() {
+        let result = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new(
+                RiskCapMetric::RepeatedRequest,
+                RiskCapScope::Global,
+                10,
+                None,
+            )])
+            .build();
+
+        assert!(
+            matches!(result, Err(ConfigError::InvalidValue { field, .. }) if field == "count_caps")
+        );
+    }
+
+    #[rstest]
+    fn test_an_active_cap_takes_no_window() {
+        let result = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new(
+                RiskCapMetric::Active,
+                RiskCapScope::Global,
+                50,
+                Some(DurationNanos::from_secs(60)),
+            )])
+            .build();
+
+        assert!(
+            matches!(result, Err(ConfigError::InvalidValue { field, .. }) if field == "count_caps")
+        );
+    }
+
+    #[rstest]
+    fn test_a_count_cap_requires_a_window() {
+        let result = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new(
+                RiskCapMetric::Submit,
+                RiskCapScope::Global,
+                10,
+                None,
+            )])
+            .build();
+
+        assert!(
+            matches!(result, Err(ConfigError::InvalidValue { field, .. }) if field == "count_caps")
+        );
+    }
+
+    #[rstest]
+    fn test_a_zero_window_is_rejected() {
+        let result = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new(
+                RiskCapMetric::Fill,
+                RiskCapScope::Instrument,
+                10,
+                Some(DurationNanos::ZERO),
+            )])
+            .build();
+
+        assert!(matches!(result, Err(ConfigError::Range { field, .. }) if field == "count_caps"));
+    }
+
+    #[rstest]
+    fn test_duplicate_caps_are_rejected() {
+        let cap = RiskCap::new(
+            RiskCapMetric::Submit,
+            RiskCapScope::Global,
+            10,
+            Some(DurationNanos::from_secs(60)),
+        );
+        let result = RiskEngineConfig::builder()
+            .count_caps(vec![cap.clone(), cap])
+            .build();
+
+        assert!(
+            matches!(result, Err(ConfigError::Duplicate { field, .. }) if field == "count_caps")
+        );
     }
 }

@@ -6766,6 +6766,7 @@ version = "0.65.0"
 dependencies = [
  "ahash",
  "bon",
+ "codspeed-criterion-compat",
  "indexmap 2.14.2",
  "log",
  "nautilus-common",

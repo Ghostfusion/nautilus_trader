@@ -15,11 +15,15 @@
 
 //! Risk management engine implementation.
 
+pub mod cap;
 pub mod config;
 
-use std::{cell::RefCell, fmt::Debug, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, fmt::Debug, rc::Rc};
 
 use ahash::AHashMap;
+use cap::{
+    CAP_DECISION_HISTORY, RiskCap, RiskCapDecision, RiskCounterKey, RiskCounters, RiskSubject,
+};
 use config::RiskEngineConfig;
 use indexmap::IndexMap;
 use nautilus_common::{
@@ -55,6 +59,7 @@ use nautilus_model::{
     identifiers::{AccountId, ClientId, InstrumentId, Venue},
     instruments::{Instrument, InstrumentAny},
     orders::{LIMIT_ORDER_TYPES, Order, OrderAny, STOP_ORDER_TYPES},
+    risk::{RiskCapMetric, RiskRequestKey},
     types::{Currency, Money, Price, Quantity, quantity::QuantityRaw},
 };
 use nautilus_portfolio::Portfolio;
@@ -78,6 +83,9 @@ pub struct RiskEngine {
     trading_state: TradingState,
     config: RiskEngineConfig,
     max_notional_per_order: AHashMap<InstrumentId, Decimal>,
+    caps: Vec<RiskCap>,
+    counters: RiskCounters,
+    cap_decisions: VecDeque<RiskCapDecision>,
     throttler_submit: Throttler<TradingCommand, SubmitCommandFn>,
     throttler_modify: Throttler<ModifyOrder, ModifyOrderFn>,
     command_count: u64,
@@ -90,6 +98,9 @@ impl Debug for RiskEngine {
             .field("trading_state", &self.trading_state)
             .field("config", &self.config)
             .field("max_notional_per_order", &self.max_notional_per_order)
+            .field("caps", &self.caps)
+            .field("counters", &self.counters)
+            .field("cap_decisions", &self.cap_decisions)
             .field("throttler_submit", &self.throttler_submit)
             .field("throttler_modify", &self.throttler_modify)
             .field("command_count", &self.command_count)
@@ -111,6 +122,7 @@ impl RiskEngine {
         let throttler_modify =
             Self::create_modify_throttler(&config, Rc::clone(&clock), Rc::clone(&cache));
         let max_notional_per_order = config.max_notional_per_order.clone();
+        let caps = config.count_caps.clone();
 
         Self {
             clock,
@@ -119,6 +131,9 @@ impl RiskEngine {
             trading_state: TradingState::Active,
             config,
             max_notional_per_order,
+            caps,
+            counters: RiskCounters::default(),
+            cap_decisions: VecDeque::new(),
             throttler_submit,
             throttler_modify,
             command_count: 0,
@@ -403,6 +418,8 @@ impl RiskEngine {
     pub fn process(&mut self, event: OrderEventAny) {
         self.event_count += 1;
 
+        self.record_cap_event(&event);
+
         // This will extend to other events such as `RiskEvent`
         self.handle_event(&event);
     }
@@ -459,6 +476,8 @@ impl RiskEngine {
         self.throttler_submit.reset();
         self.throttler_modify.reset();
         self.max_notional_per_order = self.config.max_notional_per_order.clone();
+        self.counters.clear();
+        self.cap_decisions.clear();
         self.command_count = 0;
         self.event_count = 0;
 
@@ -519,6 +538,120 @@ impl RiskEngine {
     #[must_use]
     pub const fn max_notional_per_order(&self) -> &AHashMap<InstrumentId, Decimal> {
         &self.max_notional_per_order
+    }
+
+    /// Returns the configured count caps.
+    #[must_use]
+    pub fn count_caps(&self) -> &[RiskCap] {
+        &self.caps
+    }
+
+    /// Returns the most recent cap refusals, oldest first.
+    pub fn cap_decisions(&self) -> impl Iterator<Item = &RiskCapDecision> {
+        self.cap_decisions.iter()
+    }
+
+    /// Refuses `action` for `subject` when a configured cap has been reached.
+    ///
+    /// The refusal is recorded before it is returned, so the record and the rendered denial the
+    /// caller sends describe the same decision.
+    fn enforce_caps(
+        &mut self,
+        action: RiskCapMetric,
+        subject: &RiskSubject,
+        request: Option<&RiskRequestKey>,
+    ) -> Option<RiskCapDecision> {
+        let ts_event = self.clock.borrow().timestamp_ns();
+        let decision = cap::evaluate(
+            &self.caps,
+            &mut self.counters,
+            &self.cache.borrow(),
+            action,
+            subject,
+            request,
+            ts_event,
+        );
+
+        if let Some(decision) = &decision {
+            log::warn!(
+                "{} refused for {}: observed={} limit={}",
+                action,
+                decision.subject,
+                decision.observed,
+                decision.limit,
+            );
+
+            self.cap_decisions.push_back(decision.clone());
+            while self.cap_decisions.len() > CAP_DECISION_HISTORY {
+                self.cap_decisions.pop_front();
+            }
+        }
+
+        decision
+    }
+
+    /// Records one occurrence of every windowed cap counting `action` for `subject`.
+    fn record_cap_occurrences(
+        &mut self,
+        action: RiskCapMetric,
+        subject: &RiskSubject,
+        request: Option<&RiskRequestKey>,
+    ) {
+        let ts_event = self.clock.borrow().timestamp_ns();
+
+        for cap in &self.caps {
+            if !cap.counts(action) || cap.window.is_none() {
+                continue;
+            }
+
+            if let Some(subject_key) = subject.key(cap.scope) {
+                self.counters
+                    .record(RiskCounterKey::new(cap, subject_key, request), ts_event);
+            }
+        }
+    }
+
+    /// Removes the most recent occurrence of every windowed cap counting `action` for `subject`.
+    ///
+    /// A fill that was voided is not a fill, so the occurrence it recorded is released.
+    fn void_last_cap_occurrence(
+        &mut self,
+        action: RiskCapMetric,
+        subject: &RiskSubject,
+        request: Option<&RiskRequestKey>,
+    ) {
+        let ts_event = self.clock.borrow().timestamp_ns();
+
+        for cap in &self.caps {
+            if !cap.counts(action) || cap.window.is_none() {
+                continue;
+            }
+
+            if let Some(subject_key) = subject.key(cap.scope) {
+                self.counters
+                    .void_last(&RiskCounterKey::new(cap, subject_key, request), ts_event);
+            }
+        }
+    }
+
+    /// Counts the cancellations and fills the engine observes.
+    ///
+    /// Cancellations have no command path through the engine, so the count is taken from the
+    /// cancellations the engine observes on the event stream, and never from a command it would
+    /// have to intercept to remain able to refuse one.
+    fn record_cap_event(&mut self, event: &OrderEventAny) {
+        match event {
+            OrderEventAny::Canceled(_) => {
+                self.record_cap_occurrences(RiskCapMetric::Cancel, &RiskSubject::from(event), None);
+            }
+            OrderEventAny::Filled(_) => {
+                self.record_cap_occurrences(RiskCapMetric::Fill, &RiskSubject::from(event), None);
+            }
+            OrderEventAny::FillVoided(_) => {
+                self.void_last_cap_occurrence(RiskCapMetric::Fill, &RiskSubject::from(event), None);
+            }
+            _ => {}
+        }
     }
 
     fn config_as_map(&self) -> IndexMap<String, String> {
@@ -641,6 +774,16 @@ impl RiskEngine {
             return; // Denied
         };
 
+        let subject = RiskSubject::from(&order);
+        let request = RiskRequestKey::from(&order);
+
+        if let Some(decision) = self.enforce_caps(RiskCapMetric::Submit, &subject, Some(&request)) {
+            self.deny_command(
+                TradingCommand::SubmitOrder(command),
+                &decision.reason().to_string(),
+            );
+            return; // Denied
+        }
         let full_position_exit = self.is_full_position_exit(&command, &instrument, &order);
         if !self.check_order(&instrument, &order, full_position_exit) {
             return; // Denied
@@ -656,6 +799,7 @@ impl RiskEngine {
             return; // Denied
         }
 
+        self.record_cap_occurrences(RiskCapMetric::Submit, &subject, Some(&request));
         self.execution_gateway(TradingCommand::SubmitOrder(command));
     }
 
@@ -791,6 +935,20 @@ impl RiskEngine {
             return; // Denied
         }
 
+        for order in &orders {
+            if let Some(decision) = self.enforce_caps(
+                RiskCapMetric::Submit,
+                &RiskSubject::from(order),
+                Some(&RiskRequestKey::from(order)),
+            ) {
+                self.deny_command(
+                    TradingCommand::SubmitOrderList(command),
+                    &decision.reason().to_string(),
+                );
+                return; // Denied
+            }
+        }
+
         // Per-order checks use each order's own instrument; the cumulative
         // risk check uses the representative. See docs/concepts/orders.md
         // (Order lists -> Caveats for mixed-instrument lists).
@@ -859,6 +1017,14 @@ impl RiskEngine {
             return; // Denied
         }
 
+        for order in &orders {
+            self.record_cap_occurrences(
+                RiskCapMetric::Submit,
+                &RiskSubject::from(order),
+                Some(&RiskRequestKey::from(order)),
+            );
+        }
+
         self.execution_gateway(TradingCommand::SubmitOrderList(command));
     }
 
@@ -868,12 +1034,26 @@ impl RiskEngine {
             return;
         }
 
-        if !self.validate_modify_order(&command)
-            || !self.check_modify_orders_risk(std::slice::from_ref(&command), command.client_id)
-        {
+        if !self.validate_modify_order(&command) {
             return;
         }
 
+        let Some(order) = Self::get_existing_order(&self.cache, &command) else {
+            return;
+        };
+        let subject = RiskSubject::from(&order);
+        let request = RiskRequestKey::from(&order);
+
+        if let Some(decision) = self.enforce_caps(RiskCapMetric::Modify, &subject, Some(&request)) {
+            self.reject_modify_order(&order, &decision.reason().to_string());
+            return;
+        }
+
+        if !self.check_modify_orders_risk(std::slice::from_ref(&command), command.client_id) {
+            return;
+        }
+
+        self.record_cap_occurrences(RiskCapMetric::Modify, &subject, Some(&request));
         self.throttler_modify.send(command);
     }
 
@@ -889,6 +1069,29 @@ impl RiskEngine {
         }
 
         if !self.validate_batch_modify_orders(&command) {
+            return;
+        }
+
+        let mut refusals = Vec::new();
+
+        for modify in &command.modifies {
+            let Some(order) = Self::get_existing_order(&self.cache, modify) else {
+                continue;
+            };
+
+            if let Some(decision) = self.enforce_caps(
+                RiskCapMetric::Modify,
+                &RiskSubject::from(&order),
+                Some(&RiskRequestKey::from(&order)),
+            ) {
+                refusals.push((order, decision));
+            }
+        }
+
+        if !refusals.is_empty() {
+            for (order, decision) in refusals {
+                self.reject_modify_order(&order, &decision.reason().to_string());
+            }
             return;
         }
 
@@ -908,6 +1111,16 @@ impl RiskEngine {
             }
 
             return;
+        }
+
+        for modify in &command.modifies {
+            if let Some(order) = Self::get_existing_order(&self.cache, modify) {
+                self.record_cap_occurrences(
+                    RiskCapMetric::Modify,
+                    &RiskSubject::from(&order),
+                    Some(&RiskRequestKey::from(&order)),
+                );
+            }
         }
 
         Self::send_to_execution(TradingCommand::ModifyOrders(command));

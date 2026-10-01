@@ -14,7 +14,13 @@ outcome. What follows is therefore an evidence record and a specification, not a
 The accepted items in `design 12` are **not implemented**. Each is specified in section 4 below with
 the mechanism it adopts, the parameters and arithmetic taken from VeighNa, the pitfalls found in
 VeighNa's implementation, and the acceptance criteria and verification it would need. Nothing in
-this document should be read as a statement that any of it works.
+this document should be read as a statement that any of it works, except for the items recorded as
+implemented in section 1.3.
+
+The mandate was later extended to implement the accepted items one at a time, which is what the
+defect-only instruction had previously prevented. Section 1.3 is the delivery log for that work, and
+the status column in section 6 records per item what is implemented and what was verified. An item
+that is not marked implemented remains a specification.
 
 ### 1.2 Revision history
 
@@ -55,6 +61,23 @@ specifications below.
 | Research provenance                        | A new design invariant: every research value resolves to its dataset, feature, membership and experiment digests, its as-of timestamp and its source version                                                                                                                                                   |
 | Parent and child conservation              | A new design invariant: parent target equals executed plus remaining plus cancelled unfilled, and child submissions never exceed the parent without a declared overshoot policy                                                                                                                                |
 | Improvements                               | The dependency statement now distinguishes a code dependency from a data flow; the exercise model names Cox-Ross-Rubinstein as the first implementation; D3's contract may be developed while D1 is implemented; wording on structural claims and on the factor pipeline versus domain score engines corrected |
+
+### 1.3 Implementation log
+
+Implementation of the accepted items is tracked here, one row per item, with the verification that
+was actually exercised. An item is only marked implemented when the acceptance criteria in section 6
+have a passing test or benchmark behind them.
+
+| Item | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Verification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1   | `RiskEngineConfig.count_caps` dimensions a cap over a scope, a metric and a rolling window. The counters and the decision records live in the risk engine, keyed per rule and per concrete scope, and a repeated request cap adds the canonical request identity (the instrument, side, order type, quantity and price, excluding the client order id) so each request shape holds its own counter. `OrderDeniedReason` carries the observed count, the limit, the scope and the window, and a cancellation is never refused by a cap. The cap vocabulary is in `nautilus_model::risk`. | Eight acceptance tests over the send path in `crates/risk/tests/risk_engine.rs`: refusal at the limit, the active order count and a cancellation releasing capacity, a partial fill counted once and its void releasing the occurrence, window expiry admitting a new order, a strategy scoped cap not denying a second strategy, a cancel cap gating submits without refusing a cancellation, a repeated request refused while a different request shape is admitted, and a reset clearing the counters. Denial records are asserted field by field, not through the rendered string. The exercised verification: `cargo clippy --locked -p nautilus-model -p nautilus-risk --all-targets --features python -- -D warnings` clean; `cargo nextest run --locked -p nautilus-model -p nautilus-risk --lib --features python` 3917 passed; `cargo nextest run --locked -p nautilus-risk --test risk_engine -E 'test(/cap/)'` 20 passed; the generated denial table regenerated for the three new codes, so `generated_table_is_in_sync` passes. Cost, from `cargo bench --locked -p nautilus-risk --bench caps`: the allow path over five configured caps whose windows each hold 1,000 occurrences took 6.49 to 6.85 microseconds, and a refusal at the first cap took 63.4 to 66.7 nanoseconds. |
+
+Not done as part of D1, and recorded as open items in section 8: no cap value or window duration is
+shipped as a default, the caps have no Python or live configuration surface yet, and a window that is
+a session is not built because the trading calendar is not. The acceptance criterion that a restart
+must not resurrect stale counters has no subject: the risk engine persists no state, so there is no
+`load_state` for a counter to survive, and the tested guarantee is instead that `reset` clears both
+the counters and the decision records.
 
 ## 2. Probe provenance and reproduction
 
@@ -702,7 +725,7 @@ what makes the design independently reviewable, is stated in `design 12.1`.
 
 | Item                      | Acceptance                                                                                                                                                                                    | Verification                                                                                                                 | Status             |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| D1 Risk caps              | Each new cap denies with a typed reason, cancels release capacity, and the window expiry restores it                                                                                          | Unit tests per cap plus a criterion benchmark on the send path                                                               | Not implemented    |
+| D1 Risk caps              | Each new cap denies with a typed reason, cancels release capacity, and the window expiry restores it                                                                                          | Unit tests per cap plus a criterion benchmark on the send path                                                               | Implemented (1.3)  |
 | D2 Algorithms             | Iceberg, quote pegged and sniper execute a parent to completion or deadline with bounded churn, correct behaviour when a child is denied, and conservation of parent quantity across children | One regression scenario per algorithm plus boundary unit tests, with the conservation identity asserted per scenario         | Not implemented    |
 | D3 Frame and statistics   | A periodic frame with the realised and unrealised split, four statistics, an interval trigger shared by live and backtest, and equity that reconciles exactly to the portfolio                | Regression scenario against a hand computed expectation, an independent value check per statistic, and a reconciliation test | Not implemented    |
 | D4A Exercise              | The exercise style is honoured per instrument, and the tree price converges as its step count rises                                                                                           | Reference value table with recorded provenance, and a test that ignoring the declaration fails                               | Not implemented    |
@@ -733,12 +756,21 @@ internationalisation layer.
 1. The churn hazard in 4.2 is an argument from code inspection of the VeighNa algorithms and from
    the absence of any bound in their design. It has not been measured on a live venue, and the
    bound chosen for our implementation should be justified by a measurement before it is fixed.
-2. The cost of the D1 caps on the send path is unmeasured here. The VeighNa project's need for
-   Cython twins and a micro benchmark is evidence that per order Python checks are not free, but it
-   is not evidence about Rust.
+2. The cost of the D1 caps on the send path is now measured on this machine by
+   `cargo bench --locked -p nautilus-risk --bench caps`. The allow path over five configured caps
+   whose windows each hold 1,000 occurrences took 6.49 to 6.85 microseconds, and a refusal at the
+   first cap took 63.4 to 66.7 nanoseconds. The allow figure is linear in the occurrences the
+   windows hold rather than in the number of caps, because a counter drops expired occurrences as it
+   is seen; a window seeded with a configuration's whole limit (20,000 submissions in the VeighNa
+   values) would be correspondingly more expensive per evaluation. The measurement has not been
+   taken against a live feed, and no optimisation is proposed on the strength of a benchmark alone.
 3. The concrete cap values and default window durations for D1 are unsettled. A default that is too
    low will deny legitimate strategies, and the value cannot be derived from the mechanism, so it
-   needs a judgement recorded next to the configuration (`design 13`).
+   needs a judgement recorded next to the configuration (`design 13`). The mechanism is now
+   implemented with no cap configured by default, so an engine with an unconfigured
+   `RiskEngineConfig` denies nothing, and no default value is proposed here. The VeighNa values
+   (20,000 submits, 10,000 cancels and 10,000 fills globally, 2,000 submits per instrument, 50
+   concurrent active orders) appear only as inputs to the benchmark, not as recommended settings.
 4. The D2 policy vocabulary is unsettled: which constraints an algorithm must honour and which it
    may refuse. This precedes the algorithms because it defines how much of D11 each one implements
    (`design 13`).
@@ -755,3 +787,9 @@ internationalisation layer.
 9. The D14 metric set has no acceptance threshold for any metric. Whether an implementation shortfall
    is good or bad depends on the strategy and the venue, so the analytics should report and pin
    values without asserting that any value is acceptable.
+10. The D1 caps are reachable only through the Rust `RiskEngineConfig`. Neither the Python
+    `RiskEngineConfig` nor `LiveRiskEngineConfig` carries them, so a Python user or a live deployment
+    cannot set a cap, and how a cap should be written from Python (a sequence, a mapping, or a
+    dedicated object) is a public API decision that has not been made. Adding only the Rust field
+    kept the change to the minimum surface the specification asked for; the Python surface is a
+    separate decision.

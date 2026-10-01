@@ -59,4 +59,10 @@ pyo3-stub-gen = { workspace = true, optional = true }
 [dev-dependencies]
 nautilus-model = { workspace = true, features = ["test-support"] }
 
+criterion = { workspace = true }
 rstest = { workspace = true }
+
+[[bench]]
+name = "caps"
+path = "benches/caps.rs"
+harness = false

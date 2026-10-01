@@ -246,6 +246,7 @@ impl From<LiveRiskEngineConfig> for RiskEngineConfig {
             )
             .expect("validate_runtime_support must run before RiskEngineConfig conversion"),
             max_notional_per_order,
+            count_caps: Vec::new(),
             full_position_exit_venues,
             debug: config.debug,
         }

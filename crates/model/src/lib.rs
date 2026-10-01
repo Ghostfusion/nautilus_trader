@@ -133,6 +133,7 @@ pub mod orderbook;
 pub mod orders;
 pub mod position;
 pub mod reports;
+pub mod risk;
 pub mod signal;
 pub mod target;
 pub mod types;

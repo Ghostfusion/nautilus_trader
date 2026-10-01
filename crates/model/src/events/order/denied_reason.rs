@@ -30,6 +30,7 @@ use thiserror::Error;
 use crate::{
     enums::{OrderSide, OrderType, TimeInForce, TrailingOffsetType},
     identifiers::{ClientId, InstrumentId, OrderListId, PositionId, Venue},
+    risk::{RiskCapMetric, RiskCapScope, RiskRequestKey},
     types::{Money, Price, Quantity},
 };
 
@@ -328,6 +329,51 @@ pub enum OrderDeniedReason {
         instrument_id: InstrumentId,
     },
 
+    /// A configured order count cap was reached for the scope.
+    #[error(
+        "ORDER_COUNT_LIMIT_REACHED: metric={metric}, scope={scope}, observed={observed}, limit={limit}, window_ns={window_ns}"
+    )]
+    OrderCountLimitReached {
+        /// The metric the reached cap counts.
+        metric: RiskCapMetric,
+        /// The scope kind the reached cap counts over.
+        scope: RiskCapScope,
+        /// The count observed within the window.
+        observed: u32,
+        /// The configured limit.
+        limit: u32,
+        /// The rolling window the count was taken over, in nanoseconds.
+        window_ns: u64,
+    },
+
+    /// The configured maximum number of concurrently active orders was reached.
+    #[error("ACTIVE_ORDER_LIMIT_REACHED: scope={scope}, observed={observed}, limit={limit}")]
+    ActiveOrderLimitReached {
+        /// The scope kind the reached cap counts over.
+        scope: RiskCapScope,
+        /// The open order count observed.
+        observed: u32,
+        /// The configured limit.
+        limit: u32,
+    },
+
+    /// The configured limit for requests repeated with the same canonical identity was reached.
+    #[error(
+        "REPEATED_REQUEST_LIMIT_REACHED: scope={scope}, request={request}, observed={observed}, limit={limit}, window_ns={window_ns}"
+    )]
+    RepeatedRequestLimitReached {
+        /// The scope kind the reached cap counts over.
+        scope: RiskCapScope,
+        /// The canonical identity of the repeated request.
+        request: RiskRequestKey,
+        /// The count observed within the window.
+        observed: u32,
+        /// The configured limit.
+        limit: u32,
+        /// The rolling window the count was taken over, in nanoseconds.
+        window_ns: u64,
+    },
+
     /// The order submission rate limit was exceeded.
     #[error("RATE_LIMIT_EXCEEDED")]
     RateLimitExceeded,
@@ -485,6 +531,9 @@ impl OrderDeniedCode {
             Self::OrderListDenied => "The order was denied because its order list failed risk checks.",
             Self::TradingHalted => "Trading is halted; new submissions and modifications are denied.",
             Self::TradingStateReducing => "Trading is reducing; only eligible reduce-only submissions are permitted.",
+            Self::OrderCountLimitReached => "The configured order count limit for the scope was reached.",
+            Self::ActiveOrderLimitReached => "The configured active order limit for the scope was reached.",
+            Self::RepeatedRequestLimitReached => "The configured repeated request limit for the scope was reached.",
             Self::RateLimitExceeded => "The order submission rate limit was exceeded.",
             Self::StreamReconciling => "The execution stream is unavailable or recovering; retry after recovery.",
             Self::NoExecutionClient => "No execution client was found for the routed command.",
@@ -926,6 +975,31 @@ mod tests {
             OrderDeniedReason::TradingStateReducing {
                 order_side: OrderSide::Buy,
                 instrument_id: InstrumentId::from("AUD/USD.SIM"),
+            },
+            OrderDeniedReason::OrderCountLimitReached {
+                metric: RiskCapMetric::Cancel,
+                scope: RiskCapScope::Instrument,
+                observed: 10,
+                limit: 10,
+                window_ns: 1_000_000_000,
+            },
+            OrderDeniedReason::ActiveOrderLimitReached {
+                scope: RiskCapScope::Global,
+                observed: 50,
+                limit: 50,
+            },
+            OrderDeniedReason::RepeatedRequestLimitReached {
+                scope: RiskCapScope::Global,
+                request: RiskRequestKey::new(
+                    InstrumentId::from("AUD/USD.SIM"),
+                    OrderType::Limit,
+                    OrderSide::Buy,
+                    Quantity::from("100000"),
+                    Some(Price::from("1.00000")),
+                ),
+                observed: 10,
+                limit: 10,
+                window_ns: 1_000_000_000,
             },
             OrderDeniedReason::RateLimitExceeded,
             OrderDeniedReason::StreamReconciling,

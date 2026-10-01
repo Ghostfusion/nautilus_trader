@@ -68,7 +68,10 @@ use nautilus_model::{
         AccountState, OrderAccepted, OrderDeniedReason, OrderEventAny, OrderEventType, OrderFilled,
         OrderPendingUpdate, OrderPriceField, OrderSubmitted, PositionEvent, PositionOpened,
         account::stubs::cash_account_state_million_usd,
-        order::spec::{OrderAcceptedSpec, OrderFilledSpec, OrderSubmittedSpec},
+        order::spec::{
+            OrderAcceptedSpec, OrderCanceledSpec, OrderFillVoidedSpec, OrderFilledSpec,
+            OrderSubmittedSpec,
+        },
     },
     fees::MakerTakerFeeRates,
     identifiers::{
@@ -90,6 +93,7 @@ use nautilus_model::{
     },
     orders::{Order, OrderAny, OrderList, OrderTestBuilder},
     position::Position,
+    risk::{RiskCapMetric, RiskCapScope, RiskRequestKey},
     types::{
         AccountBalance, Currency, MONEY_MAX, Money, Price, Quantity,
         fixed::{FIXED_PRECISION, check_fixed_precision},
@@ -97,7 +101,11 @@ use nautilus_model::{
     },
 };
 use nautilus_portfolio::Portfolio;
-use nautilus_risk::engine::{RiskEngine, config::RiskEngineConfig};
+use nautilus_risk::engine::{
+    RiskEngine,
+    cap::{RiskCap, RiskScopeKey},
+    config::RiskEngineConfig,
+};
 use rstest::{fixture, rstest};
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use rust_decimal_macros::dec;
@@ -209,6 +217,7 @@ fn test_deny_order_exceeding_max_notional(
         max_order_submit: RateLimit::new(10, DurationNanos::new(1000)),
         max_order_modify: RateLimit::new(5, DurationNanos::new(1000)),
         max_notional_per_order: AHashMap::new(),
+        count_caps: Vec::new(),
         full_position_exit_venues: AHashSet::new(),
     };
 
@@ -361,6 +370,7 @@ fn config_fixture(
         max_order_submit,
         max_order_modify,
         max_notional_per_order,
+        count_caps: Vec::new(),
         full_position_exit_venues: AHashSet::new(),
     }
 }
@@ -491,6 +501,7 @@ fn get_risk_engine(
         max_order_submit: RateLimit::new(10, DurationNanos::new(1000)),
         max_order_modify: RateLimit::new(5, DurationNanos::new(1000)),
         max_notional_per_order: AHashMap::new(),
+        count_caps: Vec::new(),
         full_position_exit_venues: AHashSet::new(),
     });
     let clock = clock.unwrap_or(Rc::new(RefCell::new(VirtualClock::new())));
@@ -512,6 +523,7 @@ fn get_risk_engine_for_full_position_exit(
         max_order_submit: RateLimit::new(10, DurationNanos::new(1000)),
         max_order_modify: RateLimit::new(5, DurationNanos::new(1000)),
         max_notional_per_order: AHashMap::new(),
+        count_caps: Vec::new(),
         full_position_exit_venues: [venue].into_iter().collect(),
     };
     get_risk_engine(cache, Some(config), None, false)
@@ -11275,6 +11287,7 @@ fn test_set_trading_state_publishes_trading_state_changed_event() {
         max_order_submit: RateLimit::new(100, DurationNanos::from_secs(1)),
         max_order_modify: RateLimit::new(50, DurationNanos::from_secs(1)),
         max_notional_per_order: AHashMap::new(),
+        count_caps: Vec::new(),
         full_position_exit_venues: [Venue::from("BINANCE")].into_iter().collect(),
     };
 
@@ -11342,6 +11355,7 @@ fn test_reset_restores_trading_state_and_config_notionals() {
         max_order_submit: RateLimit::new(10, DurationNanos::new(1000)),
         max_order_modify: RateLimit::new(5, DurationNanos::new(1000)),
         max_notional_per_order: config_notionals,
+        count_caps: Vec::new(),
         full_position_exit_venues: AHashSet::new(),
     };
 
@@ -14568,4 +14582,680 @@ fn test_submit_buy_no_instrument_base_currency_still_denied_for_collateral(
         "BUY must still be denied for collateral, found: {reason}"
     );
     assert_eq!(execute_messages.len(), 0);
+}
+
+// -------------------------------------------------------------------------------------------------
+// Count caps
+// -------------------------------------------------------------------------------------------------
+
+fn cap_limit_order(
+    instrument_id: InstrumentId,
+    client_order_id: &str,
+    strategy_id: StrategyId,
+) -> OrderAny {
+    OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument_id)
+        .client_order_id(ClientOrderId::from(client_order_id))
+        .strategy_id(strategy_id)
+        .side(OrderSide::Buy)
+        .quantity(Quantity::from("100000"))
+        .price(Price::from("1.00000"))
+        .build()
+}
+
+fn cap_cache(instrument: &InstrumentAny, account_state: AccountState) -> Rc<RefCell<Cache>> {
+    let mut cache = Cache::default();
+    cache.add_instrument(instrument.clone()).unwrap();
+    cache
+        .add_account(AccountAny::Cash(cash_account(account_state)))
+        .unwrap();
+    Rc::new(RefCell::new(cache))
+}
+
+fn cap_engine(
+    cache: &Rc<RefCell<Cache>>,
+    caps: Vec<RiskCap>,
+) -> (RiskEngine, Rc<RefCell<VirtualClock>>) {
+    let clock = Rc::new(RefCell::new(VirtualClock::new()));
+    let config = RiskEngineConfig {
+        debug: true,
+        bypass: false,
+        max_order_submit: RateLimit::new(10, DurationNanos::new(1000)),
+        max_order_modify: RateLimit::new(5, DurationNanos::new(1000)),
+        max_notional_per_order: AHashMap::new(),
+        count_caps: caps,
+        full_position_exit_venues: AHashSet::new(),
+    };
+
+    let engine = get_risk_engine(
+        Some(Rc::clone(cache)),
+        Some(config),
+        Some(Rc::clone(&clock)),
+        false,
+    );
+
+    (engine, clock)
+}
+
+fn cap_add_order(cache: &Rc<RefCell<Cache>>, order: &OrderAny) {
+    cache
+        .borrow_mut()
+        .add_order(order.clone(), None, None, false)
+        .unwrap();
+}
+
+fn cap_submit(engine: &mut RiskEngine, order: &OrderAny, trader_id: TraderId, client_id: ClientId) {
+    let command = SubmitOrder::from_order(
+        order,
+        trader_id,
+        Some(client_id),
+        None,
+        UUID4::new(),
+        UnixNanos::default(),
+    );
+    engine.execute(TradingCommand::SubmitOrder(command));
+}
+
+fn cap_accept(cache: &Rc<RefCell<Cache>>, order: &OrderAny, venue_order_id: &str) {
+    let accepted = OrderAccepted::new(
+        order.trader_id(),
+        order.strategy_id(),
+        order.instrument_id(),
+        order.client_order_id(),
+        VenueOrderId::from(venue_order_id),
+        AccountId::from("SIM-001"),
+        UUID4::new(),
+        UnixNanos::default(),
+        UnixNanos::default(),
+        false,
+    );
+    cache
+        .borrow_mut()
+        .update_order(&OrderEventAny::Accepted(accepted))
+        .unwrap();
+}
+
+fn cap_cancel(cache: &Rc<RefCell<Cache>>, order: &OrderAny, venue_order_id: &str) -> OrderEventAny {
+    let canceled = OrderCanceledSpec::builder()
+        .trader_id(order.trader_id())
+        .strategy_id(order.strategy_id())
+        .instrument_id(order.instrument_id())
+        .client_order_id(order.client_order_id())
+        .venue_order_id(VenueOrderId::from(venue_order_id))
+        .account_id(AccountId::from("SIM-001"))
+        .build();
+    let event = OrderEventAny::Canceled(canceled);
+    cache.borrow_mut().update_order(&event).unwrap();
+    event
+}
+
+#[rstest]
+fn test_count_cap_refuses_a_submit_at_the_limit(
+    process_order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    execute_order_event_handler: TypedIntoMessageSavingHandler<TradingCommand>,
+    trader_id: TraderId,
+    strategy_id_ema_cross: StrategyId,
+    client_id_binance: ClientId,
+    instrument_audusd: InstrumentAny,
+    cash_account_state_million_usd: AccountState,
+) {
+    let cache = cap_cache(&instrument_audusd, cash_account_state_million_usd);
+    let caps = vec![RiskCap::new(
+        RiskCapMetric::Submit,
+        RiskCapScope::Global,
+        2,
+        Some(DurationNanos::from_secs(60)),
+    )];
+    let (mut engine, _clock) = cap_engine(&cache, caps);
+
+    let orders: Vec<OrderAny> = ["O-001", "O-002", "O-003"]
+        .into_iter()
+        .map(|id| cap_limit_order(instrument_audusd.id(), id, strategy_id_ema_cross))
+        .collect();
+
+    for order in &orders {
+        cap_add_order(&cache, order);
+    }
+
+    for order in &orders {
+        cap_submit(&mut engine, order, trader_id, client_id_binance);
+    }
+
+    let denied = get_process_order_event_handler_messages(&process_order_event_handler);
+    assert_eq!(denied.len(), 1);
+    assert_eq!(denied[0].event_type(), OrderEventType::Denied);
+    assert_eq!(denied[0].client_order_id(), orders[2].client_order_id());
+    assert_eq!(
+        denied[0].message(),
+        Some(Ustr::from(
+            &OrderDeniedReason::OrderCountLimitReached {
+                metric: RiskCapMetric::Submit,
+                scope: RiskCapScope::Global,
+                observed: 2,
+                limit: 2,
+                window_ns: 60_000_000_000,
+            }
+            .to_string()
+        ))
+    );
+
+    let executed = get_execute_order_event_handler_messages(&execute_order_event_handler);
+    assert_eq!(executed.len(), 2);
+
+    assert_eq!(engine.count_caps().len(), 1);
+
+    let decisions: Vec<_> = engine.cap_decisions().cloned().collect();
+    assert_eq!(decisions.len(), 1);
+
+    let decision = &decisions[0];
+    assert_eq!(decision.metric, RiskCapMetric::Submit);
+    assert_eq!(decision.scope, RiskCapScope::Global);
+    assert_eq!(decision.subject, RiskScopeKey::Global);
+    assert_eq!(decision.observed, 2);
+    assert_eq!(decision.limit, 2);
+    assert_eq!(decision.window, Some(DurationNanos::from_secs(60)));
+    assert_eq!(decision.ts_event, UnixNanos::default());
+}
+
+#[rstest]
+fn test_active_cap_counts_the_open_order_set_and_a_cancel_releases_capacity(
+    process_order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    execute_order_event_handler: TypedIntoMessageSavingHandler<TradingCommand>,
+    trader_id: TraderId,
+    strategy_id_ema_cross: StrategyId,
+    client_id_binance: ClientId,
+    instrument_audusd: InstrumentAny,
+    cash_account_state_million_usd: AccountState,
+) {
+    let cache = cap_cache(&instrument_audusd, cash_account_state_million_usd);
+    let caps = vec![RiskCap::new(
+        RiskCapMetric::Active,
+        RiskCapScope::Global,
+        1,
+        None,
+    )];
+    let (mut engine, _clock) = cap_engine(&cache, caps);
+
+    let first = cap_limit_order(instrument_audusd.id(), "O-001", strategy_id_ema_cross);
+    let second = cap_limit_order(instrument_audusd.id(), "O-002", strategy_id_ema_cross);
+    let third = cap_limit_order(instrument_audusd.id(), "O-003", strategy_id_ema_cross);
+
+    for order in [&first, &second, &third] {
+        cap_add_order(&cache, order);
+    }
+
+    // An accepted order is open, so it holds the single slot the cap allows.
+    cap_accept(&cache, &first, "V-001");
+
+    cap_submit(&mut engine, &second, trader_id, client_id_binance);
+
+    let denied = get_process_order_event_handler_messages(&process_order_event_handler);
+    assert_eq!(denied.len(), 1);
+    assert_eq!(denied[0].client_order_id(), second.client_order_id());
+    assert_eq!(
+        denied[0].message(),
+        Some(Ustr::from(
+            &OrderDeniedReason::ActiveOrderLimitReached {
+                scope: RiskCapScope::Global,
+                observed: 1,
+                limit: 1,
+            }
+            .to_string()
+        ))
+    );
+    assert_eq!(
+        get_execute_order_event_handler_messages(&execute_order_event_handler).len(),
+        0
+    );
+
+    let decisions: Vec<_> = engine.cap_decisions().cloned().collect();
+    assert_eq!(decisions.len(), 1);
+
+    let decision = &decisions[0];
+    assert_eq!(decision.metric, RiskCapMetric::Active);
+    assert_eq!(decision.scope, RiskCapScope::Global);
+    assert_eq!(decision.subject, RiskScopeKey::Global);
+    assert_eq!(decision.observed, 1);
+    assert_eq!(decision.limit, 1);
+    assert_eq!(decision.window, None);
+    assert_eq!(decision.ts_event, UnixNanos::default());
+
+    // A cancellation reduces the open order set, which releases the capacity the cap held.
+    let canceled = cap_cancel(&cache, &first, "V-001");
+    engine.process(canceled);
+
+    cap_submit(&mut engine, &third, trader_id, client_id_binance);
+
+    assert_eq!(
+        get_execute_order_event_handler_messages(&execute_order_event_handler).len(),
+        1
+    );
+    assert_eq!(
+        get_process_order_event_handler_messages(&process_order_event_handler).len(),
+        1
+    );
+}
+
+#[rstest]
+fn test_fill_cap_counts_a_partial_fill_once_and_a_void_releases_it(
+    process_order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    execute_order_event_handler: TypedIntoMessageSavingHandler<TradingCommand>,
+    trader_id: TraderId,
+    strategy_id_ema_cross: StrategyId,
+    client_id_binance: ClientId,
+    instrument_audusd: InstrumentAny,
+    cash_account_state_million_usd: AccountState,
+) {
+    let cache = cap_cache(&instrument_audusd, cash_account_state_million_usd);
+    let caps = vec![RiskCap::new(
+        RiskCapMetric::Fill,
+        RiskCapScope::Global,
+        1,
+        Some(DurationNanos::from_secs(60)),
+    )];
+    let (mut engine, _clock) = cap_engine(&cache, caps);
+
+    let first = cap_limit_order(instrument_audusd.id(), "O-001", strategy_id_ema_cross);
+    let second = cap_limit_order(instrument_audusd.id(), "O-002", strategy_id_ema_cross);
+    let third = cap_limit_order(instrument_audusd.id(), "O-003", strategy_id_ema_cross);
+
+    for order in [&first, &second, &third] {
+        cap_add_order(&cache, order);
+    }
+
+    cap_accept(&cache, &first, "V-001");
+
+    // A partial fill of half the order counts once, not once per unit filled.
+    let filled = order_filled(
+        &first,
+        &instrument_audusd,
+        None,
+        Some(AccountId::from("SIM-001")),
+        Some(VenueOrderId::from("V-001")),
+        Some(TradeId::from("E-001")),
+        Some(Quantity::from("50000")),
+        Some(Price::from("1.00000")),
+        None,
+        None,
+        None,
+    );
+    engine.process(OrderEventAny::Filled(filled));
+
+    cap_submit(&mut engine, &second, trader_id, client_id_binance);
+
+    let denied = get_process_order_event_handler_messages(&process_order_event_handler);
+    assert_eq!(denied.len(), 1);
+    assert_eq!(denied[0].client_order_id(), second.client_order_id());
+    assert_eq!(
+        denied[0].message(),
+        Some(Ustr::from(
+            &OrderDeniedReason::OrderCountLimitReached {
+                metric: RiskCapMetric::Fill,
+                scope: RiskCapScope::Global,
+                observed: 1,
+                limit: 1,
+                window_ns: 60_000_000_000,
+            }
+            .to_string()
+        ))
+    );
+
+    let decisions: Vec<_> = engine.cap_decisions().cloned().collect();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(decisions[0].metric, RiskCapMetric::Fill);
+    assert_eq!(decisions[0].observed, 1);
+    assert_eq!(decisions[0].limit, 1);
+    assert_eq!(decisions[0].window, Some(DurationNanos::from_secs(60)));
+
+    // A voided fill is not a fill, so the occurrence it recorded is released.
+    let voided = OrderFillVoidedSpec::builder()
+        .trader_id(first.trader_id())
+        .strategy_id(first.strategy_id())
+        .instrument_id(first.instrument_id())
+        .client_order_id(first.client_order_id())
+        .venue_order_id(VenueOrderId::from("V-001"))
+        .account_id(AccountId::from("SIM-001"))
+        .trade_id(TradeId::from("E-001"))
+        .build();
+    engine.process(OrderEventAny::FillVoided(voided));
+
+    cap_submit(&mut engine, &third, trader_id, client_id_binance);
+
+    assert_eq!(
+        get_execute_order_event_handler_messages(&execute_order_event_handler).len(),
+        1
+    );
+    assert_eq!(
+        get_process_order_event_handler_messages(&process_order_event_handler).len(),
+        1
+    );
+}
+
+#[rstest]
+fn test_count_cap_window_expiry_admits_a_new_order(
+    process_order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    execute_order_event_handler: TypedIntoMessageSavingHandler<TradingCommand>,
+    trader_id: TraderId,
+    strategy_id_ema_cross: StrategyId,
+    client_id_binance: ClientId,
+    instrument_audusd: InstrumentAny,
+    cash_account_state_million_usd: AccountState,
+) {
+    let cache = cap_cache(&instrument_audusd, cash_account_state_million_usd);
+    let caps = vec![RiskCap::new(
+        RiskCapMetric::Submit,
+        RiskCapScope::Global,
+        1,
+        Some(DurationNanos::from_secs(60)),
+    )];
+    let (mut engine, clock) = cap_engine(&cache, caps);
+
+    let orders: Vec<OrderAny> = ["O-001", "O-002", "O-003", "O-004"]
+        .into_iter()
+        .map(|id| cap_limit_order(instrument_audusd.id(), id, strategy_id_ema_cross))
+        .collect();
+
+    for order in &orders {
+        cap_add_order(&cache, order);
+    }
+
+    cap_submit(&mut engine, &orders[0], trader_id, client_id_binance);
+    cap_submit(&mut engine, &orders[1], trader_id, client_id_binance);
+
+    // Inside the window the recorded occurrence still counts.
+    clock
+        .borrow_mut()
+        .advance_time(UnixNanos::from(59_000_000_000), true);
+    cap_submit(&mut engine, &orders[2], trader_id, client_id_binance);
+
+    // An occurrence exactly one window old no longer counts.
+    clock
+        .borrow_mut()
+        .advance_time(UnixNanos::from(60_000_000_000), true);
+    cap_submit(&mut engine, &orders[3], trader_id, client_id_binance);
+
+    assert_eq!(
+        get_execute_order_event_handler_messages(&execute_order_event_handler).len(),
+        2
+    );
+
+    let denied = get_process_order_event_handler_messages(&process_order_event_handler);
+    assert_eq!(denied.len(), 2);
+
+    let decisions: Vec<_> = engine.cap_decisions().cloned().collect();
+    assert_eq!(decisions.len(), 2);
+    assert_eq!(decisions[0].observed, 1);
+    assert_eq!(decisions[0].limit, 1);
+    assert_eq!(decisions[0].ts_event, UnixNanos::default());
+    assert_eq!(decisions[1].observed, 1);
+    assert_eq!(decisions[1].limit, 1);
+    assert_eq!(decisions[1].ts_event, UnixNanos::from(59_000_000_000));
+}
+
+#[rstest]
+fn test_count_cap_is_scoped_per_strategy(
+    process_order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    execute_order_event_handler: TypedIntoMessageSavingHandler<TradingCommand>,
+    trader_id: TraderId,
+    strategy_id_ema_cross: StrategyId,
+    client_id_binance: ClientId,
+    instrument_audusd: InstrumentAny,
+    cash_account_state_million_usd: AccountState,
+) {
+    let cache = cap_cache(&instrument_audusd, cash_account_state_million_usd);
+    let caps = vec![RiskCap::new(
+        RiskCapMetric::Submit,
+        RiskCapScope::Strategy,
+        1,
+        Some(DurationNanos::from_secs(60)),
+    )];
+    let (mut engine, _clock) = cap_engine(&cache, caps);
+
+    let other_strategy = StrategyId::from("S-OTHER");
+    let first = cap_limit_order(instrument_audusd.id(), "O-001", strategy_id_ema_cross);
+    let second = cap_limit_order(instrument_audusd.id(), "O-002", other_strategy);
+    let third = cap_limit_order(instrument_audusd.id(), "O-003", strategy_id_ema_cross);
+
+    for order in [&first, &second, &third] {
+        cap_add_order(&cache, order);
+    }
+
+    cap_submit(&mut engine, &first, trader_id, client_id_binance);
+    cap_submit(&mut engine, &second, trader_id, client_id_binance);
+    cap_submit(&mut engine, &third, trader_id, client_id_binance);
+
+    // The second strategy was never counted against the first strategy's cap.
+    assert_eq!(
+        get_execute_order_event_handler_messages(&execute_order_event_handler).len(),
+        2
+    );
+
+    let denied = get_process_order_event_handler_messages(&process_order_event_handler);
+    assert_eq!(denied.len(), 1);
+    assert_eq!(denied[0].client_order_id(), third.client_order_id());
+
+    let decisions: Vec<_> = engine.cap_decisions().cloned().collect();
+    assert_eq!(decisions.len(), 1);
+
+    let decision = &decisions[0];
+    assert_eq!(decision.metric, RiskCapMetric::Submit);
+    assert_eq!(decision.scope, RiskCapScope::Strategy);
+    assert_eq!(
+        decision.subject,
+        RiskScopeKey::Strategy(strategy_id_ema_cross)
+    );
+    assert_eq!(decision.observed, 1);
+    assert_eq!(decision.limit, 1);
+    assert_eq!(decision.window, Some(DurationNanos::from_secs(60)));
+    assert_eq!(decision.ts_event, UnixNanos::default());
+}
+
+#[rstest]
+fn test_cancel_cap_gates_submits_and_never_refuses_a_cancellation(
+    process_order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    execute_order_event_handler: TypedIntoMessageSavingHandler<TradingCommand>,
+    trader_id: TraderId,
+    strategy_id_ema_cross: StrategyId,
+    client_id_binance: ClientId,
+    instrument_audusd: InstrumentAny,
+    cash_account_state_million_usd: AccountState,
+) {
+    let cache = cap_cache(&instrument_audusd, cash_account_state_million_usd);
+    let caps = vec![RiskCap::new(
+        RiskCapMetric::Cancel,
+        RiskCapScope::Global,
+        1,
+        Some(DurationNanos::from_secs(60)),
+    )];
+    let (mut engine, _clock) = cap_engine(&cache, caps);
+
+    let first = cap_limit_order(instrument_audusd.id(), "O-001", strategy_id_ema_cross);
+    let second = cap_limit_order(instrument_audusd.id(), "O-002", strategy_id_ema_cross);
+    let third = cap_limit_order(instrument_audusd.id(), "O-003", strategy_id_ema_cross);
+
+    for order in [&first, &second, &third] {
+        cap_add_order(&cache, order);
+    }
+
+    cap_accept(&cache, &first, "V-001");
+    cap_accept(&cache, &second, "V-002");
+
+    // A cancellation is only ever observed, so it can never be refused.
+    let canceled_first = cap_cancel(&cache, &first, "V-001");
+    engine.process(canceled_first);
+
+    cap_submit(&mut engine, &third, trader_id, client_id_binance);
+
+    let denied = get_process_order_event_handler_messages(&process_order_event_handler);
+    assert_eq!(denied.len(), 1);
+    assert_eq!(denied[0].client_order_id(), third.client_order_id());
+    assert_eq!(
+        denied[0].message(),
+        Some(Ustr::from(
+            &OrderDeniedReason::OrderCountLimitReached {
+                metric: RiskCapMetric::Cancel,
+                scope: RiskCapScope::Global,
+                observed: 1,
+                limit: 1,
+                window_ns: 60_000_000_000,
+            }
+            .to_string()
+        ))
+    );
+
+    let canceled_second = cap_cancel(&cache, &second, "V-002");
+    engine.process(canceled_second);
+
+    // The second cancellation was counted, and the only denial remains the submit.
+    assert_eq!(
+        get_process_order_event_handler_messages(&process_order_event_handler).len(),
+        1
+    );
+    assert_eq!(
+        get_execute_order_event_handler_messages(&execute_order_event_handler).len(),
+        0
+    );
+
+    let decisions: Vec<_> = engine.cap_decisions().cloned().collect();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(decisions[0].metric, RiskCapMetric::Cancel);
+    assert_eq!(decisions[0].observed, 1);
+    assert_eq!(decisions[0].limit, 1);
+
+    cap_submit(&mut engine, &second, trader_id, client_id_binance);
+
+    let decisions: Vec<_> = engine.cap_decisions().cloned().collect();
+    assert_eq!(decisions.len(), 2);
+    assert_eq!(decisions[1].observed, 2);
+    assert_eq!(decisions[1].limit, 1);
+}
+
+#[rstest]
+fn test_repeated_request_cap_refuses_a_repeat_of_the_same_shape(
+    process_order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    execute_order_event_handler: TypedIntoMessageSavingHandler<TradingCommand>,
+    trader_id: TraderId,
+    strategy_id_ema_cross: StrategyId,
+    client_id_binance: ClientId,
+    instrument_audusd: InstrumentAny,
+    cash_account_state_million_usd: AccountState,
+) {
+    let cache = cap_cache(&instrument_audusd, cash_account_state_million_usd);
+    let caps = vec![RiskCap::new(
+        RiskCapMetric::RepeatedRequest,
+        RiskCapScope::Global,
+        1,
+        Some(DurationNanos::from_secs(60)),
+    )];
+    let (mut engine, _clock) = cap_engine(&cache, caps);
+
+    let first = cap_limit_order(instrument_audusd.id(), "O-001", strategy_id_ema_cross);
+    // The same request shape issued again: only the client order id differs.
+    let repeat = cap_limit_order(instrument_audusd.id(), "O-002", strategy_id_ema_cross);
+    let other = OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument_audusd.id())
+        .client_order_id(ClientOrderId::from("O-003"))
+        .strategy_id(strategy_id_ema_cross)
+        .side(OrderSide::Buy)
+        .quantity(Quantity::from("200000"))
+        .price(Price::from("1.00000"))
+        .build();
+
+    for order in [&first, &repeat, &other] {
+        cap_add_order(&cache, order);
+    }
+
+    cap_submit(&mut engine, &first, trader_id, client_id_binance);
+    cap_submit(&mut engine, &repeat, trader_id, client_id_binance);
+    // A different request shape holds its own counter.
+    cap_submit(&mut engine, &other, trader_id, client_id_binance);
+
+    let denied = get_process_order_event_handler_messages(&process_order_event_handler);
+    assert_eq!(denied.len(), 1);
+    assert_eq!(denied[0].client_order_id(), repeat.client_order_id());
+    assert_eq!(
+        denied[0].message(),
+        Some(Ustr::from(
+            &OrderDeniedReason::RepeatedRequestLimitReached {
+                scope: RiskCapScope::Global,
+                request: RiskRequestKey::from(&repeat),
+                observed: 1,
+                limit: 1,
+                window_ns: 60_000_000_000,
+            }
+            .to_string()
+        ))
+    );
+
+    let executed = get_execute_order_event_handler_messages(&execute_order_event_handler);
+    assert_eq!(executed.len(), 2);
+
+    let decisions: Vec<_> = engine.cap_decisions().cloned().collect();
+    assert_eq!(decisions.len(), 1);
+
+    let decision = &decisions[0];
+    assert_eq!(decision.metric, RiskCapMetric::RepeatedRequest);
+    assert_eq!(decision.scope, RiskCapScope::Global);
+    assert_eq!(decision.subject, RiskScopeKey::Global);
+    assert_eq!(decision.request, Some(RiskRequestKey::from(&repeat)));
+    assert_eq!(decision.request, Some(RiskRequestKey::from(&first)));
+    assert_eq!(decision.observed, 1);
+    assert_eq!(decision.limit, 1);
+    assert_eq!(decision.window, Some(DurationNanos::from_secs(60)));
+    assert_eq!(decision.ts_event, UnixNanos::default());
+}
+
+#[rstest]
+fn test_reset_clears_cap_counters_and_decisions(
+    process_order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    execute_order_event_handler: TypedIntoMessageSavingHandler<TradingCommand>,
+    trader_id: TraderId,
+    strategy_id_ema_cross: StrategyId,
+    client_id_binance: ClientId,
+    instrument_audusd: InstrumentAny,
+    cash_account_state_million_usd: AccountState,
+) {
+    let cache = cap_cache(&instrument_audusd, cash_account_state_million_usd);
+    let caps = vec![RiskCap::new(
+        RiskCapMetric::Submit,
+        RiskCapScope::Global,
+        1,
+        Some(DurationNanos::from_secs(60)),
+    )];
+    let (mut engine, _clock) = cap_engine(&cache, caps);
+
+    let orders: Vec<OrderAny> = ["O-001", "O-002", "O-003"]
+        .into_iter()
+        .map(|id| cap_limit_order(instrument_audusd.id(), id, strategy_id_ema_cross))
+        .collect();
+
+    for order in &orders {
+        cap_add_order(&cache, order);
+    }
+
+    cap_submit(&mut engine, &orders[0], trader_id, client_id_binance);
+    cap_submit(&mut engine, &orders[1], trader_id, client_id_binance);
+
+    assert_eq!(engine.cap_decisions().count(), 1);
+
+    // A cap count is runtime state that is never persisted, so a reset (the engine's restart
+    // boundary) cannot resurrect one.
+    engine.reset();
+
+    assert_eq!(engine.cap_decisions().count(), 0);
+    assert_eq!(
+        get_process_order_event_handler_messages(&process_order_event_handler).len(),
+        1
+    );
+
+    cap_submit(&mut engine, &orders[2], trader_id, client_id_binance);
+
+    assert_eq!(
+        get_execute_order_event_handler_messages(&execute_order_event_handler).len(),
+        2
+    );
+    assert_eq!(
+        get_process_order_event_handler_messages(&process_order_event_handler).len(),
+        1
+    );
 }
