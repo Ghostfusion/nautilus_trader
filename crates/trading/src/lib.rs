@@ -119,7 +119,10 @@ pub mod examples;
 
 pub use algorithm::{
     ExecutionAlgorithm, ExecutionAlgorithmConfig, ExecutionAlgorithmCore, ExecutionAlgorithmNative,
-    ImportableExecutionAlgorithmConfig, TwapAlgorithm, TwapAlgorithmConfig,
+    ExecutionIntent, ExecutionPolicy, ExecutionPreference, ExecutionUrgency, IcebergAlgorithm,
+    IcebergAlgorithmConfig, ImportableExecutionAlgorithmConfig, PolicyError, PolicyPart,
+    QuotePeggedAlgorithm, QuotePeggedAlgorithmConfig, SniperAlgorithm, SniperAlgorithmConfig,
+    TwapAlgorithm, TwapAlgorithmConfig,
 };
 pub use controller::ImportableControllerConfig;
 pub use strategy::{

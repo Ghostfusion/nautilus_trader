@@ -65,7 +65,10 @@ use nautilus_trading::examples::{
 };
 use nautilus_trading::{
     ImportableExecutionAlgorithmConfig, ImportableStrategyConfig,
-    algorithm::{TwapAlgorithm, TwapAlgorithmConfig},
+    algorithm::{
+        IcebergAlgorithm, IcebergAlgorithmConfig, QuotePeggedAlgorithm, QuotePeggedAlgorithmConfig,
+        SniperAlgorithm, SniperAlgorithmConfig, TwapAlgorithm, TwapAlgorithmConfig,
+    },
     python::{algorithm::PyExecutionAlgorithm, universe::PyUniverse},
 };
 use pyo3::prelude::*;
@@ -1197,6 +1200,9 @@ type NativeExecutionAlgorithmRegister =
 fn native_exec_algorithm_register(type_name: &str) -> Option<NativeExecutionAlgorithmRegister> {
     match type_name {
         "TwapAlgorithm" => Some(register_twap_algorithm),
+        "IcebergAlgorithm" => Some(register_iceberg_algorithm),
+        "QuotePeggedAlgorithm" => Some(register_quote_pegged_algorithm),
+        "SniperAlgorithm" => Some(register_sniper_algorithm),
         _ => None,
     }
 }
@@ -1210,6 +1216,51 @@ fn register_twap_algorithm(engine: &mut BacktestEngine, config: &Bound<'_, PyAny
     }
     engine
         .add_exec_algorithm(TwapAlgorithm::new(config))
+        .map_err(to_pyruntime_err)
+}
+
+fn register_iceberg_algorithm(
+    engine: &mut BacktestEngine,
+    config: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let config = config.extract::<IcebergAlgorithmConfig>()?;
+    if config.exec_algorithm_id.is_none() {
+        return Err(to_pyvalue_err(
+            "IcebergAlgorithm config requires `exec_algorithm_id`",
+        ));
+    }
+    engine
+        .add_exec_algorithm(IcebergAlgorithm::new(config))
+        .map_err(to_pyruntime_err)
+}
+
+fn register_quote_pegged_algorithm(
+    engine: &mut BacktestEngine,
+    config: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let config = config.extract::<QuotePeggedAlgorithmConfig>()?;
+    if config.exec_algorithm_id.is_none() {
+        return Err(to_pyvalue_err(
+            "QuotePeggedAlgorithm config requires `exec_algorithm_id`",
+        ));
+    }
+    engine
+        .add_exec_algorithm(QuotePeggedAlgorithm::new(config))
+        .map_err(to_pyruntime_err)
+}
+
+fn register_sniper_algorithm(
+    engine: &mut BacktestEngine,
+    config: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let config = config.extract::<SniperAlgorithmConfig>()?;
+    if config.exec_algorithm_id.is_none() {
+        return Err(to_pyvalue_err(
+            "SniperAlgorithm config requires `exec_algorithm_id`",
+        ));
+    }
+    engine
+        .add_exec_algorithm(SniperAlgorithm::new(config))
         .map_err(to_pyruntime_err)
 }
 

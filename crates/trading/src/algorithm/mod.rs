@@ -39,16 +39,22 @@ use std::fmt::Display;
 
 pub mod config;
 pub mod core;
+pub mod iceberg;
 pub mod policy;
+pub mod quote_pegged;
+pub mod sniper;
 pub mod twap;
 
 pub use core::{ExecutionAlgorithmCore, ExecutionAlgorithmNative, StrategyEventHandlers};
 
 pub use config::{ExecutionAlgorithmConfig, ImportableExecutionAlgorithmConfig};
+pub use iceberg::{IcebergAlgorithm, IcebergAlgorithmConfig};
 pub use policy::{
     ExecutionIntent, ExecutionPolicy, ExecutionPreference, ExecutionUrgency, PolicyError,
     PolicyPart,
 };
+pub use quote_pegged::{QuotePeggedAlgorithm, QuotePeggedAlgorithmConfig};
+pub use sniper::{SniperAlgorithm, SniperAlgorithmConfig};
 
 use nautilus_common::{
     actor::{DataActor, DataActorNative, registry::try_get_actor_unchecked},

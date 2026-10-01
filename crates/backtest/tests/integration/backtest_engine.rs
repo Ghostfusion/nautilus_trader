@@ -60,7 +60,7 @@ use nautilus_model::{
     enums::{
         AccountType, AggregationSource, AggressorSide, AssetClass, BarAggregation, BookAction,
         BookType, ContingencyType, InstrumentCloseType, OmsType, OptionKind, OrderSide,
-        OrderStatus, PositionAdjustmentType, PriceType, TimeInForce, TrailingOffsetType,
+        OrderStatus, OrderType, PositionAdjustmentType, PriceType, TimeInForce, TrailingOffsetType,
         TriggerType,
     },
     events::{OrderEventAny, OrderFilled},
@@ -78,9 +78,10 @@ use nautilus_model::{
 };
 use nautilus_system::trader::Trader;
 use nautilus_trading::{
-    ExecutionAlgorithm, ExecutionAlgorithmConfig, ExecutionAlgorithmCore, Strategy, StrategyConfig,
-    StrategyCore, TwapAlgorithm, TwapAlgorithmConfig, nautilus_execution_algorithm,
-    nautilus_strategy,
+    ExecutionAlgorithm, ExecutionAlgorithmConfig, ExecutionAlgorithmCore, IcebergAlgorithm,
+    IcebergAlgorithmConfig, QuotePeggedAlgorithm, QuotePeggedAlgorithmConfig, SniperAlgorithm,
+    SniperAlgorithmConfig, Strategy, StrategyConfig, StrategyCore, TwapAlgorithm,
+    TwapAlgorithmConfig, nautilus_execution_algorithm, nautilus_strategy,
 };
 use rstest::*;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
@@ -7360,5 +7361,545 @@ fn test_end_returns_streaming_write_error() {
              argument error: Metadata 'price_precision' is 255, maximum supported catalog scale \
              is 16"
         ),
+    );
+}
+
+/// Submits one limit order routed to the iceberg algorithm on the first quote.
+struct IcebergOrderStrategy {
+    core: StrategyCore,
+    instrument_id: InstrumentId,
+    exec_algorithm_id: ExecAlgorithmId,
+    submitted: bool,
+}
+
+impl IcebergOrderStrategy {
+    fn new(instrument_id: InstrumentId, exec_algorithm_id: ExecAlgorithmId) -> Self {
+        let config = StrategyConfig {
+            strategy_id: Some(StrategyId::from("ICEBERG-ORDER-001")),
+            order_id_tag: Some("001".to_string()),
+            ..Default::default()
+        };
+        Self {
+            core: StrategyCore::new(config),
+            instrument_id,
+            exec_algorithm_id,
+            submitted: false,
+        }
+    }
+}
+
+nautilus_strategy!(IcebergOrderStrategy);
+
+impl Debug for IcebergOrderStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(stringify!(IcebergOrderStrategy)).finish()
+    }
+}
+
+impl DataActor for IcebergOrderStrategy {
+    fn on_start(&mut self) -> anyhow::Result<()> {
+        self.subscribe_quotes(self.instrument_id, None, None);
+        Ok(())
+    }
+
+    fn on_quote(&mut self, _quote: &QuoteTick) -> anyhow::Result<()> {
+        if !self.submitted {
+            self.submitted = true;
+            let mut params = IndexMap::new();
+            params.insert(Ustr::from("display_size"), Ustr::from("0.025"));
+            // Longer than the run, so the sequence is driven by terminal children rather than by
+            // re-quotes.
+            params.insert(Ustr::from("requote_secs"), Ustr::from("100.0"));
+
+            let order = self.order().limit(
+                self.instrument_id,
+                OrderSide::Buy,
+                Quantity::from("0.100"),
+                Price::from("1000.00"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(self.exec_algorithm_id),
+                Some(params),
+                None,
+                None,
+            );
+            self.submit_order(order, None, None, None)?;
+        }
+        Ok(())
+    }
+}
+
+#[rstest]
+fn test_iceberg_exec_algorithm_hides_size_and_conserves_quantity(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let mut engine = create_engine();
+    let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+    let instrument_id = instrument.id();
+    let exec_algorithm_id = ExecAlgorithmId::from("ICEBERG-001");
+    engine.add_instrument(&instrument).unwrap();
+    engine
+        .add_exec_algorithm(IcebergAlgorithm::new(IcebergAlgorithmConfig {
+            exec_algorithm_id: Some(exec_algorithm_id),
+            ..Default::default()
+        }))
+        .unwrap();
+    engine
+        .add_strategy(IcebergOrderStrategy::new(instrument_id, exec_algorithm_id))
+        .unwrap();
+
+    // A deterministic book: the touch crosses the resting child once per cycle so each slice
+    // fills, and stays away from it otherwise.
+    let quotes = vec![
+        quote(instrument_id, "999.00", "1001.00", 1_000_000_000),
+        quote(instrument_id, "1000.00", "1000.00", 2_000_000_000),
+        quote(instrument_id, "999.00", "1001.00", 3_000_000_000),
+        quote(instrument_id, "1000.00", "1000.00", 4_000_000_000),
+        quote(instrument_id, "999.00", "1001.00", 5_000_000_000),
+        quote(instrument_id, "1000.00", "1000.00", 6_000_000_000),
+        quote(instrument_id, "999.00", "1001.00", 7_000_000_000),
+        quote(instrument_id, "1000.00", "1000.00", 8_000_000_000),
+    ];
+    engine.add_data(quotes, None, true, true).unwrap();
+    engine.run(None, None, None, false).unwrap();
+
+    let cache = engine.kernel().cache.borrow();
+    let orders = cache.orders(None, Some(&instrument_id), None, None, None);
+    let primary: Vec<_> = orders
+        .iter()
+        .filter(|order| order.exec_spawn_id() == Some(order.client_order_id()))
+        .collect();
+    let children: Vec<_> = orders
+        .iter()
+        .filter(|order| order.exec_spawn_id() != Some(order.client_order_id()))
+        .collect();
+
+    assert_eq!(primary.len(), 1);
+    assert_eq!(children.len(), 4);
+    assert!(
+        children
+            .iter()
+            .all(|order| order.order_type() == OrderType::Limit)
+    );
+    assert!(
+        children
+            .iter()
+            .all(|order| order.quantity() == Quantity::from("0.025"))
+    );
+    assert!(
+        children
+            .iter()
+            .all(|order| order.status() == OrderStatus::Filled)
+    );
+
+    // The conservation identity: the children that executed sum to the parent target, with no
+    // quantity remaining and none cancelled unfilled.
+    let executed: Decimal = children
+        .iter()
+        .map(|order| order.filled_qty().as_decimal())
+        .sum();
+    let cancelled_unfilled: Decimal = children
+        .iter()
+        .filter(|order| order.status() == OrderStatus::Canceled)
+        .map(|order| order.leaves_qty().as_decimal())
+        .sum();
+
+    assert_eq!(executed, Quantity::from("0.100").as_decimal());
+    assert_eq!(cancelled_unfilled, Decimal::ZERO);
+    assert_eq!(primary[0].quantity(), Quantity::from("0.000"));
+}
+
+/// Submits one limit order routed to the quote pegged algorithm on the first quote.
+struct QuotePeggedOrderStrategy {
+    core: StrategyCore,
+    instrument_id: InstrumentId,
+    exec_algorithm_id: ExecAlgorithmId,
+    submitted: bool,
+}
+
+impl QuotePeggedOrderStrategy {
+    fn new(instrument_id: InstrumentId, exec_algorithm_id: ExecAlgorithmId) -> Self {
+        let config = StrategyConfig {
+            strategy_id: Some(StrategyId::from("QUOTE-PEGGED-ORDER-001")),
+            order_id_tag: Some("001".to_string()),
+            ..Default::default()
+        };
+        Self {
+            core: StrategyCore::new(config),
+            instrument_id,
+            exec_algorithm_id,
+            submitted: false,
+        }
+    }
+}
+
+nautilus_strategy!(QuotePeggedOrderStrategy);
+
+impl Debug for QuotePeggedOrderStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(stringify!(QuotePeggedOrderStrategy))
+            .finish()
+    }
+}
+
+impl DataActor for QuotePeggedOrderStrategy {
+    fn on_start(&mut self) -> anyhow::Result<()> {
+        self.subscribe_quotes(self.instrument_id, None, None);
+        Ok(())
+    }
+
+    fn on_quote(&mut self, _quote: &QuoteTick) -> anyhow::Result<()> {
+        if !self.submitted {
+            self.submitted = true;
+
+            // A passive quote joins the near touch, and the child is re-quoted only when the
+            // touch has moved by at least one increment and this interval has elapsed.
+            let mut params = IndexMap::new();
+            params.insert(Ustr::from("pegging"), Ustr::from("passive"));
+            params.insert(Ustr::from("requote_secs"), Ustr::from("1.0"));
+
+            // The primary's own price is not the child price (the algorithm derives that from
+            // the touch), so it is set away from the initial best bid to avoid being marketable.
+            let order = self.order().limit(
+                self.instrument_id,
+                OrderSide::Buy,
+                Quantity::from("0.100"),
+                Price::from("1000.00"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(self.exec_algorithm_id),
+                Some(params),
+                None,
+                None,
+            );
+            self.submit_order(order, None, None, None)?;
+        }
+        Ok(())
+    }
+}
+
+#[rstest]
+fn test_quote_pegged_exec_algorithm_joins_the_touch_and_conserves_quantity(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let mut engine = create_engine();
+    let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+    let instrument_id = instrument.id();
+    let exec_algorithm_id = ExecAlgorithmId::from("QUOTE-PEGGED-001");
+    engine.add_instrument(&instrument).unwrap();
+    engine
+        .add_exec_algorithm(QuotePeggedAlgorithm::new(QuotePeggedAlgorithmConfig {
+            exec_algorithm_id: Some(exec_algorithm_id),
+            ..Default::default()
+        }))
+        .unwrap();
+    engine
+        .add_strategy(QuotePeggedOrderStrategy::new(
+            instrument_id,
+            exec_algorithm_id,
+        ))
+        .unwrap();
+
+    // A deterministic quote sequence, each quote doing exactly one thing:
+    // 1. seeds the near touch (best bid 999.00) and triggers the sole submission; the passive
+    //    buy child joins the touch at 999.00.
+    // 2. moves the touch up one full unit exactly one re-quote interval later, so exactly one
+    //    re-quote runs: the child at 999.00 is cancelled and the replacement child joins the
+    //    moved touch at 1000.00.
+    // 3. drops the ask onto the replacement child's price, so it fills the whole quantity.
+    let quotes = vec![
+        quote(instrument_id, "999.00", "1000.02", 1_000_000_000),
+        quote(instrument_id, "1000.00", "1000.02", 2_000_000_000),
+        quote(instrument_id, "1000.00", "1000.00", 3_000_000_000),
+    ];
+    engine.add_data(quotes, None, true, true).unwrap();
+    engine.run(None, None, None, false).unwrap();
+
+    let cache = engine.kernel().cache.borrow();
+    let orders = cache.orders(None, Some(&instrument_id), None, None, None);
+    let primary: Vec<_> = orders
+        .iter()
+        .filter(|order| order.exec_spawn_id() == Some(order.client_order_id()))
+        .collect();
+    let children: Vec<_> = orders
+        .iter()
+        .filter(|order| order.exec_spawn_id() != Some(order.client_order_id()))
+        .collect();
+
+    assert_eq!(primary.len(), 1);
+    assert_eq!(children.len(), 2);
+
+    // Each child is the algorithm's own limit order for the primary's whole remaining
+    // quantity, and carries the algorithm's id.
+    assert!(
+        children
+            .iter()
+            .all(|order| order.order_type() == OrderType::Limit)
+    );
+    assert!(
+        children
+            .iter()
+            .all(|order| order.quantity() == Quantity::from("0.100"))
+    );
+    assert!(
+        children
+            .iter()
+            .all(|order| order.exec_algorithm_id() == Some(exec_algorithm_id))
+    );
+    assert!(
+        children
+            .iter()
+            .all(|order| order.exec_spawn_id() == Some(primary[0].client_order_id()))
+    );
+
+    // The first child joined the first touch and was cancelled by the re-quote; the second
+    // child joined the moved touch and filled whole.
+    let mut quoted: Vec<_> = children
+        .iter()
+        .map(|order| (order.price(), order.status()))
+        .collect();
+    quoted.sort_by_key(|(price, _)| *price);
+    assert_eq!(
+        quoted,
+        vec![
+            (Some(Price::from("999.00")), OrderStatus::Canceled),
+            (Some(Price::from("1000.00")), OrderStatus::Filled),
+        ]
+    );
+
+    // Churn evidence, derived from the cache orders: two children were submitted and exactly
+    // one of them was cancelled by the re-quote.
+    let submitted = children.len();
+    let cancelled = children
+        .iter()
+        .filter(|order| order.status() == OrderStatus::Canceled)
+        .count();
+    assert_eq!(submitted, 2);
+    assert_eq!(cancelled, 1);
+
+    // Conservation: the executed child quantity (0.100) plus the primary's remaining quantity
+    // (0.000) equals the parent target (0.100). The cancelled child's unfilled quantity
+    // (0.100) is not a third additive term: it was returned to the primary by the core and
+    // re-bound by the replacement child, so 0.000 of the target stays unfilled.
+    let executed: Decimal = children
+        .iter()
+        .map(|order| order.filled_qty().as_decimal())
+        .sum();
+    let primary_remaining = primary[0].quantity().as_decimal();
+    let cancelled_unfilled: Decimal = children
+        .iter()
+        .filter(|order| order.status() == OrderStatus::Canceled)
+        .map(|order| order.leaves_qty().as_decimal())
+        .sum();
+
+    assert_eq!(executed, Quantity::from("0.100").as_decimal());
+    assert_eq!(primary_remaining, Decimal::ZERO);
+    assert_eq!(
+        executed + primary_remaining,
+        Quantity::from("0.100").as_decimal()
+    );
+    assert_eq!(cancelled_unfilled, Quantity::from("0.100").as_decimal());
+}
+
+/// Submits one limit order routed to the sniper algorithm on the first quote.
+struct SniperOrderStrategy {
+    core: StrategyCore,
+    instrument_id: InstrumentId,
+    exec_algorithm_id: ExecAlgorithmId,
+    submitted: bool,
+}
+
+impl SniperOrderStrategy {
+    fn new(instrument_id: InstrumentId, exec_algorithm_id: ExecAlgorithmId) -> Self {
+        let config = StrategyConfig {
+            strategy_id: Some(StrategyId::from("SNIPER-ORDER-001")),
+            order_id_tag: Some("001".to_string()),
+            ..Default::default()
+        };
+        Self {
+            core: StrategyCore::new(config),
+            instrument_id,
+            exec_algorithm_id,
+            submitted: false,
+        }
+    }
+}
+
+nautilus_strategy!(SniperOrderStrategy);
+
+impl Debug for SniperOrderStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(stringify!(SniperOrderStrategy)).finish()
+    }
+}
+
+impl DataActor for SniperOrderStrategy {
+    fn on_start(&mut self) -> anyhow::Result<()> {
+        self.subscribe_quotes(self.instrument_id, None, None);
+        Ok(())
+    }
+
+    fn on_quote(&mut self, _quote: &QuoteTick) -> anyhow::Result<()> {
+        if !self.submitted {
+            self.submitted = true;
+            let mut params = IndexMap::new();
+            // The sweep price each child is quoted at, and the hard bound on children sent.
+            params.insert(Ustr::from("limit_price"), Ustr::from("1000.00"));
+            params.insert(Ustr::from("max_children"), Ustr::from("2"));
+
+            let order = self.order().limit(
+                self.instrument_id,
+                OrderSide::Buy,
+                Quantity::from("0.100"),
+                Price::from("1000.00"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(self.exec_algorithm_id),
+                Some(params),
+                None,
+                None,
+            );
+            self.submit_order(order, None, None, None)?;
+        }
+        Ok(())
+    }
+}
+
+#[rstest]
+fn test_sniper_exec_algorithm_sweeps_only_a_reachable_touch(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let mut engine = create_engine();
+    let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt);
+    let instrument_id = instrument.id();
+    let exec_algorithm_id = ExecAlgorithmId::from("SNIPER-001");
+    engine.add_instrument(&instrument).unwrap();
+    engine
+        .add_exec_algorithm(SniperAlgorithm::new(SniperAlgorithmConfig {
+            exec_algorithm_id: Some(exec_algorithm_id),
+            ..Default::default()
+        }))
+        .unwrap();
+    engine
+        .add_strategy(SniperOrderStrategy::new(instrument_id, exec_algorithm_id))
+        .unwrap();
+
+    // A deterministic book, one purpose per quote:
+    // - 1s: the strategy submits its parent order on the first quote, before the algorithm has
+    //   subscribed, so the algorithm records no touch yet.
+    // - 2s: the ask (1001.00) is above the sweep price (1000.00), so the algorithm's first touch is
+    //   unreachable and no child is sent.
+    // - 3s: the ask reaches the sweep price with 0.040 displayed at the touch, so children are sent
+    //   at 1000.00 and fill.
+    // - 4s: a further reachable touch, after the sequence has already completed, sends nothing.
+    // - 5s: a touch below the sweep price is still reachable, but the sequence is long complete.
+    let quotes = vec![
+        quote_with_size(instrument_id, "999.00", "1001.00", "0.040", 1_000_000_000),
+        quote_with_size(instrument_id, "999.00", "1001.00", "0.040", 2_000_000_000),
+        quote_with_size(instrument_id, "1000.00", "1000.00", "0.040", 3_000_000_000),
+        quote_with_size(instrument_id, "1000.00", "1000.00", "0.040", 4_000_000_000),
+        quote_with_size(instrument_id, "999.00", "999.00", "0.040", 5_000_000_000),
+    ];
+    engine.add_data(quotes, None, true, true).unwrap();
+    engine.run(None, None, None, false).unwrap();
+
+    let cache = engine.kernel().cache.borrow();
+    let orders = cache.orders(None, Some(&instrument_id), None, None, None);
+    let primary: Vec<_> = orders
+        .iter()
+        .filter(|order| order.exec_spawn_id() == Some(order.client_order_id()))
+        .collect();
+    let children: Vec<_> = orders
+        .iter()
+        .filter(|order| order.exec_spawn_id() != Some(order.client_order_id()))
+        .collect();
+
+    // The declared child bound the strategy sent with the parent order.
+    let max_children = 2usize;
+    assert_eq!(primary.len(), 1);
+
+    // No child exists while the touch is unreachable: the algorithm's first touch is the 2s
+    // quote, and every child appears only from the reachable 3s touch onward.
+    assert!(
+        children
+            .iter()
+            .all(|order| order.ts_last() >= UnixNanos::from(3_000_000_000)),
+    );
+
+    // Each child is the algorithm's own limit at the sweep price, capped by the displayed size at
+    // the touch (0.040): both children are exactly the cap, and neither exceeds it.
+    assert!(
+        children
+            .iter()
+            .all(|order| order.order_type() == OrderType::Limit)
+    );
+    assert!(
+        children
+            .iter()
+            .all(|order| order.price() == Some(Price::from("1000.00")))
+    );
+    assert!(
+        children
+            .iter()
+            .all(|order| order.quantity() == Quantity::from("0.040"))
+    );
+
+    // Churn evidence, derived from the cache orders: the sequence submitted exactly its
+    // `max_children` bound (2) and cancelled 0 unfilled, so it completed on the child bound with
+    // quantity still remaining. The bound is never exceeded.
+    let submitted = children.len();
+    assert_eq!(submitted, max_children);
+    assert!(submitted <= max_children);
+    let cancelled = children
+        .iter()
+        .filter(|order| order.status() == OrderStatus::Canceled)
+        .count();
+    assert_eq!(cancelled, 0);
+
+    // Every child carries the executing algorithm's id.
+    assert!(
+        children
+            .iter()
+            .all(|order| order.exec_algorithm_id() == Some(exec_algorithm_id))
+    );
+
+    // The conservation identity: the executed children (0.040 + 0.040 = 0.080), the primary's
+    // remaining quantity (0.020) and the cancelled unfilled quantity (0.000) sum to the parent
+    // target 0.100.
+    let executed: Decimal = children
+        .iter()
+        .map(|order| order.filled_qty().as_decimal())
+        .sum();
+    let primary_remaining = primary[0].quantity().as_decimal();
+    let cancelled_unfilled: Decimal = children
+        .iter()
+        .filter(|order| order.status() == OrderStatus::Canceled)
+        .map(|order| order.leaves_qty().as_decimal())
+        .sum();
+
+    assert_eq!(executed, Quantity::from("0.080").as_decimal());
+    assert_eq!(primary_remaining, Quantity::from("0.020").as_decimal());
+    assert_eq!(cancelled_unfilled, Decimal::ZERO);
+    assert_eq!(
+        executed + primary_remaining + cancelled_unfilled,
+        Quantity::from("0.100").as_decimal(),
     );
 }
