@@ -147,7 +147,7 @@ nautilus-databento = { workspace = true, features = ["python", "live"] }
 nautilus-deribit = { workspace = true, features = ["python"] }
 nautilus-derive = { workspace = true, features = ["python"] }
 nautilus-dydx = { workspace = true, features = ["python"] }
-nautilus-eodhd = { workspace = true, features = ["python"] }
+nautilus-eodhd = { workspace = true, features = ["python", "live"] }
 nautilus-hyperliquid = { workspace = true, features = ["python"] }
 nautilus-interactive-brokers = { workspace = true, features = ["python"] }
 nautilus-kraken = { workspace = true, features = ["python"] }

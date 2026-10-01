@@ -15,19 +15,18 @@
 
 //! [NautilusTrader](https://nautilustrader.io) adapter for [EODHD](https://eodhd.com).
 //!
-//! The `nautilus-eodhd` crate provides access to EODHD end-of-day historical market data for
-//! building a backtest universe and loading historical bars.
+//! The `nautilus-eodhd` crate provides access to EODHD end-of-day and intraday market data: a
+//! live data client that streams bars and delayed quotes into a running node, a historical data
+//! loader, and an instrument provider.
 //!
-//! It is a **data-only** adapter: it ships an instrument provider and a historical data loader,
-//! and provides no live data client and no execution client.
+//! EODHD publishes no HTTP push channel for these endpoints, so the data client streams by
+//! polling. Every subscription owns a task that requests a bounded window, emits what is new or
+//! revised, and then waits for its next tick.
 //!
 //! # NautilusTrader
 //!
 //! [NautilusTrader](https://nautilustrader.io) is an open-source, production-grade, Rust-native
 //! engine for multi-asset, multi-venue trading systems.
-//!
-//! The system spans research, deterministic simulation, and live execution within a single
-//! event-driven architecture, providing research-to-live semantic parity.
 //!
 //! # Feature Flags
 //!
@@ -38,6 +37,7 @@
 //! - `high-precision` (default): Enables
 //!   [high-precision mode](https://nautilustrader.io/docs/nightly/getting_started/installation/#precision-mode)
 //!   to use 128-bit value types.
+//! - `live` (default): Enables the live data client, its configuration, and its factory.
 //! - `python`: Enables Python bindings from [PyO3](https://pyo3.rs).
 
 #![warn(rustc::all)]
@@ -48,10 +48,20 @@
 #![deny(clippy::missing_panics_doc)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod bars;
 pub mod common;
 pub mod http;
 pub mod loader;
 pub mod providers;
+
+#[cfg(feature = "live")]
+pub mod config;
+
+#[cfg(feature = "live")]
+pub mod data;
+
+#[cfg(feature = "live")]
+pub mod factories;
 
 #[cfg(feature = "python")]
 pub mod python;

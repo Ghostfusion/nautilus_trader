@@ -67,6 +67,90 @@ pub struct EodhdSymbol {
     pub isin: Option<String>,
 }
 
+/// A single intraday bar from the `/intraday/{ticker}` endpoint.
+///
+/// The `timestamp` is the authoritative epoch second. The `datetime` field is rendered in the
+/// exchange offset carried by `gmtoffset`, and is not used for bar timestamps.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct EodhdIntradayBar {
+    /// The bar timestamp as an epoch second.
+    pub timestamp: i64,
+    /// The exchange UTC offset in seconds, when supplied.
+    #[serde(default)]
+    pub gmtoffset: Option<i64>,
+    /// The bar timestamp rendered in the exchange offset.
+    #[serde(default)]
+    pub datetime: Option<String>,
+    /// The open price.
+    pub open: f64,
+    /// The high price.
+    pub high: f64,
+    /// The low price.
+    pub low: f64,
+    /// The close price.
+    pub close: f64,
+    /// The traded volume, when supplied.
+    #[serde(default)]
+    pub volume: Option<f64>,
+}
+
+/// A delayed quote snapshot from the `/us-quote-delayed` endpoint.
+///
+/// The endpoint describes the instrument as well as its quote. Only the quote fields are mapped
+/// onto Nautilus types; the descriptive fields are available for inspection but carry no engine
+/// semantics.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct EodhdDelayedQuote {
+    /// The EODHD ticker, for example `AAPL.US`.
+    pub symbol: String,
+    /// The best bid price.
+    #[serde(rename = "bidPrice")]
+    pub bid_price: f64,
+    /// The best ask price.
+    #[serde(rename = "askPrice")]
+    pub ask_price: f64,
+    /// The size resting at the best bid.
+    #[serde(rename = "bidSize", default)]
+    pub bid_size: f64,
+    /// The size resting at the best ask.
+    #[serde(rename = "askSize", default)]
+    pub ask_size: f64,
+    /// The best bid time as an epoch millisecond, when supplied.
+    #[serde(rename = "bidTime", default)]
+    pub bid_time: Option<i64>,
+    /// The best ask time as an epoch millisecond, when supplied.
+    #[serde(rename = "askTime", default)]
+    pub ask_time: Option<i64>,
+    /// The snapshot time as an epoch second.
+    #[serde(default)]
+    pub timestamp: Option<i64>,
+}
+
+impl EodhdDelayedQuote {
+    /// Returns the quote timestamp as epoch nanoseconds.
+    ///
+    /// The newer of the bid and ask times is used, falling back to the snapshot time.
+    #[must_use]
+    pub fn ts_event(&self) -> nautilus_core::UnixNanos {
+        let millis = match (self.bid_time, self.ask_time) {
+            (Some(bid), Some(ask)) => Some(bid.max(ask)),
+            (Some(bid), None) => Some(bid),
+            (None, Some(ask)) => Some(ask),
+            (None, None) => self.timestamp.map(|seconds| seconds * 1_000),
+        };
+
+        nautilus_core::UnixNanos::from_millis(millis.unwrap_or(0).unsigned_abs())
+    }
+}
+
+/// The `/us-quote-delayed` response envelope.
+#[derive(Clone, Debug, Deserialize)]
+pub struct EodhdDelayedQuoteResponse {
+    /// The quotes keyed by EODHD ticker.
+    #[serde(default)]
+    pub data: std::collections::HashMap<String, EodhdDelayedQuote>,
+}
+
 /// The JSON error envelope returned by EODHD.
 ///
 /// A JSON object carrying both `code` and `message` is an error. A JSON object carrying only

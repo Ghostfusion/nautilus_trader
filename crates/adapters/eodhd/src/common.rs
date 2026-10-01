@@ -45,6 +45,9 @@ pub const EODHD_HTTP_BASE_URL: &str = "https://eodhd.com/api";
 /// Default request timeout in seconds.
 pub const EODHD_HTTP_TIMEOUT_SECS: u64 = 30;
 
+/// The default price precision applied to instruments and bars.
+pub const EODHD_DEFAULT_PRICE_PRECISION: u8 = 2;
+
 /// Rate limit key for EODHD REST API requests.
 pub const EODHD_REST_RATE_KEY: &str = "eodhd_rest";
 

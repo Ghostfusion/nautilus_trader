@@ -25,7 +25,10 @@ use serde::de::DeserializeOwned;
 
 use super::{
     error::{Error, Result},
-    models::{EodhdBar, EodhdErrorResponse, EodhdSymbol},
+    models::{
+        EodhdBar, EodhdDelayedQuote, EodhdDelayedQuoteResponse, EodhdErrorResponse,
+        EodhdIntradayBar, EodhdSymbol,
+    },
 };
 use crate::common::{
     Credential, EODHD_API_KEY, EODHD_HTTP_BASE_URL, EODHD_HTTP_TIMEOUT_SECS, EODHD_REST_QUOTA,
@@ -139,6 +142,64 @@ impl EodhdHttpClient {
         let url = format!("{}/eod/{ticker}", self.base_url);
         let body = self.request(&url, &params).await?;
         parse_json_list::<EodhdBar>(&body, &url)
+    }
+
+    /// Returns the intraday bars for `ticker` between `from` and `to` inclusive.
+    ///
+    /// `from` and `to` are epoch seconds. `interval` is one of `1m`, `5m`, or `1h`; EODHD rejects
+    /// any other value with an HTTP 422.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails, the token is rejected, or the body does not parse.
+    pub async fn intraday_bars(
+        &self,
+        ticker: &str,
+        from: i64,
+        to: i64,
+        interval: &str,
+    ) -> Result<Vec<EodhdIntradayBar>> {
+        let mut params = self.base_params();
+        params.insert("interval".to_string(), vec![interval.to_string()]);
+        params.insert("from".to_string(), vec![from.to_string()]);
+        params.insert("to".to_string(), vec![to.to_string()]);
+
+        let url = format!("{}/intraday/{ticker}", self.base_url);
+        let body = self.request(&url, &params).await?;
+
+        parse_json_list::<EodhdIntradayBar>(&body, &url)
+    }
+
+    /// Returns the delayed quote snapshot for `ticker`.
+    ///
+    /// EODHD describes the instrument alongside the quote and returns the row keyed by ticker, so
+    /// the first row of the response is taken.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails, the token is not entitled to the endpoint, or the
+    /// response carries no quote for `ticker`.
+    pub async fn delayed_quote(&self, ticker: &str) -> Result<EodhdDelayedQuote> {
+        let mut params = self.base_params();
+        params.insert("s".to_string(), vec![ticker.to_string()]);
+
+        let url = format!("{}/us-quote-delayed", self.base_url);
+        let body = self.request(&url, &params).await?;
+        let response: EodhdDelayedQuoteResponse = serde_json::from_slice(&body).map_err(|e| {
+            Error::ResponseParse(format!(
+                "{url}: {e} | body starts with {:?}",
+                body_preview(&body)
+            ))
+        })?;
+
+        response
+            .data
+            .into_values()
+            .next()
+            .ok_or_else(|| Error::ApiError {
+                status: SUCCESS_STATUS,
+                message: format!("no delayed quote returned for {ticker}"),
+            })
     }
 
     /// Returns the symbol list for `exchange`, where `exchange` is an EODHD exchange code.

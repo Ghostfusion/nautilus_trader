@@ -6,8 +6,43 @@ import typing
 from nautilus_trader import model
 
 __all__ = [
+    "EodhdDataClientConfig",
+    "EodhdDataClientFactory",
     "EodhdDataLoader",
 ]
+
+@typing.final
+class EodhdDataClientConfig:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        http_base_url: str | None = None,
+        proxy_url: str | None = None,
+        exchange: str | None = None,
+        poll_interval_secs: int | None = None,
+        backfill_days: int | None = None,
+        price_precision: int | None = None,
+        currency: str | None = None,
+        timeout_secs: int | None = None,
+        load_instruments: bool | None = None,
+    ) -> None: ...
+    @property
+    def has_api_key(self) -> bool: ...
+    @property
+    def exchange(self) -> str: ...
+    @property
+    def poll_interval_secs(self) -> int: ...
+    @property
+    def backfill_days(self) -> int: ...
+    @property
+    def price_precision(self) -> int: ...
+    @property
+    def load_instruments(self) -> bool: ...
+
+@typing.final
+class EodhdDataClientFactory:
+    def __init__(self) -> None: ...
+    def name(self) -> str: ...
 
 @typing.final
 class EodhdDataLoader:

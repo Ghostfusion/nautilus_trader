@@ -21,6 +21,8 @@ from nautilus_trader._libnautilus.eodhd import *  # noqa: F403 (undefined-local-
 
 
 __all__ = [
+    "EodhdDataClientConfig",
+    "EodhdDataClientFactory",
     "EodhdDataLoader",
 ]
 

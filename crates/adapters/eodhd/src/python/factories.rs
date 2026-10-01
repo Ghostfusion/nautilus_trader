@@ -13,12 +13,24 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-//! EODHD REST API client and response models.
+//! Python bindings for the EODHD data client factory.
 
-pub mod client;
-pub mod error;
-pub mod models;
+use pyo3::prelude::*;
 
-pub use client::EodhdHttpClient;
-pub use error::{Error, Result};
-pub use models::{EodhdBar, EodhdDelayedQuote, EodhdIntradayBar, EodhdSymbol};
+use crate::{common::EODHD, factories::EodhdDataClientFactory};
+
+#[pymethods]
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+impl EodhdDataClientFactory {
+    /// Factory for creating EODHD data clients.
+    #[new]
+    fn py_new() -> Self {
+        Self
+    }
+
+    /// Returns the adapter identifier this factory registers under.
+    #[pyo3(name = "name")]
+    fn py_name(&self) -> &str {
+        EODHD
+    }
+}

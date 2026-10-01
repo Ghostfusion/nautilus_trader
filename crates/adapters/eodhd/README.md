@@ -29,6 +29,7 @@ depending on the intended use case:
 - `high-precision` (default): Enables
   [high-precision mode](https://nautilustrader.io/docs/nightly/getting_started/installation/#precision-mode)
   to use 128-bit value types.
+- `live` (default): Enables the live data client, its configuration, and its factory.
 - `python`: Enables Python bindings from [PyO3](https://pyo3.rs).
 
 ## Scope

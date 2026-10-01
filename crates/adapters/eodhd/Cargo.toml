@@ -20,18 +20,24 @@ name = "nautilus_eodhd"
 crate-type = ["rlib"]
 
 [features]
-default = ["high-precision"]
+default = ["live", "high-precision"]
 extension-module = [
   "nautilus-common/extension-module",
   "nautilus-core/extension-module",
+  "nautilus-live?/extension-module",
   "nautilus-model/extension-module",
   "pyo3/extension-module",
   "python",
 ]
+live = ["dep:nautilus-live", "dep:tokio", "dep:tokio-util"]
+
 python = [
+  "live",
+  "dep:nautilus-system",
   "nautilus-common/python",
   "nautilus-core/python",
   "nautilus-model/python",
+  "nautilus-system/python",
   "pyo3",
   "pyo3-async-runtimes",
   "pyo3-stub-gen",
@@ -39,7 +45,7 @@ python = [
 high-precision = ["nautilus-model/high-precision"]
 
 [package.metadata.docs.rs]
-features = ["high-precision"]
+features = ["high-precision", "live"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
@@ -50,13 +56,21 @@ nautilus-network = { workspace = true }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+bon = { workspace = true }
 flate2 = { workspace = true }
+indexmap = { workspace = true }
 jiff = { workspace = true }
+log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 ustr = { workspace = true }
 zeroize = { workspace = true }
+
+nautilus-live = { workspace = true, optional = true }
+nautilus-system = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
 
 pyo3 = { workspace = true, optional = true }
 pyo3-async-runtimes = { workspace = true, optional = true }
