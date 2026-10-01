@@ -142,7 +142,18 @@ impl PortfolioStatistic for ValueAtRisk {
         }
 
         let returns = self.downsample_to_daily_bins(raw_returns);
-        let mut values: Vec<f64> = returns.values().copied().collect();
+
+        // A missing return cannot be ranked, so it is excluded rather than carried in the sample:
+        // carrying it would leave the count in the rank arithmetic and shift the quantile even
+        // though the value itself was never a value.
+        let mut values: Vec<f64> = returns
+            .values()
+            .copied()
+            .filter(|value| value.is_finite())
+            .collect();
+        if values.is_empty() {
+            return Some(f64::NAN);
+        }
         values.sort_by(f64::total_cmp);
 
         let alpha = 1.0 - self.confidence;

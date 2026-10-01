@@ -28,9 +28,13 @@ built, what was pruned and why. **D4, multiple-testing-aware reporting, is imple
 (`python/nautilus_trader/optimization/significance.py`): the statistical contract is declared whole,
 with an identity and a digest, and the deflated Sharpe ratio is computed under it from a sample that
 must declare its annualisation, its kurtosis convention and its trial dependence; section 4.4 records
-what was built, the ten decisions taken and the verification. Every other item remains **Not
-implemented** in section 6, and its mechanism in section 4 remains a specification rather than a
-description of code.
+what was built, the ten decisions taken and the verification. **D5, the classified numerical-stability obligation, is implemented**
+(`crates/analysis/src/kernel.rs`): every built-in statistic and the three shared kernels are assigned
+a class whose obligation is stated, the classification is checked against the registry in both
+directions, and the obligations are exercised per class, which found and fixed four missing-value
+defects and one summation that could not be trusted over a long series; section 4.5 records what was
+built, the defects and the verification. Every other item remains **Not implemented** in section 6,
+and its mechanism in section 4 remains a specification rather than a description of code.
 
 All three items were verified by execution, not inspection. D2: `pytest tests/unit/optimization` (54
 tests, including 31 for the contract), `pytest tests/integration/test_optimization.py` (9 tests,
@@ -46,8 +50,10 @@ unmodified. The identity contracts: `pytest tests/unit/optimization` runs 68 tes
 tests/integration/test_optimization.py` runs 10, all passing, including seven unit tests for the
 contracts and one integration test that proves two real sweeps of one study reproduce the result
 digest. D4: `pytest tests/unit/optimization/test_significance.py` runs 21 tests, all passing, and the
-formula is compared against a recomputation that shares no step with it and agrees to `1e-12`. The
-statement that no test was run applies to the probe alone.
+formula is compared against a recomputation that shares no step with it and agrees to `1e-12`. D5:
+`cargo nextest run -p nautilus-analysis --lib --features python` runs 319 tests, all passing,
+including eleven for the classification and its obligations, and `cargo clippy` with `-D warnings` is
+clean on the crate. The statement that no test was run applies to the probe alone.
 
 ### 1.2 Revision history
 
@@ -61,6 +67,7 @@ statement that no test was run applies to the probe alone.
 | 6       | D3 was implemented: `BarAmbiguityPolicy` names the four bar-derived assumptions (bar execution, the intrabar path, trigger precedence, the trigger fill rule and gap handling) with a policy id, a version and a digest; the declaration lives in a configuration file under `assumptions`, is refused as a configuration error when ambiguous, and the resolved policy is recorded in the emitted result document. No Rust type or behaviour changed, the default is named as the existing behaviour rather than changed, and the assumption-to-assertion map is documented and cited in section 4.3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 7       | The identity contracts were implemented: `StudyIdentity`, `TrialIdentity`, `TrialProvenance`, `DatasetIdentity`, `UniverseIdentity`, `ComputationIdentity` and `ResearchResult` with digests that compose from the digests that already exist, two closed vocabularies for the selection rule and the execution status, and bridges from an objective's terms, a split contract and an optimizer run. The field lists were pruned rather than filled in - the counts moved to a provenance record so a transient failure cannot move a study's identity, and the feature and label definitions were dropped because nothing in the repository computes either - and the contracts are not yet wired into the pipeline, which is recorded with its reason in section 4.11                                                                                                                                                                                                                                                                                                                                                                           |
 | 8       | D4 was implemented: `python/nautilus_trader/optimization/significance.py` declares the whole statistical contract with an identity and a digest (the return definition and compounding, the explicit risk-free treatment, the minimum observation and trial counts, the Sharpe frequency and divisor, the trial-variance estimator, the skew and non-excess-kurtosis estimators, the prohibition on annualised inputs, the missing-return rule, the duplicate-trial rule, the failed-trial rule and the required trial-independence declaration), computes the deflated Sharpe ratio under it with `unavailable` and `invalid` distinguished in D1's vocabulary, and records the study, its trials and their provenance in a report that digests stably. The annualised case and the excess-kurtosis case are refused at the boundary, a dependent study must declare its effective trial count, and the two thresholds are declared parameters with defaults the owner may replace. Section 4.4 records the decisions and the verification, and the correction is deliberately not wired into the emitted document, for the reason recorded there |
+| 9       | D5 was implemented: `crates/analysis/src/kernel.rs` declares the seven kernel classes with the cases each obliges, classifies every built-in statistic and the three shared kernels by their dominant numerical operation, and is checked against the registry in both directions so a new statistic cannot enter unclassified. The class obligations are exercised by eleven tests, including a missing-value rule (a kernel must propagate or completely exclude a missing observation, never keep it in a count or a rank), a divisor and minimum-observation case, and a dispersion comparison against a compensated two-pass computation. That comparison found `calculate_std` wrong by 0.71 relative on a hundred thousand values with a large offset; it now sums with Neumaier compensation and agrees to 1.6e-16. The rule also found and fixed four missing-value defects (`max_drawdown`, `value_at_risk`, `expected_shortfall` and `win_rate`). Section 4.5 records the decisions, the fixes and the verification                                                                                                                     |
 
 ### 1.3 Reference maps
 
@@ -602,7 +609,8 @@ decision and would need a sweep to compare over.
 
 ### 4.5 D5 Numerical-stability obligation, classified by kernel type
 
-**Specification to implement** (`design 9 L5`). Every research kernel that reduces, transforms or
+**Specification, implemented in revision 9** (`design 9 L5`); the implementation record and its
+deviations are at the end of this section. Every research kernel that reduces, transforms or
 estimates is classified, and its class determines the obligation. The classification table in
 `design 9 L5` is the specification, reproduced here with the obligations:
 
@@ -627,7 +635,85 @@ estimates is classified, and its class determines the obligation. The classifica
 **Acceptance and verification.** The classification exists for every research kernel, and for each
 kernel the obligation for its class is met. Parity alone is explicitly not the standard.
 
-**Not implemented.**
+**Implemented.** `crates/analysis/src/kernel.rs` holds the classification and its obligations, and
+the tests below exercise them. The work also found and fixed four kernels whose missing-value
+handling and one whose summation did not meet the obligation their class assigns them.
+
+| Item                                                                  | Where                                                                                                                     |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| The seven classes, each with its stable name and the cases it obliges | `kernel.rs` `KernelClass`, `KernelClass::ALL`, `as_str`, `obligation`                                                     |
+| The classification of every research kernel, with its source          | `kernel.rs` `KernelClassification`, `RESEARCH_KERNELS`, `classify`, `kernels_of_class`                                    |
+| The compensated summation the dispersion kernel now uses              | `statistic.rs` `compensated_sum`, called by `calculate_std`                                                               |
+| The missing-value rule, enforced where it was violated                | `statistics/max_drawdown.rs`, `statistics/value_at_risk.rs`, `statistics/expected_shortfall.rs`, `statistics/win_rate.rs` |
+| The concept documentation                                             | `docs/concepts/portfolio.md` section "Numerical stability of the research kernels"                                        |
+| The tests                                                             | `kernel.rs` test module, eleven tests                                                                                     |
+
+Facts the implementation fixes:
+
+1. **The class is the kernel's dominant numerical operation**, not a name for its output. A kernel
+   that aggregates without a denominator is a `reduction`; one that divides by a level, a level's
+   change or a count is a `normalization`; one that estimates a distribution parameter is a
+   `statistical_estimator`; one that accumulates along the series is `cumulative`; one that maps a
+   series to a series is a `transform`. Of the thirty-four built-in statistics, ten are reductions,
+   thirteen normalizations, eight statistical estimators and three cumulative, with the three shared
+   kernels (`calculate_std`, `downsample_to_daily_bins`, `align_returns`) classified beside them.
+2. **`rolling_reduction` and `label` have no member yet, and they are declared anyway.** A kernel
+   that joins them inherits an obligation rather than an exemption, and the table says so rather than
+   omitting the classes. This is the same reasoning as "a kernel that is not classified is an
+   incomplete obligation": an empty class is a statement about the crate, not a gap in the table.
+3. **The classification cannot drift from the statistics.** A test compares the table against
+   `builtin_statistics()` in both directions: every built-in statistic is classified, and every entry
+   whose source is under `statistics/` is a built-in statistic. Adding a statistic without
+   classifying it fails the test.
+4. **The missing-value rule is mechanical rather than a convention.** A kernel must either propagate
+   a missing observation (a non-finite result) or exclude it completely, and a test compares each
+   kernel's result on a series containing a missing observation against the same series without it.
+   The third outcome, keeping the observation in a count or a rank, is a silent reinterpretation and
+   is what the test detects. The rule is the kernel-level form of the reporting rule that a missing
+   return is excluded rather than zero-filled.
+5. **The dispersion kernel is compared against a compensated computation, not against its own twin.**
+   A hundred thousand values with a large offset relative to their spread is the adversarial case a
+   parity test cannot see: the previous plain summation was wrong by 0.71 relative to a compensated
+   two-pass computation, and the compensated kernel now agrees to 1.6e-16 (`statistic.rs`,
+   `compensated_sum`). The test asserts both halves, so it cannot pass by being vacuous: the kernel
+   must agree tightly *and* the naive form must still be materially wrong on the same input.
+6. **The divisor convention is pinned by an exact value.** `calculate_std` uses Bessel's correction
+   (the sample divisor `n - 1`), asserted on a two-element sample where the two conventions differ by
+   a factor of two, and the minimum-observation case yields `NaN` for one element and for none.
+
+The four missing-value defects found by the rule, and their fix:
+
+| Kernel               | Observed                                                                                                                                                         | Fix                                                                                                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `max_drawdown`       | A `NaN` return made the equity path unknown, every comparison against it false, and the kernel reported `-0.0` where the series without the return drew down 50% | A non-finite return propagates: the drawdown of an unknown path is unknown, and the kernel returns `NaN`                                                                              |
+| `value_at_risk`      | A `NaN` return was carried in the sample and kept its rank, shifting the quantile by a whole observation                                                         | Non-finite returns are excluded from the sample before ranking, and an empty sample returns `NaN`                                                                                     |
+| `expected_shortfall` | The same sample, so the tail and its bounding quantile could disagree                                                                                            | The same exclusion, because the value at risk and the tail it bounds must be taken from the same observed returns                                                                     |
+| `win_rate`           | A `NaN` PnL fell into the losers' bucket and counted in the denominator, deflating the rate from 0.5 to 0.33                                                     | A missing PnL is excluded: a trade that was not recorded is not a trade that lost. A recorded breakeven trade still counts, which is the pre-existing behaviour and its existing test |
+
+**Verified by execution.** `cargo nextest run -p nautilus-analysis --lib --features python` runs 319
+tests, all passing: the 308 pre-existing tests, including every statistic's own pinned value tests,
+and eleven new ones - the classification's completeness in both directions, the class vocabulary and
+its obligations, the missing-value rule over the returns, PnL and benchmark categories, the
+short-finite-series infinity rule, the divisor and minimum-observation case, the compensated
+dispersion comparison, the cumulative kernels against a log-space recomputation over a hundred
+thousand observations, the transform layout, and the order-independence of a reduction.
+`cargo clippy --locked -p nautilus-analysis --all-targets --features python -- -D warnings` is clean
+and `cargo fmt` is applied. `pytest tests/unit/analysis tests/unit/portfolio tests/unit/optimization
+tests/integration/test_optimization.py` and `pytest tests/regression/test_regression.py` pass with
+`python/tests/regression/expected` unmodified, so no published number moved: the four fixes change
+behaviour only for non-finite inputs, and the compensation changes a dispersion only where the plain
+sum's error was already comparable to the value.
+
+**Not measured.** The obligations that need inputs this crate cannot construct are exercised at the
+class level rather than per kernel: no test builds a `Position`, so the position-based `long_ratio`
+and the position category of the PnL statistics are covered only where they return `None`, and the
+benchmark-relative kernels are exercised with one synthetic benchmark pair rather than a family of
+market regimes. The `normalization` class's invariance clause is exercised as bracket-scale
+invariance only: this crate has no geometric normalization, so the translation-invariance clause has
+no member to test. The `rolling_reduction` and `label` obligations are declared and unexercised
+because no kernel occupies those classes. Whether the class assignments themselves are the right ones
+is a review question, not a measurement: the assignment is recorded per kernel with its source so it
+can be disagreed with in one place.
 
 ### 4.6 D6 Label and target policy framework, in tranches, with alignment
 
@@ -900,20 +986,20 @@ These are properties of vectorbt, recorded so that the same trap is not imported
 This table is the detailed verification plan. The minimum acceptance contract per decision, which is
 what makes the design independently reviewable, is stated in `design 13.1`.
 
-| Item                                | Acceptance                                                                                                                                                                            | Verification                                                                                                                                              | Status                                                                                                                                                                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1 Metric identity                  | Identity, title, units, tags and direction declared; a four-state status with domain-owned reason codes                                                                               | One test covering computed, unavailable, invalid and unregistered in a single result; `invalid` versus `unavailable` on one metric; closed sets           | Implemented (4.1); 308 analysis crate tests and 365 Python tests pass, including seven contract tests; clippy clean; the vocabulary's membership is a proposal the owner may replace                                            |
-| D2 Split contract                   | Any series length and any set-length mixture; a leakage relation expressing purge before, purge after, embargo after and a label overlap rule; a zero interval that must be justified | Contract tests, a label-overlap test, a refusal test, a zero-interval justification test, three-exclusion expressibility, window equality after migration | Implemented (4.2); 31 contract tests, 23 configuration tests, 9 integration tests and `optimization_golden` pass                                                                                                                |
-| D3 Ambiguity policy                 | Every assumption documented, ambiguous configurations rejected, an identity recorded in the result, the policy distinct from execution simulation, the default named by the owner     | Assumption-to-test mapping, rejection test, identity in the result, policy-version distinguishability, a test asserting the named default                 | Implemented (4.3); 61 optimization tests pass, including seven for the policy; the regression scenarios pass with expectations unmodified; the default is named as the existing behaviour, so replacing it is an owner decision |
-| D4 Multiple-testing reporting       | Study and trial identity recorded; the full statistical contract specified before testing; reported and never a gate                                                                  | Nine acceptance cases from section 4.4, including dependent trials and the annualisation rejection                                                        | Implemented (4.4); 21 unit tests pass and the formula agrees with an independent recomputation to 1e-12; the two defaults are declared and replaceable, and the value is never a gate                                           |
-| D5 Numerical stability              | Each kernel classified by class, and the obligation for its class met; running variance compared against an independent method                                                        | The classification exists and each kernel has its class obligation                                                                                        | Not implemented                                                                                                                                                                                                                 |
-| D6 Labels                           | The first tranche exists only on the target path, the definition includes the alignment convention, a leakage test fails if a label value is read as a feature                        | Hand-computed asymmetric case, wait case, both alignment pairings, leakage test; per-instrument test in the second tranche                                | Not implemented                                                                                                                                                                                                                 |
-| D7 Parity protocol                  | A written protocol exists and is linked from the owning crate; not a research prerequisite                                                                                            | The document and its link; the checklist applies only if a second implementation appears                                                                  | Not implemented                                                                                                                                                                                                                 |
-| D8 Capability results               | One shared shape with domain-scoped closed code sets; nothing branches on detail text                                                                                                 | Two refusal cases per domain, and a source test against detail matching                                                                                   | Not implemented                                                                                                                                                                                                                 |
-| D9 Cache                            | No acceptance criterion while deferred; if triggered, the key is the identity model and cached and uncached runs agree                                                                | Deferred                                                                                                                                                  | Not implemented                                                                                                                                                                                                                 |
-| D10 Provider adapter                | No acceptance criterion in this document                                                                                                                                              | Belongs to the data-provider architecture review                                                                                                          | Not implemented                                                                                                                                                                                                                 |
-| D11 Schema ownership                | No acceptance criterion: the decision is to change nothing                                                                                                                            | Not applicable                                                                                                                                            | Not implemented                                                                                                                                                                                                                 |
-| Identity contracts (no decision id) | A result cannot be produced without a study identity; the trial identity is sufficient to re-run a trial; field lists are pruned, not filled in                                       | Construction-level assertion, digest stability, kernel-version change reflected in the implementation identity, trial re-run                              | Implemented (4.11); 68 optimization unit tests and 10 integration tests pass, including the two-sweep digest equality; the field lists were pruned and each pruning is justified in 4.11                                        |
+| Item                                | Acceptance                                                                                                                                                                            | Verification                                                                                                                                              | Status                                                                                                                                                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1 Metric identity                  | Identity, title, units, tags and direction declared; a four-state status with domain-owned reason codes                                                                               | One test covering computed, unavailable, invalid and unregistered in a single result; `invalid` versus `unavailable` on one metric; closed sets           | Implemented (4.1); 308 analysis crate tests and 365 Python tests pass, including seven contract tests; clippy clean; the vocabulary's membership is a proposal the owner may replace                                                  |
+| D2 Split contract                   | Any series length and any set-length mixture; a leakage relation expressing purge before, purge after, embargo after and a label overlap rule; a zero interval that must be justified | Contract tests, a label-overlap test, a refusal test, a zero-interval justification test, three-exclusion expressibility, window equality after migration | Implemented (4.2); 31 contract tests, 23 configuration tests, 9 integration tests and `optimization_golden` pass                                                                                                                      |
+| D3 Ambiguity policy                 | Every assumption documented, ambiguous configurations rejected, an identity recorded in the result, the policy distinct from execution simulation, the default named by the owner     | Assumption-to-test mapping, rejection test, identity in the result, policy-version distinguishability, a test asserting the named default                 | Implemented (4.3); 61 optimization tests pass, including seven for the policy; the regression scenarios pass with expectations unmodified; the default is named as the existing behaviour, so replacing it is an owner decision       |
+| D4 Multiple-testing reporting       | Study and trial identity recorded; the full statistical contract specified before testing; reported and never a gate                                                                  | Nine acceptance cases from section 4.4, including dependent trials and the annualisation rejection                                                        | Implemented (4.4); 21 unit tests pass and the formula agrees with an independent recomputation to 1e-12; the two defaults are declared and replaceable, and the value is never a gate                                                 |
+| D5 Numerical stability              | Each kernel classified by class, and the obligation for its class met; running variance compared against an independent method                                                        | The classification exists and each kernel has its class obligation                                                                                        | Implemented (4.5); 319 analysis tests pass, the dispersion kernel agrees with a compensated computation to 1.6e-16 where the plain summation was wrong by 0.71, and four missing-value defects in the statistics were found and fixed |
+| D6 Labels                           | The first tranche exists only on the target path, the definition includes the alignment convention, a leakage test fails if a label value is read as a feature                        | Hand-computed asymmetric case, wait case, both alignment pairings, leakage test; per-instrument test in the second tranche                                | Not implemented                                                                                                                                                                                                                       |
+| D7 Parity protocol                  | A written protocol exists and is linked from the owning crate; not a research prerequisite                                                                                            | The document and its link; the checklist applies only if a second implementation appears                                                                  | Not implemented                                                                                                                                                                                                                       |
+| D8 Capability results               | One shared shape with domain-scoped closed code sets; nothing branches on detail text                                                                                                 | Two refusal cases per domain, and a source test against detail matching                                                                                   | Not implemented                                                                                                                                                                                                                       |
+| D9 Cache                            | No acceptance criterion while deferred; if triggered, the key is the identity model and cached and uncached runs agree                                                                | Deferred                                                                                                                                                  | Not implemented                                                                                                                                                                                                                       |
+| D10 Provider adapter                | No acceptance criterion in this document                                                                                                                                              | Belongs to the data-provider architecture review                                                                                                          | Not implemented                                                                                                                                                                                                                       |
+| D11 Schema ownership                | No acceptance criterion: the decision is to change nothing                                                                                                                            | Not applicable                                                                                                                                            | Not implemented                                                                                                                                                                                                                       |
+| Identity contracts (no decision id) | A result cannot be produced without a study identity; the trial identity is sufficient to re-run a trial; field lists are pruned, not filled in                                       | Construction-level assertion, digest stability, kernel-version change reflected in the implementation identity, trial re-run                              | Implemented (4.11); 68 optimization unit tests and 10 integration tests pass, including the two-sweep digest equality; the field lists were pruned and each pruning is justified in 4.11                                              |
 
 ## 7. Explicit non-goals
 
@@ -966,8 +1052,12 @@ what makes the design independently reviewable, is stated in `design 13.1`.
    implementation rather than by an owner decision, because a closed set is mechanically replaceable
    and the mechanism does not depend on which members it holds. The owner can still replace the
    membership without touching the contract.
-6. The kernel classification is incomplete until every research kernel is assigned a class. This gates
-   D5.
+6. The kernel classification now exists (section 4.5): every built-in statistic and the three shared
+   kernels are assigned a class, a test compares the table against the registry in both directions so
+   a new statistic cannot enter unclassified, and the obligations are exercised per class. Two classes
+   (`rolling_reduction` and `label`) are declared with no member yet, and the position categories are
+   covered only where they return `None`, because this crate cannot construct a `Position` in a unit
+   test; whether the class assignments are the right ones remains a review question.
 7. What constitutes dataset identity is the largest open question, and it gates the reproducibility of
    every study rather than any single decision. The contract now declares the seven fields (section
    4.11) and its caller makes the declaration; which of them a catalog can *derive* remains open,

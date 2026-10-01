@@ -22,6 +22,28 @@ use crate::{Returns, metric::MetricDefinition};
 
 const IMPL_ERR: &str = "is not implemented for";
 
+/// Returns the sum of the values with Neumaier compensation.
+///
+/// The compensation term carries the rounding error of each addition, so the sum's error stays
+/// independent of the number of additions rather than growing with it. It is the difference
+/// between a dispersion estimate that keeps its precision over a long series and one that does not.
+fn compensated_sum(values: impl Iterator<Item = f64>) -> f64 {
+    let mut sum = 0.0;
+    let mut compensation = 0.0;
+
+    for value in values {
+        let tentative = sum + value;
+        compensation += if sum.abs() >= value.abs() {
+            (sum - tentative) + value
+        } else {
+            (value - tentative) + sum
+        };
+        sum = tentative;
+    }
+
+    sum + compensation
+}
+
 /// Trait for portfolio performance statistics that can be calculated from different data sources.
 ///
 /// This trait provides a flexible framework for implementing various financial performance
@@ -143,15 +165,20 @@ pub trait PortfolioStatistic: Debug {
     }
 
     /// Calculates the standard deviation of returns with Bessel's correction.
+    ///
+    /// The mean and the squared deviations are summed with compensation, not plainly. A plain sum
+    /// over a long series of values with a large offset carries a rounding error that grows with
+    /// the number of additions, and once that error is comparable to the deviations themselves the
+    /// dispersion loses most of its significant digits.
     fn calculate_std(&self, returns: &Returns) -> f64 {
         let n = returns.len() as f64;
         if n < 2.0 {
             return f64::NAN;
         }
 
-        let mean = returns.values().sum::<f64>() / n;
+        let mean = compensated_sum(returns.values().copied()) / n;
 
-        let variance = returns.values().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0);
+        let variance = compensated_sum(returns.values().map(|x| (x - mean).powi(2))) / (n - 1.0);
 
         variance.sqrt()
     }

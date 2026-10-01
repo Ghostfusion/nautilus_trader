@@ -392,6 +392,46 @@ non-finite input or a degenerate series; `NOT_REGISTERED` means the metric is no
 at all. A name-keyed dictionary cannot distinguish the last two from a metric that was simply never
 asked for, so a data defect would look like an applicability rule.
 
+## Numerical stability of the research kernels
+
+A statistic that reduces, transforms or estimates over returns is held to a numerical standard, and
+the standard is **classified rather than blanket**: every reducing kernel passing a full adversarial
+suite would be an unbounded audit, so each kernel is assigned a class and the class states the cases
+it owes. A trivial kernel carries a trivial obligation and says so; a dispersion estimator carries
+the heavy one.
+
+| Class                   | Obligation                                                                                                             |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `reduction`             | Empty input, single element, missing-value propagation, layout independence                                            |
+| `rolling_reduction`     | The reduction cases, plus running-variance stability over a long series and a minimum period greater than the length   |
+| `cumulative`            | The reduction cases, plus overflow, underflow and catastrophic cancellation                                            |
+| `normalization`         | The reduction cases, plus invariance under scaling, and a zero-denominator case                                        |
+| `statistical_estimator` | The reduction cases, plus a documented divisor convention, a minimum-observation case and an independent recomputation |
+| `transform`             | Empty input, single element, missing-value edges and layout                                                            |
+| `label`                 | The transform cases, plus the wait convention and a leakage boundary                                                   |
+
+`crates/analysis/src/kernel.rs` is the classification: the class of every built-in statistic and of
+the three shared kernels (`calculate_std`, `downsample_to_daily_bins`, `align_returns`), each beside
+the file it lives in. A kernel that is not classified is an incomplete obligation rather than an
+exempt one, so a test compares the classification against the statistic registry in both directions:
+adding a statistic without classifying it fails. `rolling_reduction` and `label` are declared with no
+member yet - nothing in the crate is windowed, and the label kernels arrive with the research
+surface - because a class that a kernel will join should state its obligation in advance rather than
+grant an exemption by omission.
+
+Two of the obligations are worth stating in full, because both are rules rather than test names:
+
+- **A missing observation is propagated or excluded, never reinterpreted.** A kernel may return a
+  non-finite value when an observation is missing, or ignore the observation completely, but it may
+  not keep it in a count or a rank and treat it as data. Each kernel is compared on a series with a
+  missing return against the same series without it.
+- **A dispersion is compared against a compensated computation, not against its own twin.** Two
+  implementations can agree and both be wrong, so the reference is an independent method: over a
+  hundred thousand values with a large offset relative to their spread, `calculate_std` now agrees
+  with a compensated two-pass computation to `1.6e-16`, where a plain summation was wrong by `0.71`
+  relative. The divisor convention is pinned at the same time: the sample divisor `n - 1`, asserted
+  on a sample where the population divisor would differ by a factor of two.
+
 ## Returns: position vs portfolio
 
 The analyzer tracks two distinct return series:

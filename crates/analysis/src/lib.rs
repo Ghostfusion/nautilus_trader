@@ -76,6 +76,7 @@
 )]
 
 pub mod analyzer;
+pub mod kernel;
 pub mod metric;
 pub mod objective;
 pub mod snapshot;

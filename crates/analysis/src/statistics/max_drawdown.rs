@@ -83,6 +83,13 @@ impl PortfolioStatistic for MaxDrawdown {
             return Some(0.0);
         }
 
+        // A missing or non-finite return makes the equity path unknown, so the value propagates:
+        // a comparison against NaN is false, so without this the loop would silently skip the
+        // observation and report a spurious "no drawdown" where the path cannot be computed.
+        if returns.values().any(|value| !value.is_finite()) {
+            return Some(f64::NAN);
+        }
+
         // Calculate cumulative returns starting from 1.0
         let mut cumulative = 1.0;
         let mut running_max = 1.0;

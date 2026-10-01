@@ -122,8 +122,19 @@ impl PortfolioStatistic for ExpectedShortfall {
         // Downsample and sort once; both the VaR threshold and the tail it bounds
         // are taken from this same daily-binned, value-sorted sample, keeping them
         // consistent by construction and avoiding a second downsample + sort.
+        //
+        // A missing return is excluded from that sample for the same reason it is excluded from the
+        // value at risk: a value that cannot be ranked must not carry a rank, and the tail must be
+        // the tail of the returns that were observed.
         let returns = self.downsample_to_daily_bins(raw_returns);
-        let mut values: Vec<f64> = returns.values().copied().collect();
+        let mut values: Vec<f64> = returns
+            .values()
+            .copied()
+            .filter(|value| value.is_finite())
+            .collect();
+        if values.is_empty() {
+            return Some(f64::NAN);
+        }
         values.sort_by(f64::total_cmp);
 
         let alpha = 1.0 - self.confidence;

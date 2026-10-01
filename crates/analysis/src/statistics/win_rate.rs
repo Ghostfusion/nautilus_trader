@@ -75,15 +75,16 @@ impl PortfolioStatistic for WinRate {
     }
 
     fn calculate_from_realized_pnls(&self, realized_pnls: &[f64]) -> Option<Self::Item> {
-        if realized_pnls.is_empty() {
+        // A missing PnL is excluded rather than counted as a losing trade: a trade that was not
+        // recorded is not a trade that lost, and counting it would deflate the rate. A recorded
+        // breakeven trade is still a trade and stays in the denominator.
+        let contributing = realized_pnls.iter().filter(|pnl| pnl.is_finite()).count();
+        if contributing == 0 {
             return Some(f64::NAN);
         }
 
-        let (winners, losers): (Vec<f64>, Vec<f64>) =
-            realized_pnls.iter().partition(|&&pnl| pnl > 0.0);
-
-        let total_trades = winners.len() + losers.len();
-        Some(winners.len() as f64 / total_trades.max(1) as f64)
+        let winners = realized_pnls.iter().filter(|pnl| **pnl > 0.0).count();
+        Some(winners as f64 / contributing as f64)
     }
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {
         None
