@@ -185,21 +185,8 @@ impl EodhdHttpClient {
 
         let url = format!("{}/us-quote-delayed", self.base_url);
         let body = self.request(&url, &params).await?;
-        let response: EodhdDelayedQuoteResponse = serde_json::from_slice(&body).map_err(|e| {
-            Error::ResponseParse(format!(
-                "{url}: {e} | body starts with {:?}",
-                body_preview(&body)
-            ))
-        })?;
 
-        response
-            .data
-            .into_values()
-            .next()
-            .ok_or_else(|| Error::ApiError {
-                status: SUCCESS_STATUS,
-                message: format!("no delayed quote returned for {ticker}"),
-            })
+        parse_delayed_quote(&body, &url, ticker)
     }
 
     /// Returns the symbol list for `exchange`, where `exchange` is an EODHD exchange code.
@@ -292,6 +279,25 @@ fn body_preview(body: &[u8]) -> String {
     String::from_utf8_lossy(&body[..end]).to_string()
 }
 
+/// Parses a delayed quote response, taking the row the provider keyed by ticker.
+fn parse_delayed_quote(body: &[u8], url: &str, ticker: &str) -> Result<EodhdDelayedQuote> {
+    let response: EodhdDelayedQuoteResponse = serde_json::from_slice(body).map_err(|e| {
+        Error::ResponseParse(format!(
+            "{url}: {e} | body starts with {:?}",
+            body_preview(body)
+        ))
+    })?;
+
+    response
+        .data
+        .into_values()
+        .next()
+        .ok_or_else(|| Error::ApiError {
+            status: SUCCESS_STATUS,
+            message: format!("no delayed quote returned for {ticker}"),
+        })
+}
+
 /// Parses a JSON array body, surfacing the provider's own error envelope when present.
 ///
 /// EODHD answers most failures with an HTTP 200 and an error object rather than an error status,
@@ -365,6 +371,63 @@ mod tests {
         assert!(matches!(
             result,
             Err(Error::ApiError { message, .. }) if message == "Not found"
+        ));
+    }
+
+    #[rstest]
+    fn test_parse_delayed_quote_reads_the_quote_fields() {
+        let body = br#"{
+            "meta": {"count": 1},
+            "data": {
+                "AAPL.US": {
+                    "symbol": "AAPL.US",
+                    "exchange": "XNAS",
+                    "name": "Apple",
+                    "open": 330,
+                    "high": 332.4816,
+                    "low": 325.81,
+                    "bidPrice": 330.46,
+                    "askPrice": 330.57,
+                    "askSize": 2,
+                    "bidSize": 12,
+                    "bidTime": 1790886551000,
+                    "askTime": 1790886551000,
+                    "lastTradePrice": 330.55,
+                    "previousClosePrice": 330.32,
+                    "currency": "USD",
+                    "timestamp": 1790900940
+                }
+            },
+            "links": {"next": null}
+        }"#;
+
+        let quote = parse_delayed_quote(body, "test", "AAPL.US").unwrap();
+
+        assert_eq!(quote.symbol, "AAPL.US");
+        assert_eq!(quote.bid_price, 330.46);
+        assert_eq!(quote.ask_price, 330.57);
+        assert_eq!(quote.bid_size, 12.0);
+        assert_eq!(quote.ask_size, 2.0);
+        assert_eq!(quote.ts_event().as_u64(), 1_790_886_551_000_000_000);
+    }
+
+    #[rstest]
+    fn test_parse_delayed_quote_falls_back_to_the_snapshot_time() {
+        let body = br#"{"data": {"AAPL.US": {"symbol": "AAPL.US", "bidPrice": 1.0,
+            "askPrice": 1.1, "bidSize": 1, "askSize": 1, "timestamp": 1790900940}}}"#;
+
+        let quote = parse_delayed_quote(body, "test", "AAPL.US").unwrap();
+
+        assert_eq!(quote.ts_event().as_u64(), 1_790_900_940_000_000_000);
+    }
+
+    #[rstest]
+    fn test_parse_delayed_quote_rejects_an_empty_payload() {
+        let result = parse_delayed_quote(br#"{"data": {}}"#, "test", "AAPL.US");
+
+        assert!(matches!(
+            result,
+            Err(Error::ApiError { message, .. }) if message.contains("AAPL.US")
         ));
     }
 

@@ -824,6 +824,44 @@ mod tests {
         assert!(emitter.consider(bar(1_700_000_120, 102.0)).is_some());
     }
 
+    fn delayed_quote() -> EodhdDelayedQuote {
+        EodhdDelayedQuote {
+            symbol: "AAPL.US".to_string(),
+            bid_price: 330.46,
+            ask_price: 330.57,
+            bid_size: 12.0,
+            ask_size: 2.0,
+            bid_time: Some(1_790_886_551_000),
+            ask_time: Some(1_790_886_551_000),
+            timestamp: Some(1_790_900_940),
+        }
+    }
+
+    #[rstest]
+    fn test_build_quote_maps_the_snapshot_onto_a_quote_tick() {
+        let quote = delayed_quote();
+        let ts_event = quote.ts_event();
+        let instrument_id = InstrumentId::from("AAPL.US");
+
+        let tick = build_quote(instrument_id, &quote, 2, ts_event, ts_event).unwrap();
+
+        assert_eq!(tick.instrument_id, instrument_id);
+        assert_eq!(tick.bid_price, Price::new(330.46, 2));
+        assert_eq!(tick.ask_price, Price::new(330.57, 2));
+        assert_eq!(tick.bid_size, Quantity::new(12.0, 0));
+        assert_eq!(tick.ask_size, Quantity::new(2.0, 0));
+        assert_eq!(tick.ts_event.as_u64(), 1_790_886_551_000_000_000);
+    }
+
+    #[rstest]
+    fn test_ts_event_prefers_the_quote_time_over_the_snapshot_time() {
+        let mut quote = delayed_quote();
+        quote.bid_time = Some(1_790_886_560_000);
+        quote.ask_time = Some(1_790_886_570_000);
+
+        assert_eq!(quote.ts_event().as_u64(), 1_790_886_570_000_000_000);
+    }
+
     #[rstest]
     fn test_fetch_bars_rejects_an_unsupported_spec_before_any_request() {
         let spec = BarSpecification::new(15, BarAggregation::Minute, PriceType::Last);
