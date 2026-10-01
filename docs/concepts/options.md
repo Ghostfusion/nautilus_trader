@@ -31,6 +31,58 @@ Greeks-relevant metadata varies by instrument type:
 - `BinaryOption`: has `expiration_ns` and `outcome`/`description`, but no
   `strike_price`, `option_kind`, or `underlying`.
 
+## Exercise style and pricing
+
+An option's early exercise right changes its value, so the exercise style is declared on the
+instrument rather than assumed per chain. `OptionContract` declares `ExerciseStyle::American` by
+default, the listed equity convention, and can be built with `with_exercise_style` for a European
+contract; `CryptoOption` declares `ExerciseStyle::European`. `Instrument::exercise_style` returns the
+declaration for an option and `None` for anything else.
+
+Pricing selects its model from that declaration. `nautilus_model::data::price_option` prices a
+European option with the existing closed form and an American one with a Cox-Ross-Rubinstein
+binomial tree (`CoxRossRubinstein`, with a configurable step count), both behind the same
+`OptionPricingModel` interface, so another scheme can replace the tree without changing callers.
+`OptionPricingParams` carries the cost of carry, so `b = r - q` is Black-Scholes with a dividend
+yield and `b = 0` is Black-76 on a futures-style underlying.
+
+A tree price is an approximation: the CRR error is `O(1/N)` with an oscillating term, so the tree's
+convergence is bounded and tested rather than asserted, and the tests check the identities an
+American price must satisfy (it dominates the European price and the intrinsic value, and an American
+call with no dividend equals the European call) instead of pinning an unsourced value.
+
+`implied_forward_from_parity` derives the implied forward of the underlying from a call and a put at
+one strike, `F = K + (C - P) * exp(r * T)`, for comparison against the market's forward.
+
+## Volatility surface
+
+`nautilus_model::data::volatility_surface` builds a surface from an option chain as a subsystem with
+declared inputs and limits.
+
+**Observations.** Each observation carries the instrument, strike, expiry, option kind, bid, ask,
+optional volume and timestamp. The filters are named and each rejection is counted by reason: an
+invalid quote, a crossed market, a bid below the minimum, a spread above the maximum, a time to
+expiry below the minimum, a volume below the minimum, and a stale observation by age.
+
+**Coordinates.** Total implied variance against log moneyness, with time to expiry as the second
+axis. The forward is either supplied or derived from put call parity.
+
+**Interpolation and extrapolation.** Within the quoted region, total variance is interpolated
+piecewise linearly against log moneyness, which preserves the observations' monotonicity between
+nodes and its convexity, so the interpolant cannot introduce a butterfly arbitrage the data did not
+have. Beyond the quoted range total variance is held flat, and every query reports whether it was
+extrapolated. Total variance must not decrease in time to expiry at a log moneyness, and the
+monotonicity, convexity and calendar conditions are validated and reported: a surface that fails them
+is refused rather than repaired. A slice the interpolation family cannot make satisfy the conditions
+can fall back to a fitted parameterised arbitrage-free family (an SVI slice) whose own constraints
+are checked.
+
+**Calibration and confidence.** Calibration is triggered on demand, on a time interval or on a count
+of new observations; a set below the declared minimum (three usable observations per expiry slice and
+two slices) is refused with a typed error rather than fitted. Every query returns the number of
+contributing observations, a fit error derived from the residuals at the observed points, and the
+extrapolation flag.
+
 ## Subscribing to Greeks
 
 Venues like Deribit, Bybit, and OKX publish real-time Greeks alongside their options markets.

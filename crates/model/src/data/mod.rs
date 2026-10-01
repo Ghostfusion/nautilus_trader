@@ -42,6 +42,7 @@ pub mod quote;
 pub mod registry;
 pub mod status;
 pub mod trade;
+pub mod volatility_surface;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod stubs;
@@ -114,6 +115,12 @@ pub use registry::{
 };
 pub use status::InstrumentStatus;
 pub use trade::TradeTick;
+pub use volatility_surface::{
+    ArbitrageViolation, CalibrationTrigger, ForwardSource, MIN_OBSERVATIONS_PER_SLICE,
+    MIN_SLICES_FOR_CALENDAR, RejectionCounts, SliceFallback, SurfaceConfig, SurfaceError,
+    SurfaceFilters, SurfaceObservation, SurfacePriceSource, SurfaceQuery, SurfaceRejection,
+    SurfaceScheme, SviParams, VarianceNode, VolatilitySlice, VolatilitySurface,
+};
 
 /// Arrow schema-map name for compact string enum columns.
 pub const ARROW_ENUM_DICTIONARY: &str = "Dictionary(Int8, Utf8)";
