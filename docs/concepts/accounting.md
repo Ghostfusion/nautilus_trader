@@ -149,6 +149,21 @@ The accounting and valuation paths also follow these rules:
 See [Portfolio](portfolio.md#equity-and-mark-to-market) for equity formulas, price and xrate selection, snapshot
 metadata, and missing-price query scope.
 
+## Accounting authority
+
+The portfolio and the account model are the **only** authority for position state, realised PnL,
+unrealised PnL, and margin. Nothing else recomputes those values from fills, prices, or balances;
+every consumer reads them back from the portfolio or the account.
+
+The performance-period frame is the only periodic reduction of that authority. Each frame row is a
+difference of the portfolio's own realised and unrealised PnL, equity, and exposure counts between
+two snapshots, so the frame is a projection of the authority and never a second ledger that can
+disagree with it.
+
+Any new component that touches PnL must either consume the portfolio for its numbers or state in
+its own documentation why it does not. A component that keeps a parallel PnL ledger is a defect,
+not a feature.
+
 ## Margin scopes
 
 A `MarginBalance` has four fields: `initial`, `maintenance`, `currency`, and an

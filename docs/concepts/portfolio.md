@@ -3,6 +3,10 @@
 The Portfolio maintains account and position-derived state for a trading node or backtest. Strategies
 use it to query accounts, PnL, exposure, margin, equity, and performance statistics.
 
+The portfolio and the account model are the only authority for position, realised PnL, unrealised
+PnL, and margin; the performance-period frame is the only periodic reduction of them. See
+[Accounting](accounting.md#accounting-authority) for the rule that every PnL consumer must follow.
+
 ## Currency conversion
 
 The Python `Portfolio` can convert PnL and exposure from native cost currencies to an account base
