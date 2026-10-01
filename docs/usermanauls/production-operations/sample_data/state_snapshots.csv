@@ -1,0 +1,4 @@
+ts_event_ns,run_id,strategy_id,event,quote_count,orders_submitted,orders_denied,net_position_qty
+1546383600000000000,RUN-001,RUNWAY-001,on_save,120,4,2,200000
+1546383719000000000,RUN-001,RUNWAY-001,on_save,120,6,4,200000
+1546383720000000000,RUN-002,RUNWAY-001,on_load,120,6,4,200000
