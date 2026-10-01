@@ -16,6 +16,7 @@ This approach combines Python's simplicity and ecosystem with Rust's performance
 - [Design Principles](design_principles.md)
 - [Callback Dispatch Contract](callback_dispatch.md)
 - [Runtime Conformance Contract](runtime_conformance.md)
+- [Secondary Implementation Parity Protocol](parity_protocol.md)
 - [Coding Standards](coding_standards.md)
 - [Shell](shell.md)
 - [Rust](rust.md)

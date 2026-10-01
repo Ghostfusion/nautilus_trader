@@ -9,6 +9,10 @@ Python bindings for [NautilusTrader](https://nautilustrader.io).
 The `nautilus-pyo3` crate provides all [PyO3](https://pyo3.rs) Python bindings for the
 main `nautilus_trader` Python package, built via [maturin](https://github.com/PyO3/maturin).
 
+This crate owns the boundary between the two implementations of the engine, so the
+[secondary implementation parity protocol](../../docs/developer_guide/parity_protocol.md) applies to
+changes that introduce or extend a second implementation of one kernel.
+
 ## NautilusTrader
 
 [NautilusTrader](https://nautilustrader.io) is an open-source, production-grade, Rust-native
