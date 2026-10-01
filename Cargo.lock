@@ -6761,6 +6761,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "nautilus-research"
+version = "0.65.0"
+dependencies = [
+ "anyhow",
+ "arrow 59.3.0",
+ "blake3",
+ "nautilus-core",
+ "nautilus-model",
+ "nautilus-persistence",
+ "nautilus-serialization",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "nautilus-risk"
 version = "0.65.0"
 dependencies = [

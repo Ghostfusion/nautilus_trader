@@ -124,6 +124,9 @@ audit-as-crates-io = false
 [policy.nautilus-pyo3]
 audit-as-crates-io = false
 
+[policy.nautilus-research]
+audit-as-crates-io = false
+
 [policy.nautilus-risk]
 audit-as-crates-io = false
 

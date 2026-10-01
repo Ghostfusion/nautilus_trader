@@ -1,0 +1,39 @@
+[package]
+name = "nautilus-research"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Point-in-time research datasets for the Nautilus trading engine"
+categories.workspace = true
+keywords.workspace = true
+documentation.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "nautilus_research"
+crate-type = ["rlib"]
+
+[package.metadata.cargo-machete]
+ignored = ["arrow"] # Used by `arrow_custom_data` macro expansion
+
+[dependencies]
+nautilus-core = { workspace = true }
+nautilus-model = { workspace = true }
+nautilus-persistence = { workspace = true }
+nautilus-serialization = { workspace = true, features = ["arrow"] }
+
+anyhow = { workspace = true }
+arrow = { workspace = true } # Used by `arrow_custom_data` macro expansion
+blake3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
