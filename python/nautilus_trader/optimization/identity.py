@@ -678,6 +678,7 @@ def objective_definition_from_terms(
     }
 
     declared: list[object] = []
+
     for term in terms:
         direction = directions.get(term.direction)
         if direction is None:
