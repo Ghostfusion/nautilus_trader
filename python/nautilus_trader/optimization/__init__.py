@@ -24,6 +24,11 @@ windows come from a split contract that states which observations the evaluation
 excludes from training, rather than from an implicit time distance.
 """
 
+from nautilus_trader.optimization.assumptions import BarAmbiguityPolicy as BarAmbiguityPolicy
+from nautilus_trader.optimization.assumptions import GapHandling as GapHandling
+from nautilus_trader.optimization.assumptions import IntrabarPath as IntrabarPath
+from nautilus_trader.optimization.assumptions import TriggerFill as TriggerFill
+from nautilus_trader.optimization.assumptions import TriggerPrecedence as TriggerPrecedence
 from nautilus_trader.optimization.concurrency import ConcurrencyPolicy as ConcurrencyPolicy
 from nautilus_trader.optimization.config import ConfigError as ConfigError
 from nautilus_trader.optimization.config import OptimizationConfig as OptimizationConfig
@@ -61,6 +66,7 @@ from nautilus_trader.optimization.stages import walk_forward_windows as walk_for
 
 __all__ = [
     "BacktestRunner",
+    "BarAmbiguityPolicy",
     "CanonicalRun",
     "ConcurrencyPolicy",
     "ConfigError",
@@ -68,7 +74,9 @@ __all__ = [
     "ExperimentResult",
     "ExperimentStore",
     "FailedExperiment",
+    "GapHandling",
     "GridSearch",
+    "IntrabarPath",
     "LabelOverlapRule",
     "LeakagePolicy",
     "OptimizationConfig",
@@ -83,6 +91,8 @@ __all__ = [
     "SplitContract",
     "SplitDirection",
     "TrainStage",
+    "TriggerFill",
+    "TriggerPrecedence",
     "ValidateStage",
     "ValidationResult",
     "WalkForwardReport",

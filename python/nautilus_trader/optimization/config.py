@@ -57,6 +57,7 @@ from nautilus_trader.common import LogLevel
 from nautilus_trader.common import init_logging
 from nautilus_trader.core import UUID4
 from nautilus_trader.model import TraderId
+from nautilus_trader.optimization.assumptions import BarAmbiguityPolicy
 from nautilus_trader.optimization.concurrency import ConcurrencyPolicy
 from nautilus_trader.optimization.optimizer import Optimizer
 from nautilus_trader.optimization.persistence import ExperimentStore
@@ -129,8 +130,12 @@ _TOP_LEVEL_KEYS = frozenset(
         "stage",
         "concurrency",
         "store",
+        "assumptions",
     },
 )
+
+# The keys of the declared execution assumptions, spelled as the venue configuration spells them.
+_ASSUMPTION_KEYS = frozenset({"bar_execution", "adaptive_high_low_ordering"})
 
 
 class ConfigError(ValueError):
@@ -214,6 +219,8 @@ class OptimizationConfig:
         The memory-driven concurrency policy.
     store_directory : str | None
         The persistence directory, or None when results are not persisted.
+    assumptions : BarAmbiguityPolicy
+        The declared bar-derived execution assumptions, defaulting to the declared default.
 
     """
 
@@ -226,6 +233,7 @@ class OptimizationConfig:
     end: int | None = None
     concurrency: ConcurrencyPolicy = field(default_factory=ConcurrencyPolicy)
     store_directory: str | None = None
+    assumptions: BarAmbiguityPolicy = field(default_factory=BarAmbiguityPolicy.declared_default)
 
 
 def load_config(path: str | Path) -> OptimizationConfig:
@@ -285,7 +293,36 @@ def parse_config(payload: object) -> OptimizationConfig:
         end=end,
         concurrency=_parse_concurrency(document.get("concurrency")),
         store_directory=_parse_store(document.get("store")),
+        assumptions=_parse_assumptions(document.get("assumptions")),
     )
+
+
+def _parse_assumptions(payload: object) -> BarAmbiguityPolicy:
+    """
+    Parse the declared execution assumptions.
+
+    An absent declaration is the declared default, which is named rather than inferred from a venue
+    setting, and an ambiguous declaration is a configuration error.
+    """
+    if payload is None:
+        return BarAmbiguityPolicy.declared_default()
+
+    mapping = _require_mapping(payload, "config.assumptions")
+    _reject_unknown(mapping, _ASSUMPTION_KEYS, "config.assumptions")
+
+    bar_execution = _optional_bool(mapping.get("bar_execution"), "config.assumptions.bar_execution")
+    adaptive = _optional_bool(
+        mapping.get("adaptive_high_low_ordering"),
+        "config.assumptions.adaptive_high_low_ordering",
+    )
+
+    try:
+        return BarAmbiguityPolicy.from_venue_flags(
+            bar_execution=True if bar_execution is None else bar_execution,
+            adaptive_high_low_ordering=(False if adaptive is None else adaptive),
+        )
+    except ValueError as exc:
+        raise ConfigError(f"config.assumptions: {exc}") from exc
 
 
 def run_config(config: OptimizationConfig) -> dict[str, object]:
@@ -562,7 +599,11 @@ def _walk_forward_records(report: WalkForwardReport) -> dict[str, object]:
 def _attach_context(document: dict[str, object], config: OptimizationConfig) -> None:
     """
     Attach the non-stage context to a result document.
+
+    The declared assumption policy is part of the record, so a result names the execution
+    assumptions it was produced under rather than leaving them to be inferred from a version.
     """
+    document["assumptions"] = config.assumptions.to_dict()
     document["window"] = {"start": config.start, "end": config.end}
     document["persistence_directory"] = config.store_directory
     document["result_count"] = len(_sequence(document["results"]))
@@ -975,6 +1016,17 @@ def _optional_str(value: object, where: str) -> str | None:
         return None
     if not isinstance(value, str):
         raise ConfigError(f"{where} must be a string")
+    return value
+
+
+def _optional_bool(value: object, where: str) -> bool | None:
+    """
+    Parse an optional boolean.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ConfigError(f"{where} must be a boolean")
     return value
 
 

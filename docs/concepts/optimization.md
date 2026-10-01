@@ -83,6 +83,63 @@ stages declare their zero policy with its reason in
 from results realised inside each window and declare no label horizon. A study whose labels or
 features reach across a window boundary declares a policy of its own under `stage.leakage`.
 
+### Execution assumptions
+
+A bar records four prices and no path between them, so a bar-driven replay must assume an ordering,
+a fill rule for a triggered stop, a precedence between simultaneous triggers, and a treatment for a
+bar that opens beyond a trigger. Those are assumptions about an unknowable intrabar path, not market
+rules, and this subsystem records them rather than owning them: the implementation lives in the
+matching engine, and a study declares which rule set it ran under.
+
+`BarAmbiguityPolicy` is that declaration, with an identity. Its `policy_id` and `version` name the
+rule set, and its fields name each rule:
+
+| Field                | Members                                              | Meaning                                                       |
+| -------------------- | ---------------------------------------------------- | ------------------------------------------------------------- |
+| `bar_execution`      | `bool`                                               | Whether bars drive order execution at all.                    |
+| `intrabar_path`      | `OHLC_SEQUENCE`, `ADAPTIVE_NEAREST_TO_OPEN`, or None | The order the bar's prices are visited in.                    |
+| `trigger_precedence` | `OHLC_SEQUENCE`                                      | Which trigger wins when several are reachable in one bar.     |
+| `trigger_fill`       | `TRIGGER_PRICE_INSIDE_BAR`                           | The fill price when the bar does not open beyond the trigger. |
+| `gap_handling`       | `MARKET_PRICE_BEYOND_TRIGGER`                        | The fill price when the bar opens beyond the trigger.         |
+
+Two configurations that cannot both apply are refused rather than resolved: `from_venue_flags`
+rejects adaptive ordering without bar execution, and a policy that declares an intrabar path while
+bar execution is off (or bar execution with no declared path) raises at construction. An ambiguous
+declaration is a configuration error, not a silent convention, so two studies cannot look identical
+while assuming different things.
+
+The declaration is a top-level `assumptions` block in a configuration file, spelled as the venue
+configuration spells the flags:
+
+```json
+{
+  "assumptions": {
+    "bar_execution": true,
+    "adaptive_high_low_ordering": false
+  }
+}
+```
+
+`BarAmbiguityPolicy.declared_default()` names the default a study runs under when it declares
+nothing: bar execution with the fixed Open, High, Low, Close sequence, which is the behaviour the
+engine already implements. The emitted result document carries the policy as `assumptions`, so a
+result states the rule set that produced it and two results produced under different versions are
+distinguishable by their policy digest.
+
+Every assumption above maps to an implementation and an assertion:
+
+| Assumption                                                                            | Implementation                                              | Assertion                                                                                                  |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Bars drive execution only on an L1 book with external aggregation                     | `crates/execution/src/matching_engine/mod.rs:1907`, `:1914` | `crates/backtest/tests/integration/backtest_engine.rs` `test_add_data_rejects_bar_internal_aggregation`    |
+| Fixed Open, High, Low, Close order                                                    | `crates/execution/src/matching_engine/mod.rs:2325`          | `crates/execution/tests/integration/matching_engine.rs` `test_bar_execution_fills_stop_order`              |
+| Adaptive order visits the nearer extreme first                                        | `crates/execution/src/matching_engine/mod.rs:2325`, `:2040` | `test_bar_adaptive_ordering_fills_low_side_first`, `test_quote_bar_adaptive_ordering_fills_low_side_first` |
+| A trigger inside the bar fills at the trigger price; a gap fills at the market price  | `crates/execution/src/matching_engine/mod.rs:4560-4590`     | `docs/concepts/backtesting/fill-prices-and-matching.md` and the engine's bar-fill tests                    |
+| Simultaneous triggers follow the price sequence rather than a configurable precedence | `crates/execution/src/matching_engine/mod.rs:2325`          | `docs/concepts/backtesting/bar-execution.md` describes the ordering as the resolution                      |
+
+This is a research record, not an execution model. Nothing here changes an engine configuration or
+a fill; the policy states what a result assumed, which is why it stays on this side of the boundary
+described above.
+
 ## The statistics bridge
 
 A default run reports its returns statistics in `BacktestResult.stats_returns`, but that set is the
@@ -153,6 +210,8 @@ runner and produce the same results, in the same order.
   `WalkForwardWindow`, `walk_forward_windows`, `WalkForwardReport`: the methodology stages.
 - `SplitContract`, `Split`, `SplitDirection`, `LeakagePolicy`, `LabelOverlapRule`: the split
   contract, the bounds it yields, and the leakage exclusion relation it applies.
+- `BarAmbiguityPolicy`, `IntrabarPath`, `TriggerPrecedence`, `TriggerFill`, `GapHandling`: the
+  declared bar-derived execution assumptions and their identity.
 - `OptimizationConfig`, `load_config`, `run_config`: the JSON configuration-file entry point the
   `nautilus optimize` command and notebooks share.
 
@@ -161,7 +220,8 @@ runner and produce the same results, in the same order.
 The subsystem lives in `python/nautilus_trader/optimization/`: the parameter model in `space.py`,
 enumeration in `search.py`, execution in `runner.py`, the statistics bridge in `metrics.py`, result
 aggregation in `report.py`, the sweep in `optimizer.py`, the stages in `stages.py`, the split
-contract and the leakage policy in `splits.py`, persistence in
+contract and the leakage policy in `splits.py`, the execution assumptions in `assumptions.py`,
+persistence in
 `persistence.py`, process fan-out in `concurrency.py`, and the configuration-file entry point in
 `config.py`. The objective and constraints are the existing Rust types exposed from
 `nautilus_trader.analysis`; this subsystem adds no second objective and no second execution path.
@@ -230,7 +290,8 @@ concurrency policy, and an optional persistence directory.
   ],
   "stage": {"kind": "optimize"},
   "concurrency": {"max_workers": 1},
-  "store": {"directory": "runs/optimization"}
+  "store": {"directory": "runs/optimization"},
+  "assumptions": {"bar_execution": true, "adaptive_high_low_ordering": false}
 }
 ```
 
@@ -244,6 +305,12 @@ concurrency policy, and an optional persistence directory.
 - `objective.terms[].direction` is `maximize` or `minimize`, and
   `constraints[].comparison` is `at_least` or `at_most`.
 - `store` is optional; when present the sweep is persisted under its directory.
+- `assumptions` declares the bar-derived execution assumptions, with the venue configuration's own
+  spelling: `bar_execution` (default `true`) and `adaptive_high_low_ordering` (default `false`).
+  When the key is absent the declared default applies, which is the fixed Open, High, Low, Close
+  sequence. The emitted result document carries the resolved policy under `assumptions`, so a
+  result states the rule set it was produced under. A declaration that cannot apply, such as
+  adaptive ordering without bar execution, is rejected as a configuration error.
 - `stage.leakage`, on `walk_forward` only, takes `purge_before_ns`, `purge_after_ns`,
   `embargo_after_ns`, `label_overlap_rule` (`none` or `enforce`), `label_horizon_ns`, and
   `zero_interval_justification`. A policy that leaves any interval at zero must justify it. When

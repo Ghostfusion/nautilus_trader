@@ -12,10 +12,11 @@ either exposes or closes, never as a port of a vectorbt subsystem.
 **Status.** Architecture approved; contracts under revision. The probe changed no production code,
 because the authorising instruction permits code changes only for defects and none were found
 (section 5.1 of the companion document). The owner then authorised implementation in the order of
-section 12, and **D1 and D2 are implemented** (sections 4.1 and 4.2 of the companion document record
-them); every other item here is specified and ordered but marked **not implemented**. The identity
-contracts in section 8 are the centre of gravity: they are cross-cutting, they sit underneath the
-decisions rather than beside them, and the remaining sections are read as their consequences.
+section 12, and **D1, D2 and D3 are implemented** (sections 4.1, 4.2 and 4.3 of the companion
+document record them); every other item here is specified and ordered but marked **not
+implemented**. The identity contracts in section 8 are the centre of gravity: they are cross-cutting,
+they sit underneath the decisions rather than beside them, and the remaining sections are read as
+their consequences.
 
 ### Revision summary
 
@@ -26,6 +27,7 @@ decisions rather than beside them, and the remaining sections are read as their 
 | 3        | Identity promoted to a first-class contract section covering study, trial, dataset, universe and result, with the trial level made explicit; the D1/D3/D4 graph split into a contract graph and a work order, so the graph no longer contradicts its own explanation; the leakage policy gained an exclusion relation rather than a time distance alone; the ambiguity default became an owner decision separate from the policy contract, and ambiguity was separated from execution simulation; the statistical contract for the correction was specified; the stability obligation was classified by kernel type; the metric status vocabulary gained `invalid`; capability codes became domain-scoped; the label definition gained an alignment convention; a no-decision-authority invariant was added; two identity questions were added to the open list |
 | 4        | D2 implemented after the owner authorised the work order: the split contract and the leakage exclusion relation now exist in `nautilus_trader.optimization.splits`, the walk-forward stages consume the contract with their windows unchanged, and the policy is reachable from the configuration document. No other decision changed status. Section 4.2 of the companion document records the implementation, its deviations and its verification                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 5        | D1 implemented: the metric vocabulary is closed and declared (units, tags, action-oriented directions with an optional target, inputs, four statuses and seven reason codes), every statistic declares a `MetricDefinition`, and report methods keep every requested metric visible with a status and a reason. Question 6 of section 14 is answered by the implementation as a replaceable proposal, and section 4.1 of the companion document records the two deviations                                                                                                                                                                                                                                                                                                                                                                                      |
+| 6        | D3 implemented: the bar-derived assumptions have an identity (`BarAmbiguityPolicy` with a policy id, a version, closed vocabularies for the intrabar path, trigger precedence, trigger fill and gap handling, and a digest), a study declares them under `assumptions` in a configuration file, an ambiguous declaration is a configuration error, and the resolved policy is recorded in the emitted result document. No Rust behaviour changed and the default is named as the existing behaviour, so question 1 of section 14 is answered as a status quo the owner may replace                                                                                                                                                                                                                                                                              |
 
 ## 1. Purpose and scope
 
@@ -520,6 +522,13 @@ stages consume it rather than owning window generation.
 
 ### L3 Ambiguity is a policy with an identity, and it is not execution semantics
 
+**Status.** Implemented in revision 6: `python/nautilus_trader/optimization/assumptions.py` holds
+`BarAmbiguityPolicy` and its closed vocabularies, a study declares the assumptions under
+`assumptions` in a configuration file, an ambiguous declaration is refused, and the resolved policy
+is recorded in the emitted result document. The rules themselves remain the engine's; nothing in Rust
+changed. The companion document's section 4.3 records the implementation and its six decisions,
+including why the named default is the status quo rather than a new policy.
+
 vectorbt cannot know the intrabar path from bars, and says so: the trailing stop may only be seeded
 from a previous bar's extreme, the stop-loss is assumed to be hit before the take-profit when both
 could have been hit, a gap through the threshold fills at the open rather than at the threshold, a
@@ -852,7 +861,7 @@ every later phase records into them.
 1. **D2, the split contract and its leakage policy.** Implemented. First, because every out-of-sample number
    depends on it and because D6 and D4 both consume it.
 2. **D1, metric identity, status and reason codes.** Implemented. The contract that defines the shape of a result.
-3. **D3, the ambiguity policy and its identity.** Because a result that cannot name its assumptions
+3. **D3, the ambiguity policy and its identity.** Implemented. Because a result that cannot name its assumptions
    cannot be compared with another result.
 4. **Study identity and trial identity** (8.1, 8.2), with the selection rule included.
 5. **Dataset and universe identity** (8.3, 8.4), which consume the point-in-time and membership
@@ -897,7 +906,7 @@ differently.
 | --- | ------------------------------------------------------------------------------------------- | --------------------- | -------------------------------- | -------------------------------------------------------------------------------- |
 | D1  | Metric identity, metadata, four-state status and reason codes                               | Research integrity    | vectorbt, extended               | Implemented (companion 4.1); the vocabulary membership is the owner's to replace |
 | D2  | Reusable split contract with a leakage exclusion relation                                   | Research integrity    | vectorbt, extended               | Implemented (companion 4.2); concept mandatory, values optional                  |
-| D3  | Ambiguity policy identity, distinct from execution simulation; default is an owner decision | Research integrity    | Comparison                       | Adopt                                                                            |
+| D3  | Ambiguity policy identity, distinct from execution simulation; default is an owner decision | Research integrity    | Comparison                       | Implemented (companion 4.3); the default is named as the existing behaviour      |
 | D4  | Multiple-testing-aware reporting with a specified statistical contract                      | Research integrity    | vectorbt, extended               | Adopt; the deflated Sharpe ratio is the first statistic                          |
 | D5  | Numerical-stability obligation classified by kernel type                                    | Numerical correctness | vectorbt                         | Adopt                                                                            |
 | D6  | Label and target policy framework, with alignment in the definition                         | Research integrity    | vectorbt, extended               | Adopt in tranches; the first tranche is scoped                                   |
@@ -919,7 +928,7 @@ item may be called done.
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | D1  | Every registered statistic declares a title, units, tags and direction; a result reports a status from the four-state vocabulary and a reason code from that domain's closed set for every statistic that is not computed; a test asserts that `invalid` and `unavailable` are distinguishable on the same metric. Met: implemented, with the tests listed in companion document 4.1                                                                                                  |
 | D2  | A split is produced by a contract that works for any series length, supports fractional and absolute set lengths, filters short windows and takes a leakage policy capable of expressing purge before, purge after, embargo after and a label overlap rule; a test asserts that no training observation overlaps an evaluation observation's label information; a zero interval without a justification is refused. Met: implemented, with the tests listed in companion document 4.2 |
-| D3  | Each bar-derived assumption is documented, an ambiguous configuration is rejected, and a result records the ambiguity policy identity; a test asserts that two results produced under different policy versions are distinguishable; the default is named by an owner decision and, if pessimistic, is tested as such                                                                                                                                                                 |
+| D3  | Each bar-derived assumption is documented, an ambiguous configuration is rejected, and a result records the ambiguity policy identity; a test asserts that two results produced under different policy versions are distinguishable; the default is named by an owner decision and, if pessimistic, is tested as such. Met: implemented, with the named default asserted axis by axis; replacing it remains an owner decision                                                         |
 | D4  | A study records study and trial identity; every element of the statistical contract in L4 is specified before the first test is written; the value is reported, never a gate                                                                                                                                                                                                                                                                                                          |
 | D5  | Each kernel is classified, and the obligation for its class from the table in L5 is met, with running variance compared against an independent method rather than against the kernel's own twin                                                                                                                                                                                                                                                                                       |
 | D6  | The first tranche exists only on the target path, the definition includes the alignment convention, a leakage test fails if a label value is read as a feature, and the first-hit label is pinned against a hand-computed asymmetric case                                                                                                                                                                                                                                             |
@@ -933,7 +942,10 @@ item may be called done.
 
 Ordered by what they gate. The placement questions are preconditions (section 1.3), not open questions.
 
-1. **Which ambiguity policy is the default?** An owner decision, because it changes published numbers
+1. **Which ambiguity policy is the default?** An owner decision, because it changes published numbers.
+   The implementation (companion document 4.3) names the existing behaviour - bar execution with the
+   fixed Open, High, Low, Close sequence - so no published number moved, and the test asserts that
+   named default rather than an assumed one. Selecting a pessimistic default remains open.
    and needs a before-and-after comparison. This gates D3.
 2. **What observations are forbidden from training because their feature and label information
    overlaps the evaluation information?** This is the leakage rule, and it replaces the earlier
