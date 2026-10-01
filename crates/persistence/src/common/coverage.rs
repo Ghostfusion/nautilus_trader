@@ -23,7 +23,7 @@ use arrow::{
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
-use nautilus_core::ClosedInterval;
+use nautilus_core::{ClosedInterval, capability::Capability};
 use nautilus_serialization::arrow::{StringColumnRef, U32ColumnRef, U64ColumnRef};
 
 use super::{
@@ -605,6 +605,45 @@ pub fn missing_intervals(
     missing
 }
 
+/// Returns the capability answer for a requested closed interval against one key's coverage.
+///
+/// The answer is available when every nanosecond of the range is backed by stored data. A known
+/// empty interval is not coverage: it records that no data exists there, so it is a gap like any
+/// other. The requirements list every missing span in order, which is what a caller acts on, and
+/// the detail never carries the gaps.
+#[must_use]
+pub fn coverage_capability(interval: ClosedInterval, coverage: &CoverageIntervals) -> Capability {
+    let missing = missing_intervals(interval.start, interval.end, &coverage.data);
+
+    if missing.is_empty() {
+        return Capability::available();
+    }
+
+    let whole = missing.len() == 1 && missing.first().is_some_and(|gap| *gap == interval);
+    let (code, detail) = if whole {
+        (
+            "RANGE_NOT_COVERED",
+            format!("no stored data covers {}..{}", interval.start, interval.end),
+        )
+    } else {
+        (
+            "RANGE_GAPS",
+            format!(
+                "{}..{} is covered in part, with {} gaps",
+                interval.start,
+                interval.end,
+                missing.len()
+            ),
+        )
+    };
+
+    missing
+        .iter()
+        .fold(Capability::unavailable(code, detail), |capability, gap| {
+            capability.requiring(format!("missing {}..{}", gap.start, gap.end))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use arrow::array::{ArrayRef, Int32Array};
@@ -1008,5 +1047,65 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.to_string(), "ts_init column not found");
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use nautilus_core::capability::is_canonical_code;
+
+    use super::*;
+
+    fn coverage(data: &[(u64, u64)]) -> CoverageIntervals {
+        CoverageIntervals {
+            data: data
+                .iter()
+                .map(|(start, end)| ClosedInterval::new(*start, *end).expect("valid interval"))
+                .collect(),
+            empty: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_a_fully_covered_range_is_available() {
+        let interval = ClosedInterval::new(10, 20).expect("valid interval");
+        let capability = coverage_capability(interval, &coverage(&[(0, 30)]));
+
+        assert!(capability.is_available());
+        assert_eq!(capability.code(), None);
+        assert!(capability.detail().is_empty());
+    }
+
+    #[test]
+    fn test_a_range_no_stored_data_covers_is_not_covered() {
+        let interval = ClosedInterval::new(40, 50).expect("valid interval");
+        let capability = coverage_capability(interval, &coverage(&[(0, 30)]));
+
+        assert_eq!(capability.code(), Some("RANGE_NOT_COVERED"));
+        assert_eq!(capability.requirements(), ["missing 40..50"]);
+        assert!(is_canonical_code("RANGE_NOT_COVERED"));
+    }
+
+    #[test]
+    fn test_a_partly_covered_range_lists_its_gaps() {
+        let interval = ClosedInterval::new(10, 50).expect("valid interval");
+        let capability = coverage_capability(interval, &coverage(&[(0, 20), (30, 35)]));
+
+        assert_eq!(capability.code(), Some("RANGE_GAPS"));
+        assert_eq!(
+            capability.requirements(),
+            ["missing 21..29", "missing 36..50"]
+        );
+    }
+
+    #[test]
+    fn test_a_known_empty_range_is_a_gap_rather_than_coverage() {
+        let interval = ClosedInterval::new(10, 20).expect("valid interval");
+        let mut intervals = coverage(&[]);
+        intervals.empty = vec![interval];
+        let capability = coverage_capability(interval, &intervals);
+
+        assert_eq!(capability.code(), Some("RANGE_NOT_COVERED"));
+        assert_eq!(capability.requirements(), ["missing 10..20"]);
     }
 }

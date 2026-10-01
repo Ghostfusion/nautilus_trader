@@ -70,6 +70,7 @@
     reason = "`assert!(x.is_empty())` is clearer than comparing against an empty value"
 )]
 
+pub mod capability;
 pub mod collections;
 pub mod consts;
 pub mod correctness;

@@ -52,6 +52,7 @@ macro_rules! impl_pyo3_config_getters {
     };
 }
 
+pub mod capability;
 pub mod casing;
 pub mod datetime;
 pub mod enums;
@@ -78,6 +79,7 @@ use pyo3::{
 
 use crate::{
     UUID4,
+    capability::Capability,
     consts::{NAUTILUS_USER_AGENT, NAUTILUS_VERSION},
     correctness::CorrectnessError,
     datetime::{
@@ -232,6 +234,7 @@ pub fn core(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add(stringify!(NANOSECONDS_IN_MILLISECOND), NANOSECONDS_IN_MILLISECOND)?;
     m.add(stringify!(NANOSECONDS_IN_MICROSECOND), NANOSECONDS_IN_MICROSECOND)?;
     m.add_class::<UUID4>()?;
+    m.add_class::<Capability>()?;
     m.add_function(wrap_pyfunction!(casing::py_convert_to_snake_case, m)?)?;
     m.add_function(wrap_pyfunction!(string::py_mask_api_key, m)?)?;
     m.add_function(wrap_pyfunction!(datetime::py_secs_to_nanos, m)?)?;

@@ -37,6 +37,7 @@
 //! Every vocabulary in this module is closed: it is an enum with an exhaustive string mapping,
 //! so a reported value is checkable rather than a spelling competition.
 
+use nautilus_core::capability::Capability;
 use std::{collections::BTreeMap, fmt::Display};
 
 /// The unit a metric value is expressed in.
@@ -690,6 +691,26 @@ impl MetricResult {
     }
 }
 
+impl MetricResult {
+    /// Returns the capability answer for this result.
+    ///
+    /// The answer is available when a value was computed, and otherwise carries the result's
+    /// reason, which is this domain's closed set: the seven reason codes are what a caller may
+    /// branch on. The detail names the metric and its status for a human and is never canonical,
+    /// and the requirements are empty because a statistic is computed from what it was given rather
+    /// than from a precondition that could be supplied.
+    #[must_use]
+    pub fn capability(&self) -> Capability {
+        match self.reason() {
+            None => Capability::available(),
+            Some(reason) => Capability::unavailable(
+                reason.as_str(),
+                format!("{} is {}", self.title(), self.status().as_str()),
+            ),
+        }
+    }
+}
+
 /// The outcome of every requested metric in a report.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(
@@ -984,5 +1005,77 @@ mod tests {
             MetricReason::InsufficientData,
             MetricStatus::Invalid,
         );
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use nautilus_core::capability::is_canonical_code;
+    use rstest::rstest;
+
+    use super::*;
+
+    #[test]
+    fn test_a_computed_result_is_available_and_carries_no_code() {
+        let result = MetricResult::computed(
+            "sharpe_ratio".to_string(),
+            "Sharpe Ratio (252 days)".to_string(),
+            1.5,
+        );
+
+        let capability = result.capability();
+
+        assert!(capability.is_available());
+        assert_eq!(capability.code(), None);
+        assert!(capability.detail().is_empty());
+    }
+
+    #[rstest]
+    #[case(
+        MetricReason::UnsupportedInput,
+        MetricStatus::Unavailable,
+        "unsupported_input"
+    )]
+    #[case(
+        MetricReason::NonFiniteInput,
+        MetricStatus::Invalid,
+        "non_finite_input"
+    )]
+    #[case(
+        MetricReason::NotInMetricSet,
+        MetricStatus::NotRegistered,
+        "not_in_metric_set"
+    )]
+    fn test_a_result_that_was_not_computed_reports_its_reason_code(
+        #[case] reason: MetricReason,
+        #[case] status: MetricStatus,
+        #[case] expected: &str,
+    ) {
+        let result = MetricResult::not_computed(
+            "long_ratio".to_string(),
+            "Long Ratio".to_string(),
+            reason,
+            status,
+        );
+
+        let capability = result.capability();
+
+        assert!(!capability.is_available());
+        assert_eq!(capability.code(), Some(expected));
+        assert!(
+            capability
+                .to_string()
+                .starts_with(&format!("{expected}: Long Ratio is "))
+        );
+        assert!(capability.requirements().is_empty());
+    }
+
+    #[test]
+    fn test_every_metric_reason_in_the_closed_set_is_canonical() {
+        for reason in MetricReason::ALL {
+            let token = reason.as_str();
+
+            assert!(is_canonical_code(token), "{token} is not canonical");
+        }
     }
 }

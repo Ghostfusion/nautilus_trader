@@ -29,6 +29,12 @@ from nautilus_trader.optimization.assumptions import GapHandling as GapHandling
 from nautilus_trader.optimization.assumptions import IntrabarPath as IntrabarPath
 from nautilus_trader.optimization.assumptions import TriggerFill as TriggerFill
 from nautilus_trader.optimization.assumptions import TriggerPrecedence as TriggerPrecedence
+from nautilus_trader.optimization.capability import ResearchCapabilityCode as ResearchCapabilityCode
+from nautilus_trader.optimization.capability import leakage_capability as leakage_capability
+from nautilus_trader.optimization.capability import (
+    significance_capability as significance_capability,
+)
+from nautilus_trader.optimization.capability import split_capability as split_capability
 from nautilus_trader.optimization.concurrency import ConcurrencyPolicy as ConcurrencyPolicy
 from nautilus_trader.optimization.config import ConfigError as ConfigError
 from nautilus_trader.optimization.config import OptimizationConfig as OptimizationConfig
@@ -133,6 +139,7 @@ __all__ = [
     "OutOfSampleStage",
     "Parameter",
     "ParameterSpace",
+    "ResearchCapabilityCode",
     "ResearchResult",
     "ReturnCompounding",
     "ReturnMoments",
@@ -164,12 +171,15 @@ __all__ = [
     "WalkForwardWindow",
     "deflated_sharpe_ratio",
     "label_series",
+    "leakage_capability",
     "load_config",
     "objective_definition_from_terms",
     "per_period_sharpe",
     "return_moments",
     "run_config",
+    "significance_capability",
     "significance_report",
+    "split_capability",
     "split_contract_digest",
     "statistic_values",
     "trial_identity",

@@ -701,6 +701,33 @@ Python's standard library and third-party dependencies can also raise exceptions
 documented contracts.
 :::
 
+### Capability results
+
+A capability result answers whether a request can be served, before the work is done, as data rather
+than as an exception. The shared shape is `nautilus_trader.core.Capability`, and it carries
+availability, a canonical code, a human-readable detail and the requirements that were not met.
+
+The shape is shared and the code sets are not. Each domain declares its own closed set, so no
+universal enum accumulates every refusal reason in the system:
+
+| Domain   | Code set                                                           | Producer                                                |
+| -------- | ------------------------------------------------------------------ | ------------------------------------------------------- |
+| Order    | `OrderDeniedCode`, the existing set of local denial codes          | `OrderDeniedReason::capability` in `nautilus-model`     |
+| Analysis | `MetricReason`, the metric vocabulary the analysis crate publishes | `MetricResult::capability` in `nautilus-analysis`       |
+| Data     | The coverage codes `RANGE_NOT_COVERED` and `RANGE_GAPS`            | `coverage_capability` in `nautilus-persistence`         |
+| Research | `ResearchCapabilityCode`, owned by the optimization package        | The probes in `nautilus_trader.optimization.capability` |
+
+The code is canonical and the detail is not: a caller may compare, match or branch on the code, and
+must never branch on the detail, which exists for a human. The requirements list what a caller can
+act on, in the units the domain measures them in, such as the nanoseconds a purge has to grow by or
+the number of observations a study is short of. Canonical form is checked wherever a code is built
+from a string, so a code that is prose is refused rather than accepted as one.
+
+A probe built on this shape is a pure function of its inputs, which is what makes it cheap enough to
+call before the work it predicts. An available answer carries no code, and an unavailable answer
+always carries one, so the two cannot disagree and a caller reads the code rather than a separate
+flag when it has to branch.
+
 ### Processes and threads
 
 :::warning[One node per process]

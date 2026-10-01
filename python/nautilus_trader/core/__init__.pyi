@@ -14,6 +14,7 @@ __all__ = [
     "NAUTILUS_USER_AGENT",
     "NAUTILUS_VERSION",
     "UUID4",
+    "Capability",
     "convert_to_snake_case",
     "is_within_last_24_hours",
     "last_weekday_nanos",
@@ -34,6 +35,22 @@ MILLISECONDS_IN_SECOND: int
 NANOSECONDS_IN_SECOND: int
 NANOSECONDS_IN_MILLISECOND: int
 NANOSECONDS_IN_MICROSECOND: int
+
+@typing.final
+class Capability:
+    @staticmethod
+    def available() -> Capability: ...
+    @staticmethod
+    def unavailable(code: str, detail: str) -> Capability: ...
+    def requiring(self, requirement: str) -> Capability: ...
+    @property
+    def is_available(self) -> bool: ...
+    @property
+    def code(self) -> str | None: ...
+    @property
+    def detail(self) -> str: ...
+    @property
+    def requirements(self) -> list[str]: ...
 
 @typing.final
 class UUID4:

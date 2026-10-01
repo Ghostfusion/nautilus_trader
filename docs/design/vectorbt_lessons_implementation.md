@@ -33,7 +33,13 @@ what was built, the ten decisions taken and the verification. **D5, the classifi
 a class whose obligation is stated, the classification is checked against the registry in both
 directions, and the obligations are exercised per class, which found and fixed four missing-value
 defects and one summation that could not be trusted over a long series; section 4.5 records what was
-built, the defects and the verification. **D6, the first tranche of the label policies, is
+built, the defects and the verification. **D7, the secondary implementation parity protocol, exists
+as a document** (`docs/developer_guide/parity_protocol.md`, linked from `crates/pyo3/README.md`),
+with its claims re-derived from this repository rather than restated; section 4.7 records what it
+states and what was corrected. **D8, domain-scoped capability results, is implemented**
+(`crates/core/src/capability.rs` with its Python binding, plus one producer in each of the order,
+analysis, data and research domains): one shape, four closed code sets, and a source test that no
+caller branches on a detail; section 4.8 records what was built. **D6, the first tranche of the label policies, is
 implemented** (`python/nautilus_trader/optimization/labels.py`): a label definition carries the
 outcome, the forward window, the wait, the missing-data policy and the alignment convention; the
 fixed-horizon forward return, the forward aggregates of the window's per-bar returns and a first-hit
@@ -63,7 +69,11 @@ including eleven for the classification and its obligations, and `cargo clippy` 
 clean on the crate. D6: `pytest tests/unit/optimization/test_labels.py` runs 19 tests, all passing,
 including the hand-computed asymmetric first-hit case, the cumulative-barrier case, both alignment
 pairings, the zero-wait case, the two missing-data policies, the leakage refusal with its shortfall
-and the two quarantine tests. The statement that no test was run applies to the probe alone.
+and the two quarantine tests. D8: `cargo nextest run` over the core, model, analysis and persistence
+crates passes, including 13 tests for the capability shape and the four producers, `cargo clippy`
+with `-D warnings` is clean on all four, and on the Python side 9 capability tests pass, including
+the source scan; the extension was rebuilt and the stubs regenerated for the new binding. The
+statement that no test was run applies to the probe alone.
 
 ### 1.2 Revision history
 
@@ -80,6 +90,7 @@ and the two quarantine tests. The statement that no test was run applies to the 
 | 9       | D5 was implemented: `crates/analysis/src/kernel.rs` declares the seven kernel classes with the cases each obliges, classifies every built-in statistic and the three shared kernels by their dominant numerical operation, and is checked against the registry in both directions so a new statistic cannot enter unclassified. The class obligations are exercised by eleven tests, including a missing-value rule (a kernel must propagate or completely exclude a missing observation, never keep it in a count or a rank), a divisor and minimum-observation case, and a dispersion comparison against a compensated two-pass computation. That comparison found `calculate_std` wrong by 0.71 relative on a hundred thousand values with a large offset; it now sums with Neumaier compensation and agrees to 1.6e-16. The rule also found and fixed four missing-value defects (`max_drawdown`, `value_at_risk`, `expected_shortfall` and `win_rate`). Section 4.5 records the decisions, the fixes and the verification                                                                                                                     |
 | 10      | D6 was implemented, first tranche only: `python/nautilus_trader/optimization/labels.py` declares a `LabelDefinition` carrying the outcome, the forward window in observations, the wait, the missing-data policy and the alignment convention as part of the definition; computes the fixed-horizon forward return, the forward aggregates of the window's per-bar returns with the sample divisor of the D5 dispersion kernel, and a first-hit label over two independent thresholds measured from the entry; and measures the forward reach of every produced label from the series rather than deriving it, so a `LeakagePolicy` shorter than the reach is refused with the shortfall in nanoseconds. The target path is quarantined by a source test over the live packages and by refusing a label series offered as market data. The second tranche (extrema and trend-state labels) is not built, because the dataset contract of the earlier review is not implemented and the leakage intervals remain a study decision                                                                                                                   |
 | 11      | D7 was implemented as a document: `docs/developer_guide/parity_protocol.md` states the seven rules (one reference implementation, mirroring argument order and return shape, refusal over degradation, benchmarks after parity, the import direction, the build-time version agreement and the status as policy rather than a research prerequisite) with a nine-step checklist. It is linked from `crates/pyo3/README.md`, which owns the boundary, and listed in the developer guide's contents. Its version-agreement claim was re-derived from `crates/core/build.rs` rather than assumed, and the reference-generation claim from `scripts/benchmark-backtest-versions.py`, so the document records what this repository does rather than what the source library does                                                                                                                                                                                                                                                                                                                                                                        |
+| 12      | D8 was implemented: `Capability` in `crates/core/src/capability.rs` is the shared shape (availability, a canonical code, a human-readable detail and the requirements not met), exposed to Python as `nautilus_trader.core.Capability` with the code validated where it is built from a string. The code sets are per domain: order reuses `OrderDeniedCode`, analysis reuses `MetricReason`, data declares coverage codes and research declares `ResearchCapabilityCode` with three probes. A source test rejects any comparison, membership test or prefix search on a detail, in either language                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ### 1.3 Reference maps
 
@@ -854,7 +865,45 @@ repository rather than restated:
 **Acceptance and verification.** A unit test per domain asserting the code for at least two refusal
 cases, and a test asserting that no detail string is matched anywhere in the source.
 
-**Not implemented.**
+**Implemented in revision 12.** The shape is `crates/core/src/capability.rs`:
+`Capability { available, code, detail, requirements }`, with `is_canonical_code` and a `Display` that
+renders `CODE: detail`. An available answer carries no code and an unavailable answer always carries
+one, so the two cannot disagree. The Python binding is `crates/core/src/python/capability.rs`,
+registered in the `nautilus_trader.core` module and exposed as `available()`, `unavailable(code,
+detail)`, `requiring(requirement)` and the four properties; it validates the code and raises
+`ValueError` for prose, because a Python caller passes a string while a Rust caller passes the
+variant of a closed enum. The stubs were regenerated.
+
+The code sets are per domain, and three of the four already existed:
+
+- **Order** reuses `OrderDeniedCode`: `OrderDeniedReason::capability` reports the denial as
+  unavailable, and splits the rendered message at the documented `": "` boundary so the code appears
+  once rather than in both the code and the detail, which the test asserting that the capability
+  renders exactly like the denial pins.
+- **Analysis** reuses `MetricReason`: `MetricResult::capability` is available when a value was
+  computed and otherwise carries the result's reason, so the analysis domain gains no second
+  vocabulary for the same facts.
+- **Data** declares its own: `coverage_capability` in `nautilus-persistence` answers a requested
+  closed interval against a key's coverage, reporting `RANGE_NOT_COVERED` when no stored data covers
+  the range and `RANGE_GAPS` when it is covered in part, with every missing span as a requirement. A
+  known-empty interval is a gap rather than coverage, because it records that no data exists there.
+- **Research** declares `ResearchCapabilityCode` (seven codes, one per constraint that failed) in
+  `python/nautilus_trader/optimization/capability.py`, with three probes that answer before the work
+  is done: `leakage_capability` over a label series and a leakage policy, `significance_capability`
+  over the study's counts and its dependence declaration, and `split_capability` over a split
+  contract and a period. The last one asks the contract rather than predicting it and carries the
+  refusal it raises as the detail, which is what the rule that a detail is not canonical is for.
+
+The rule that no caller branches on a detail is enforced by a source test over the compiled and the
+Python sources, which rejects a comparison, a membership test and a prefix or substring search on a
+detail. The producers and the tests avoid matching details themselves, so the scan needs no
+exceptions beyond its own file.
+
+**Not measured**: no caller consumes a capability answer yet beyond the tests, so the producers are
+the mechanism rather than a decision that already depends on them; the probe and the contract it
+consults both refuse the same request, so a caller can choose either; and the Python binding cannot
+check that a code belongs to the domain's set, only that it is a canonical token, because the set
+membership is Rust-side.
 
 ### 4.9 D9 Declarative research caching, deferred
 
@@ -1059,7 +1108,7 @@ what makes the design independently reviewable, is stated in `design 13.1`.
 | D5 Numerical stability              | Each kernel classified by class, and the obligation for its class met; running variance compared against an independent method                                                        | The classification exists and each kernel has its class obligation                                                                                        | Implemented (4.5); 319 analysis tests pass, the dispersion kernel agrees with a compensated computation to 1.6e-16 where the plain summation was wrong by 0.71, and four missing-value defects in the statistics were found and fixed        |
 | D6 Labels                           | The first tranche exists only on the target path, the definition includes the alignment convention, a leakage test fails if a label value is read as a feature                        | Hand-computed asymmetric case, wait case, both alignment pairings, leakage test; per-instrument test in the second tranche                                | Implemented (4.6); 19 label tests pass, including the hand-computed asymmetric first-hit case, the cumulative-barrier case, both alignment pairings, the zero-wait case, the leakage refusal with its shortfall and the two quarantine tests |
 | D7 Parity protocol                  | A written protocol exists and is linked from the owning crate; not a research prerequisite                                                                                            | The document and its link; the checklist applies only if a second implementation appears                                                                  | Implemented (4.7); the document exists, is linked from `crates/pyo3/README.md` and listed in the developer guide, and its checklist applies only when a second implementation appears                                                        |
-| D8 Capability results               | One shared shape with domain-scoped closed code sets; nothing branches on detail text                                                                                                 | Two refusal cases per domain, and a source test against detail matching                                                                                   | Not implemented                                                                                                                                                                                                                              |
+| D8 Capability results               | One shared shape with domain-scoped closed code sets; nothing branches on detail text                                                                                                 | Two refusal cases per domain, and a source test against detail matching                                                                                   | Implemented (4.8); the shared shape is `nautilus_trader.core.Capability`, the four domain sets are closed and owned, 13 Rust and 9 Python capability tests pass, and a source test rejects any match on a detail                             |
 | D9 Cache                            | No acceptance criterion while deferred; if triggered, the key is the identity model and cached and uncached runs agree                                                                | Deferred                                                                                                                                                  | Not implemented                                                                                                                                                                                                                              |
 | D10 Provider adapter                | No acceptance criterion in this document                                                                                                                                              | Belongs to the data-provider architecture review                                                                                                          | Not implemented                                                                                                                                                                                                                              |
 | D11 Schema ownership                | No acceptance criterion: the decision is to change nothing                                                                                                                            | Not applicable                                                                                                                                            | Not implemented                                                                                                                                                                                                                              |

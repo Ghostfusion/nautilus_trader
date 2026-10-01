@@ -398,6 +398,9 @@ runner and produce the same results, in the same order.
 - `LabelDefinition`, `LabelKind`, `ForwardAggregate`, `AlignmentConvention`, `MissingDataPolicy`,
   `LabelSeries`, `label_series`: the label policies on the target path, their alignment convention
   and the forward reach a leakage policy has to cover.
+- `ResearchCapabilityCode`, `leakage_capability`, `significance_capability`, `split_capability`: the
+  research domain's closed refusal codes and the probes that answer whether a request can be served
+  before the work is done.
 - `BarAmbiguityPolicy`, `IntrabarPath`, `TriggerPrecedence`, `TriggerFill`, `GapHandling`: the
   declared bar-derived execution assumptions and their identity.
 - `StudyIdentity`, `TrialIdentity`, `TrialProvenance`, `DatasetIdentity`, `UniverseIdentity`,
