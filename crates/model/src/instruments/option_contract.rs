@@ -28,7 +28,7 @@ use ustr::Ustr;
 
 use super::{Instrument, any::InstrumentAny, tick_scheme::check_tick_scheme};
 use crate::{
-    enums::{AssetClass, InstrumentClass, OptionKind},
+    enums::{AssetClass, ExerciseStyle, InstrumentClass, OptionKind},
     identifiers::{InstrumentId, Symbol},
     types::{
         currency::Currency,
@@ -62,6 +62,12 @@ pub struct OptionContract {
     pub underlying: Ustr,
     /// The kind of option (PUT | CALL).
     pub option_kind: OptionKind,
+    /// The exercise style of the option contract.
+    ///
+    /// Defaults to [`ExerciseStyle::American`] (the market convention for United
+    /// States listed equity options) when absent from serialized data.
+    #[serde(default)]
+    pub exercise_style: ExerciseStyle,
     /// The option strike price.
     pub strike_price: Price,
     /// UNIX timestamp (nanoseconds) for contract activation.
@@ -114,6 +120,7 @@ impl OptionContract {
         exchange: Option<Ustr>,
         underlying: Ustr,
         option_kind: OptionKind,
+        exercise_style: Option<ExerciseStyle>,
         strike_price: Price,
         currency: Currency,
         activation_ns: UnixNanos,
@@ -154,6 +161,7 @@ impl OptionContract {
             exchange,
             underlying,
             option_kind,
+            exercise_style: exercise_style.unwrap_or(ExerciseStyle::American),
             activation_ns,
             expiration_ns,
             strike_price,
@@ -193,6 +201,7 @@ impl OptionContract {
         exchange: Option<Ustr>,
         underlying: Ustr,
         option_kind: OptionKind,
+        exercise_style: Option<ExerciseStyle>,
         strike_price: Price,
         currency: Currency,
         activation_ns: UnixNanos,
@@ -219,6 +228,7 @@ impl OptionContract {
             exchange,
             underlying,
             option_kind,
+            exercise_style,
             strike_price,
             currency,
             activation_ns,
@@ -238,6 +248,13 @@ impl OptionContract {
             ts_event,
             ts_init,
         )
+    }
+
+    /// Returns a copy of this contract with the given `exercise_style`.
+    #[must_use]
+    pub fn with_exercise_style(mut self, exercise_style: ExerciseStyle) -> Self {
+        self.exercise_style = exercise_style;
+        self
     }
 }
 
@@ -297,6 +314,10 @@ impl Instrument for OptionContract {
 
     fn option_kind(&self) -> Option<OptionKind> {
         Some(self.option_kind)
+    }
+
+    fn exercise_style(&self) -> Option<ExerciseStyle> {
+        Some(self.exercise_style)
     }
 
     fn exchange(&self) -> Option<Ustr> {
@@ -444,6 +465,7 @@ mod tests {
             Some(Ustr::from("GMNI")),
             Ustr::from("AAPL"),
             OptionKind::Call,
+            None,
             Price::from("150.0"),
             Currency::USD(),
             0.into(),
@@ -475,6 +497,7 @@ mod tests {
             Some(Ustr::from("GMNI")),
             Ustr::from("AAPL"),
             OptionKind::Call,
+            None,
             Price::from("150.0"),
             Currency::USD(),
             0.into(),
@@ -508,6 +531,7 @@ mod tests {
             Some(Ustr::from("GMNI")),
             Ustr::from("AAPL"),
             OptionKind::Call,
+            None,
             strike_price,
             Currency::USD(),
             0.into(),
@@ -554,6 +578,7 @@ mod tests {
             Some(Ustr::from("GMNI")),
             Ustr::from("AAPL"),
             OptionKind::Call,
+            None,
             Price::from("149.0"),
             Currency::USD(),
             1.into(),

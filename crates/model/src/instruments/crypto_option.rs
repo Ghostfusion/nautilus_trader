@@ -25,7 +25,7 @@ use ustr::Ustr;
 
 use super::{Instrument, any::InstrumentAny, tick_scheme::check_tick_scheme};
 use crate::{
-    enums::{AssetClass, InstrumentClass, OptionKind},
+    enums::{AssetClass, ExerciseStyle, InstrumentClass, OptionKind},
     identifiers::{InstrumentId, Symbol},
     types::{
         currency::Currency,
@@ -61,6 +61,12 @@ pub struct CryptoOption {
     pub is_inverse: bool,
     /// The kind of option (PUT | CALL).
     pub option_kind: OptionKind,
+    /// The exercise style of the option contract.
+    ///
+    /// Crypto option venues (for example Deribit) list European style options,
+    /// so this defaults to [`ExerciseStyle::European`] when absent from serialized data.
+    #[serde(default = "default_exercise_style_european")]
+    pub exercise_style: ExerciseStyle,
     /// The option strike price.
     pub strike_price: Price,
     /// UNIX timestamp (nanoseconds) for contract activation.
@@ -103,6 +109,10 @@ pub struct CryptoOption {
     pub ts_event: UnixNanos,
     /// UNIX timestamp (nanoseconds) when the data object was initialized.
     pub ts_init: UnixNanos,
+}
+
+fn default_exercise_style_european() -> ExerciseStyle {
+    ExerciseStyle::European
 }
 
 #[bon::bon]
@@ -171,6 +181,7 @@ impl CryptoOption {
             settlement_currency,
             is_inverse,
             option_kind,
+            exercise_style: ExerciseStyle::European,
             strike_price,
             activation_ns,
             expiration_ns,
@@ -328,6 +339,10 @@ impl Instrument for CryptoOption {
 
     fn option_kind(&self) -> Option<OptionKind> {
         Some(self.option_kind)
+    }
+
+    fn exercise_style(&self) -> Option<ExerciseStyle> {
+        Some(self.exercise_style)
     }
 
     fn strike_price(&self) -> Option<Price> {

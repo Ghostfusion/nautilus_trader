@@ -1105,6 +1105,52 @@ pub enum OptionKind {
     Put = 2,
 }
 
+/// The exercise style of an option contract, which determines when the holder
+/// may exercise the option.
+#[repr(C)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Display,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    AsRefStr,
+    FromRepr,
+    EnumIter,
+    EnumString,
+)]
+#[strum(ascii_case_insensitive)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.model",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.model")
+)]
+pub enum ExerciseStyle {
+    /// The holder may exercise the option at any time up to and including expiry.
+    ///
+    /// This is the market convention for United States listed equity options.
+    #[default]
+    American = 1,
+    /// The holder may exercise the option only on the expiry date.
+    European = 2,
+}
+
 /// The numeraire convention for option greeks published by a venue.
 ///
 /// Crypto option venues commonly publish two parallel greek sets for the same
@@ -2117,6 +2163,7 @@ enum_strum_serde!(BookType);
 enum_strum_serde!(ContingencyType);
 enum_strum_serde!(ContinuousFutureAdjustmentType);
 enum_strum_serde!(CurrencyType);
+enum_strum_serde!(ExerciseStyle);
 enum_strum_serde!(GreeksConvention);
 enum_strum_serde!(InstrumentClass);
 enum_strum_serde!(InstrumentCloseType);
@@ -2549,6 +2596,7 @@ mod tests {
             ContingencyType,
             ContinuousFutureAdjustmentType,
             CurrencyType,
+            ExerciseStyle,
             GreeksConvention,
             InstrumentClass,
             InstrumentCloseType,
@@ -2632,6 +2680,8 @@ mod tests {
         "CurrencyType::CommodityBacked=COMMODITY_BACKED",
         "CurrencyType::Crypto=CRYPTO",
         "CurrencyType::Fiat=FIAT",
+        "ExerciseStyle::American=AMERICAN",
+        "ExerciseStyle::European=EUROPEAN",
         "GreeksConvention::BlackScholes=BLACK_SCHOLES",
         "GreeksConvention::PriceAdjusted=PRICE_ADJUSTED",
         "InstrumentClass::BinaryOption=BINARY_OPTION",
@@ -2772,6 +2822,7 @@ mod tests {
             ContingencyType,
             ContinuousFutureAdjustmentType,
             CurrencyType,
+            ExerciseStyle,
             GreeksConvention,
             InstrumentClass,
             InstrumentCloseType,

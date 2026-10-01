@@ -135,7 +135,7 @@ impl FromStr for NautilusInstrumentType {
     }
 }
 use crate::{
-    enums::{AssetClass, InstrumentClass, OptionKind},
+    enums::{AssetClass, ExerciseStyle, InstrumentClass, OptionKind},
     identifiers::{InstrumentId, Symbol, Venue},
     types::{
         Currency, ERROR_PRICE, Money, Price, Quantity,
@@ -298,6 +298,15 @@ pub trait Instrument: 'static + Send {
 
     fn isin(&self) -> Option<Ustr>;
     fn option_kind(&self) -> Option<OptionKind>;
+
+    /// Returns the exercise style of the instrument, when applicable.
+    ///
+    /// Defaults to `None` for instruments which are not options. Option instruments
+    /// override this to return their declared style.
+    fn exercise_style(&self) -> Option<ExerciseStyle> {
+        None
+    }
+
     fn exchange(&self) -> Option<Ustr>;
     fn strike_price(&self) -> Option<Price>;
     fn strategy_type(&self) -> Option<Ustr> {

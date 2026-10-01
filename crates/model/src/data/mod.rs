@@ -23,6 +23,7 @@ pub mod adjustment;
 pub mod bar;
 pub mod batch;
 pub mod bet;
+pub mod binomial;
 pub mod black_scholes;
 pub mod close;
 pub mod corporate_action;
@@ -36,6 +37,7 @@ pub mod greeks;
 pub mod option_chain;
 pub mod order;
 pub mod prices;
+pub mod pricing;
 pub mod quote;
 pub mod registry;
 pub mod status;
@@ -66,6 +68,7 @@ use crate::{
 #[rustfmt::skip]  // Keep these grouped
 pub use adjustment::{AdjustmentSeries, PriceRepresentation};
 pub use bar::{Bar, BarSpecification, BarType};
+pub use binomial::{CoxRossRubinstein, DEFAULT_STEPS};
 pub use black_scholes::Greeks;
 pub use close::InstrumentClose;
 pub use corporate_action::{CorporateAction, CorporateActionType};
@@ -90,6 +93,10 @@ pub use greeks::{
 pub use option_chain::{OptionChainSlice, OptionGreeks, OptionStrikeData, StrikeRange};
 pub use order::{BookOrder, NULL_ORDER};
 pub use prices::{IndexPriceUpdate, MarkPriceUpdate};
+pub use pricing::{
+    OptionPricingModel, OptionPricingParams, PricingError, implied_forward_from_parity,
+    price_option,
+};
 pub use quote::QuoteTick;
 #[cfg(feature = "arrow")]
 pub use registry::{

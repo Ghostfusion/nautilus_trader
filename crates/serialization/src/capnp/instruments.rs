@@ -19,6 +19,7 @@ use std::error::Error;
 
 use nautilus_core::{Params, UnixNanos};
 use nautilus_model::{
+    enums::ExerciseStyle,
     identifiers::{InstrumentId, Symbol},
     instruments::{
         BettingInstrument, BinaryOption, Cfd, Commodity, CryptoFuture, CryptoFuturesSpread,
@@ -814,6 +815,9 @@ impl<'a> FromCapnp<'a> for CryptoOption {
             settlement_currency: Currency::from_capnp(reader.get_settlement_currency()?)?,
             is_inverse: reader.get_is_inverse(),
             option_kind: option_kind_from_capnp(reader.get_option_kind()?),
+            // The schema carries no exercise style, and a crypto option is European by class
+            // convention, so a decoded crypto option takes the class default.
+            exercise_style: ExerciseStyle::European,
             strike_price: Price::from_capnp(reader.get_strike_price()?)?,
             activation_ns: read_unix_nanos(|| reader.get_activation_ns())?,
             expiration_ns: read_unix_nanos(|| reader.get_expiration_ns())?,
@@ -1561,6 +1565,10 @@ impl<'a> FromCapnp<'a> for OptionContract {
             exchange: read_optional_ustr(reader.has_exchange(), || reader.get_exchange())?,
             underlying: read_ustr(|| reader.get_underlying())?,
             option_kind: option_kind_from_capnp(reader.get_option_kind()?),
+            // The schema carries no exercise style, so a decoded option contract takes the
+            // instrument class default (American, the listed equity convention). A non-default
+            // style does not survive a capnp round trip.
+            exercise_style: ExerciseStyle::default(),
             strike_price: Price::from_capnp(reader.get_strike_price()?)?,
             activation_ns: read_unix_nanos(|| reader.get_activation_ns())?,
             expiration_ns: read_unix_nanos(|| reader.get_expiration_ns())?,
