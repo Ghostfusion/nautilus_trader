@@ -48,6 +48,13 @@ from nautilus_trader.optimization.identity import (
 )
 from nautilus_trader.optimization.identity import split_contract_digest as split_contract_digest
 from nautilus_trader.optimization.identity import trial_identity as trial_identity
+from nautilus_trader.optimization.labels import AlignmentConvention as AlignmentConvention
+from nautilus_trader.optimization.labels import ForwardAggregate as ForwardAggregate
+from nautilus_trader.optimization.labels import LabelDefinition as LabelDefinition
+from nautilus_trader.optimization.labels import LabelKind as LabelKind
+from nautilus_trader.optimization.labels import LabelSeries as LabelSeries
+from nautilus_trader.optimization.labels import MissingDataPolicy as MissingDataPolicy
+from nautilus_trader.optimization.labels import label_series as label_series
 from nautilus_trader.optimization.metrics import statistic_values as statistic_values
 from nautilus_trader.optimization.optimizer import Optimizer as Optimizer
 from nautilus_trader.optimization.persistence import ExperimentStore as ExperimentStore
@@ -96,6 +103,7 @@ from nautilus_trader.optimization.stages import walk_forward_windows as walk_for
 
 
 __all__ = [
+    "AlignmentConvention",
     "BacktestRunner",
     "BarAmbiguityPolicy",
     "CanonicalRun",
@@ -109,11 +117,16 @@ __all__ = [
     "ExperimentResult",
     "ExperimentStore",
     "FailedExperiment",
+    "ForwardAggregate",
     "GapHandling",
     "GridSearch",
     "IntrabarPath",
+    "LabelDefinition",
+    "LabelKind",
     "LabelOverlapRule",
+    "LabelSeries",
     "LeakagePolicy",
+    "MissingDataPolicy",
     "OptimizationConfig",
     "OptimizeStage",
     "Optimizer",
@@ -150,6 +163,7 @@ __all__ = [
     "WalkForwardStage",
     "WalkForwardWindow",
     "deflated_sharpe_ratio",
+    "label_series",
     "load_config",
     "objective_definition_from_terms",
     "per_period_sharpe",

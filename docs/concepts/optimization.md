@@ -140,6 +140,58 @@ This is a research record, not an execution model. Nothing here changes an engin
 a fill; the policy states what a result assumed, which is why it stays on this side of the boundary
 described above.
 
+## Labels and the target path
+
+A label is a future outcome. Every construction that produces one reads observations a feature cannot
+see, so the label layer is a separate path with a separate type: no module under `trading`, `live`,
+`backtest`, `execution`, `risk` or `adapters` imports it, and a label series handed back where market
+data is expected is refused by name rather than read. Both are asserted, so a label value cannot
+quietly become a feature.
+
+`labels.py` carries the first tranche: the fixed-horizon forward return, the forward aggregates of a
+window's per-bar returns (mean, standard deviation, minimum, maximum), and a first-hit label that
+reports which of two independent thresholds the cumulative return from the entry breached first.
+
+`LabelDefinition` states the outcome, the window and the alignment:
+
+| Field                                      | Meaning                                                                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `label_id`                                 | The policy's identifier, unique within a study.                                                                           |
+| `kind`                                     | `FORWARD_RETURN`, `FORWARD_AGGREGATE` or `FIRST_HIT_THRESHOLD`.                                                           |
+| `horizon`                                  | The forward window length in observations.                                                                                |
+| `wait`                                     | The observations to wait before the entry; a zero wait still excludes the anchor bar from the window.                     |
+| `alignment`                                | Which label row a feature row is paired with: the anchor bar or the next bar.                                             |
+| `missing_data_policy`                      | `PROPAGATE` requires every window observation present; `SKIP` counts present observations, so the window spans more time. |
+| `aggregate`                                | The reduction for `FORWARD_AGGREGATE`, required by that kind and refused by the others.                                   |
+| `positive_threshold`, `negative_threshold` | The barriers of a first-hit label; independent rather than one and its negation.                                          |
+
+The window of a label anchored at a bar is the `horizon` observations after the `wait`, and its entry
+reference is the close of the `wait`-th observation, so a zero wait enters at the anchor's own close
+while the window still starts after it. `FORWARD_RETURN` measures the endpoint ratio over the window,
+`FORWARD_AGGREGATE` reduces the window's per-bar returns (the mean with a compensated accumulation,
+the standard deviation with the sample divisor the dispersion kernel uses), and
+`FIRST_HIT_THRESHOLD` scans the cumulative return from the entry and reports `1` for the positive
+barrier, `-1` for the negative one and `0` when neither is reached. The scan is over closes rather
+than highs and lows, so one observation cannot breach both barriers; an intrabar comparison would need
+the bar ordering policy, which is a study decision rather than a label one.
+
+The alignment convention is first-class because it is invisible in the shape of the result. Pairing a
+feature row with the label anchored at that row and with the label anchored at the next row produce
+the same values shifted by one row, and they are not the same dataset: the second measures its outcome
+over a later bar and reads one bar further into the future.
+
+That reach is what a leakage policy has to cover. `LabelSeries.forward_reach_ns` is measured from the
+produced series rather than derived from the definition, so it accounts for the alignment, for the
+wait, for a first hit that stops early, and for a skipped window that spans more time than its bar
+count. `validate_leakage` refuses a policy whose effective purge before the evaluation set is shorter
+than the reach and reports the shortfall in nanoseconds, so the fix is a number rather than a
+judgement; the intervals themselves stay a study decision, and the check states the requirement
+without choosing the value.
+
+Every field is part of the definition digest, so two datasets assembled under different conventions
+cannot share an identity. Extrema and trend-state labels are not built: they need the dataset
+contract of the earlier review, and neither it nor a stored point-in-time membership exists.
+
 ## Identity contracts
 
 Provenance is part of the meaning of a result: a number that cannot name the study that produced it,
@@ -343,6 +395,9 @@ runner and produce the same results, in the same order.
   `WalkForwardWindow`, `walk_forward_windows`, `WalkForwardReport`: the methodology stages.
 - `SplitContract`, `Split`, `SplitDirection`, `LeakagePolicy`, `LabelOverlapRule`: the split
   contract, the bounds it yields, and the leakage exclusion relation it applies.
+- `LabelDefinition`, `LabelKind`, `ForwardAggregate`, `AlignmentConvention`, `MissingDataPolicy`,
+  `LabelSeries`, `label_series`: the label policies on the target path, their alignment convention
+  and the forward reach a leakage policy has to cover.
 - `BarAmbiguityPolicy`, `IntrabarPath`, `TriggerPrecedence`, `TriggerFill`, `GapHandling`: the
   declared bar-derived execution assumptions and their identity.
 - `StudyIdentity`, `TrialIdentity`, `TrialProvenance`, `DatasetIdentity`, `UniverseIdentity`,
@@ -356,8 +411,9 @@ runner and produce the same results, in the same order.
 The subsystem lives in `python/nautilus_trader/optimization/`: the parameter model in `space.py`,
 enumeration in `search.py`, execution in `runner.py`, the statistics bridge in `metrics.py`, result
 aggregation in `report.py`, the sweep in `optimizer.py`, the stages in `stages.py`, the split
-contract and the leakage policy in `splits.py`, the execution assumptions in `assumptions.py`, the
-identity contracts in `identity.py`, persistence in
+contract and the leakage policy in `splits.py`, the label policies and their leakage reach in
+`labels.py`, the execution assumptions in `assumptions.py`, the identity contracts in `identity.py`,
+persistence in
 `persistence.py`, process fan-out in `concurrency.py`, and the configuration-file entry point in
 `config.py`. The objective and constraints are the existing Rust types exposed from
 `nautilus_trader.analysis`; this subsystem adds no second objective and no second execution path.
