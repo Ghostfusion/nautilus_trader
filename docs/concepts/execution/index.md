@@ -223,6 +223,48 @@ resolves, or the selected client's account is not cached yet, the risk engine de
 rejects the modification with `VALIDATION_FAILED`. It never falls back to another account. Positions
 and open orders count toward position-reducing checks only when they belong to the selected account.
 
+### Pre-trade count caps
+
+`RiskEngineConfig.count_caps` adds count-based pre-trade limits beside the rate limits above. A cap
+is a predicate over four things:
+
+- **Scope**: global, strategy, account, instrument, venue, or strategy by instrument. Counters are
+  keyed per rule and per concrete scope, so two rules over one scope with different windows are two
+  rules.
+- **Metric**: active orders, submits, modifies, cancels, fills, or repeated requests.
+- **Limit**: the count the cap permits within the window.
+- **Window**: a rolling duration over event timestamps from the engine clock, half-open at its
+  start. No reset boundary exists, so capacity returns as occurrences age out rather than at a
+  session change. An active-order cap takes no window; every other metric requires one.
+
+A cancel or a fill cap gates **submits** rather than itself: a cancellation is never refused by a
+cap, because refusing to cancel is the behaviour a risk limit must not have. A repeated-request cap
+counts by the request shape - instrument, side, order type, quantity and price - excluding the
+client order id, so each shape keeps its own counter and a legitimate repeat of a different shape is
+not blocked by an earlier one. A refusal is an `OrderDenied` whose reason is
+`ORDER_COUNT_LIMIT_REACHED`, `ACTIVE_ORDER_LIMIT_REACHED` or `REPEATED_REQUEST_LIMIT_REACHED`, and
+the structured decision record carries the observed count, the limit, the scope and the window.
+
+**No cap is configured by default, and no default value or window duration is shipped.** An engine
+whose `RiskEngineConfig` declares no cap denies nothing. A default cannot be derived from the
+mechanism, and a value that is too low denies legitimate strategies, so the value is a deployment's
+judgement against its own venue message limits and order flow.
+
+The one measured configuration is the one the send-path benchmark used, and it is **not** a
+recommendation:
+
+| Scope                  | Metric  | Limit   |
+| ---------------------- | ------- | ------- |
+| Global                 | Submit  | 20,000  |
+| Global                 | Cancel  | 10,000  |
+| Global                 | Fill    | 10,000  |
+| Instrument             | Submit  | 2,000   |
+| Global                 | Active  | 50      |
+
+Those values were taken from the comparison reviewed in the design record as inputs to the
+benchmark only. A deployment should derive its own from its venue's message limits and its observed
+order flow, and record the window it chose rather than inheriting a duration.
+
 ### Whole-position conditional exits
 
 Some execution clients support conditional exits whose venue determines the closing quantity from

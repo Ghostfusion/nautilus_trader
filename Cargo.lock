@@ -6767,6 +6767,7 @@ dependencies = [
  "anyhow",
  "arrow 59.3.0",
  "blake3",
+ "codspeed-criterion-compat",
  "nautilus-core",
  "nautilus-model",
  "nautilus-persistence",

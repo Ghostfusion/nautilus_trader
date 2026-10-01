@@ -19,6 +19,11 @@ workspace = true
 name = "nautilus_research"
 crate-type = ["rlib"]
 
+[[bench]]
+name = "membership_backfill"
+path = "benches/membership_backfill.rs"
+harness = false
+
 [package.metadata.cargo-machete]
 ignored = ["arrow"] # Used by `arrow_custom_data` macro expansion
 
@@ -36,4 +41,5 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 tempfile = { workspace = true }
