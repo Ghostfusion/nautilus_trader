@@ -126,6 +126,13 @@ API, built-in margin models, and the adapter convention across live venues.
 The `Portfolio` tracks all positions across strategies and instruments, providing a unified view
 of holdings, risk exposure, and performance.
 
+## Performance periods
+
+[Performance periods](performance_periods.md) describes the periodic result frame: the row grouped
+as accounting, trading activity, exposure and derived performance, the reduction of the portfolio's
+own accounting that produces it, the calendar trigger shared by live and backtest, the four
+statistics defined over it, and why an undefined statistic is not available rather than zero.
+
 ## Reports
 
 Execution reports, portfolio analysis, PnL accounting, and backtest post-run analysis.

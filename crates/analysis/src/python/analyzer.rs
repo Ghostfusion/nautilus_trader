@@ -27,6 +27,7 @@ use crate::{
     Returns,
     analyzer::PortfolioAnalyzer,
     metric::{MetricDefinition, MetricReport},
+    period::PerformancePeriod,
     python::statistic::statistic_from_pyobject,
 };
 
@@ -196,6 +197,25 @@ impl PortfolioAnalyzer {
         let requested: Vec<&str> = requested.iter().map(String::as_str).collect();
 
         self.report_pnls_metrics(&requested, currency)
+    }
+
+    /// Reports the requested period-frame-based metrics, one result per request.
+    ///
+    /// Mirrors `Self.report_returns_metrics` for the performance-period input: a metric whose
+    /// definition is defined over `MetricInput.PerformancePeriods` is calculated from `periods`,
+    /// and one that is not is reported `unavailable` with `MetricReason.UnsupportedInput`. An
+    /// empty frame is reported `unavailable` with `MetricReason.InsufficientData`; a statistic
+    /// that declines to reduce a present frame is reported the same way.
+    #[expect(clippy::needless_pass_by_value)]
+    #[pyo3(name = "report_period_metrics")]
+    fn py_report_period_metrics(
+        &self,
+        requested: Vec<String>,
+        periods: Vec<PerformancePeriod>,
+    ) -> MetricReport {
+        let requested: Vec<&str> = requested.iter().map(String::as_str).collect();
+
+        self.report_period_metrics(&requested, &periods)
     }
 
     /// Records a position return at a specific timestamp.

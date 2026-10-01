@@ -18,7 +18,7 @@ use std::{collections::BTreeMap, fmt::Debug};
 use nautilus_core::DurationNanos;
 use nautilus_model::position::Position;
 
-use crate::{Returns, metric::MetricDefinition};
+use crate::{Returns, metric::MetricDefinition, period::PerformancePeriod};
 
 const IMPL_ERR: &str = "is not implemented for";
 
@@ -53,7 +53,8 @@ fn compensated_sum(values: impl Iterator<Item = f64>) -> f64 {
 /// The analyzer calls `calculate_from_returns`, `calculate_from_realized_pnls`, and
 /// `calculate_from_positions` on every registered statistic, and their defaults panic, so an
 /// implementation must override all three and return `None` for a category it does not support.
-/// `calculate_from_returns_with_benchmark` defaults to `None` and is optional.
+/// `calculate_from_returns_with_benchmark` and `calculate_from_periods` default to `None` and are
+/// optional.
 #[allow(unused_variables)]
 pub trait PortfolioStatistic: Debug {
     type Item;
@@ -97,6 +98,15 @@ pub trait PortfolioStatistic: Debug {
     /// Panics if this method is not implemented for the specific statistic.
     fn calculate_from_positions(&self, positions: &[Position]) -> Option<Self::Item> {
         panic!("`calculate_from_positions` {IMPL_ERR} `{}`", self.name());
+    }
+
+    /// Calculates the statistic from a performance-period frame.
+    ///
+    /// Defaults to `None`: a statistic that is not defined over the frame is simply skipped, so a
+    /// returns- or PnL-based statistic needs no override. A frame-based statistic overrides this
+    /// and returns `None` for a frame it cannot reduce.
+    fn calculate_from_periods(&self, periods: &[PerformancePeriod]) -> Option<Self::Item> {
+        None
     }
 
     /// Calculates the statistic from time-indexed strategy returns relative to a benchmark.

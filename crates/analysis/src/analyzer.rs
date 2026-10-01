@@ -32,6 +32,7 @@ use crate::{
     metric::{
         MetricDefinition, MetricInput, MetricReason, MetricReport, MetricResult, MetricStatus,
     },
+    period::PerformancePeriod,
     snapshot::PortfolioStatistics,
     statistic::PortfolioStatistic,
     statistics::{
@@ -1006,6 +1007,50 @@ impl PortfolioAnalyzer {
                 statistic.calculate_from_realized_pnls(&realized_pnls),
                 input_present,
                 input_non_finite,
+            ));
+        }
+
+        MetricReport::new(results)
+    }
+
+    /// Reports the requested period-frame-based metrics, one result per request.
+    ///
+    /// Mirrors [`Self::report_returns_metrics`] for the performance-period input: a metric whose
+    /// definition is defined over [`MetricInput::PerformancePeriods`] is calculated from `periods`,
+    /// and one that is not is reported `unavailable` with [`MetricReason::UnsupportedInput`]. An
+    /// empty frame is reported `unavailable` with [`MetricReason::InsufficientData`]; a statistic
+    /// that declines to reduce a present frame is reported the same way.
+    #[must_use]
+    pub fn report_period_metrics(
+        &self,
+        requested: &[&str],
+        periods: &[PerformancePeriod],
+    ) -> MetricReport {
+        let mut results = Vec::with_capacity(requested.len());
+        let input_present = !periods.is_empty();
+
+        for requested in requested {
+            let Some(statistic) = self.find_metric(requested) else {
+                results.push(not_registered(requested));
+                continue;
+            };
+
+            let definition = statistic.definition();
+
+            if !definition.is_defined_over(MetricInput::PerformancePeriods) {
+                results.push(not_computed(
+                    &definition,
+                    MetricReason::UnsupportedInput,
+                    MetricStatus::Unavailable,
+                ));
+                continue;
+            }
+
+            results.push(classify(
+                &definition,
+                statistic.calculate_from_periods(periods),
+                input_present,
+                false,
             ));
         }
 
@@ -2968,6 +3013,6 @@ mod tests {
         let count = ids.len();
         ids.dedup();
         assert_eq!(ids.len(), count);
-        assert_eq!(count, 34);
+        assert_eq!(count, 38);
     }
 }

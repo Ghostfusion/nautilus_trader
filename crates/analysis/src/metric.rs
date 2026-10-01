@@ -263,6 +263,8 @@ pub enum MetricInput {
     RealizedPnls,
     /// A sequence of closed positions.
     Positions,
+    /// A frame of performance periods.
+    PerformancePeriods,
 }
 
 impl MetricInput {
@@ -272,6 +274,7 @@ impl MetricInput {
         Self::Benchmark,
         Self::RealizedPnls,
         Self::Positions,
+        Self::PerformancePeriods,
     ];
 
     /// Returns the stable string for this input.
@@ -282,6 +285,7 @@ impl MetricInput {
             Self::Benchmark => "benchmark",
             Self::RealizedPnls => "realized_pnls",
             Self::Positions => "positions",
+            Self::PerformancePeriods => "performance_periods",
         }
     }
 }
@@ -838,7 +842,7 @@ mod tests {
             assert_eq!(direction.to_string(), direction.as_str());
         }
 
-        assert_eq!(MetricInput::ALL.len(), 4);
+        assert_eq!(MetricInput::ALL.len(), 5);
         for input in MetricInput::ALL {
             assert!(!input.as_str().is_empty());
             assert_eq!(input.to_string(), input.as_str());

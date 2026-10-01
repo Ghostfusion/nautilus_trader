@@ -223,6 +223,16 @@ pub const RESEARCH_KERNELS: &[KernelClassification] = &[
         class: KernelClass::Reduction,
         source: "statistics/expectancy.rs",
     },
+    KernelClassification {
+        identity: "total_commissions",
+        class: KernelClass::Reduction,
+        source: "statistics/total_commissions.rs",
+    },
+    KernelClassification {
+        identity: "total_turnover",
+        class: KernelClass::Reduction,
+        source: "statistics/total_turnover.rs",
+    },
     // Cumulative: a value accumulated along the series.
     KernelClassification {
         identity: "cagr",
@@ -233,6 +243,11 @@ pub const RESEARCH_KERNELS: &[KernelClassification] = &[
         identity: "max_drawdown",
         class: KernelClass::Cumulative,
         source: "statistics/max_drawdown.rs",
+    },
+    KernelClassification {
+        identity: "max_drawdown_duration",
+        class: KernelClass::Cumulative,
+        source: "statistics/max_drawdown_duration.rs",
     },
     KernelClassification {
         identity: "ulcer_index",
@@ -279,6 +294,11 @@ pub const RESEARCH_KERNELS: &[KernelClassification] = &[
         identity: "risk_return_ratio",
         class: KernelClass::Normalization,
         source: "statistics/risk_return_ratio.rs",
+    },
+    KernelClassification {
+        identity: "exponentially_weighted_sharpe",
+        class: KernelClass::Normalization,
+        source: "statistics/exponentially_weighted_sharpe.rs",
     },
     KernelClassification {
         identity: "sharpe_ratio",

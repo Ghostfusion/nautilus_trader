@@ -27,20 +27,25 @@ use crate::{
     Returns,
     analyzer::Statistic,
     metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    period::PerformancePeriod,
     statistic::PortfolioStatistic,
     statistics::{
         alpha::Alpha, beta_ratio::BetaRatio, cagr::CAGR, calmar_ratio::CalmarRatio,
         down_capture_ratio::DownCaptureRatio, expectancy::Expectancy,
-        expected_shortfall::ExpectedShortfall, information_ratio::InformationRatio,
-        long_ratio::LongRatio, loser_avg::AvgLoser, loser_max::MaxLoser, loser_min::MinLoser,
-        max_drawdown::MaxDrawdown, omega_ratio::OmegaRatio, profit_factor::ProfitFactor,
-        returns_avg::ReturnsAverage, returns_avg_loss::ReturnsAverageLoss,
-        returns_avg_win::ReturnsAverageWin, returns_kurtosis::ReturnsKurtosis,
-        returns_skewness::ReturnsSkewness, returns_volatility::ReturnsVolatility,
-        risk_return_ratio::RiskReturnRatio, sharpe_ratio::SharpeRatio, sortino_ratio::SortinoRatio,
-        tail_ratio::TailRatio, tracking_error::TrackingError, treynor_ratio::TreynorRatio,
-        ulcer_index::UlcerIndex, up_capture_ratio::UpCaptureRatio, value_at_risk::ValueAtRisk,
-        win_rate::WinRate, winner_avg::AvgWinner, winner_max::MaxWinner, winner_min::MinWinner,
+        expected_shortfall::ExpectedShortfall,
+        exponentially_weighted_sharpe::ExponentiallyWeightedSharpe,
+        information_ratio::InformationRatio, long_ratio::LongRatio, loser_avg::AvgLoser,
+        loser_max::MaxLoser, loser_min::MinLoser, max_drawdown::MaxDrawdown,
+        max_drawdown_duration::MaxDrawdownDuration, omega_ratio::OmegaRatio,
+        profit_factor::ProfitFactor, returns_avg::ReturnsAverage,
+        returns_avg_loss::ReturnsAverageLoss, returns_avg_win::ReturnsAverageWin,
+        returns_kurtosis::ReturnsKurtosis, returns_skewness::ReturnsSkewness,
+        returns_volatility::ReturnsVolatility, risk_return_ratio::RiskReturnRatio,
+        sharpe_ratio::SharpeRatio, sortino_ratio::SortinoRatio, tail_ratio::TailRatio,
+        total_commissions::TotalCommissions, total_turnover::TotalTurnover,
+        tracking_error::TrackingError, treynor_ratio::TreynorRatio, ulcer_index::UlcerIndex,
+        up_capture_ratio::UpCaptureRatio, value_at_risk::ValueAtRisk, win_rate::WinRate,
+        winner_avg::AvgWinner, winner_max::MaxWinner, winner_min::MinWinner,
     },
 };
 
@@ -337,6 +342,7 @@ fn defined_over_every_input() -> Vec<MetricInput> {
         MetricInput::Returns,
         MetricInput::RealizedPnls,
         MetricInput::Positions,
+        MetricInput::PerformancePeriods,
     ]
 }
 
@@ -378,6 +384,16 @@ impl PortfolioStatistic for PythonStatistic {
             let method = self.method(py, METHOD)?;
             let positions = self.converted(METHOD, PyList::new(py, positions.iter().cloned()))?;
             self.value(py, METHOD, method.call1((positions,)))
+        })
+    }
+
+    fn calculate_from_periods(&self, periods: &[PerformancePeriod]) -> Option<f64> {
+        const METHOD: &str = "calculate_from_periods";
+
+        Python::attach(|py| {
+            let method = self.method(py, METHOD)?;
+            let periods = self.converted(METHOD, PyList::new(py, periods.iter().cloned()))?;
+            self.value(py, METHOD, method.call1((periods,)))
         })
     }
 
@@ -461,6 +477,10 @@ fn native_statistic(py: Python<'_>, statistic: &Py<PyAny>, type_name: &str) -> O
         "CAGR" => extract::<CAGR>(py, statistic),
         "CalmarRatio" => extract::<CalmarRatio>(py, statistic),
         "MaxDrawdown" => extract::<MaxDrawdown>(py, statistic),
+        "MaxDrawdownDuration" => extract::<MaxDrawdownDuration>(py, statistic),
+        "ExponentiallyWeightedSharpe" => extract::<ExponentiallyWeightedSharpe>(py, statistic),
+        "TotalCommissions" => extract::<TotalCommissions>(py, statistic),
+        "TotalTurnover" => extract::<TotalTurnover>(py, statistic),
         "Alpha" => extract::<Alpha>(py, statistic),
         "BetaRatio" => extract::<BetaRatio>(py, statistic),
         "DownCaptureRatio" => extract::<DownCaptureRatio>(py, statistic),

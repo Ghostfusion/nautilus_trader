@@ -79,6 +79,7 @@ pub mod analyzer;
 pub mod kernel;
 pub mod metric;
 pub mod objective;
+pub mod period;
 pub mod snapshot;
 pub mod statistic;
 pub mod statistics;

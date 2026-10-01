@@ -31,9 +31,11 @@ from nautilus_trader.analysis import CalmarRatio
 from nautilus_trader.analysis import DownCaptureRatio
 from nautilus_trader.analysis import Expectancy
 from nautilus_trader.analysis import ExpectedShortfall
+from nautilus_trader.analysis import ExponentiallyWeightedSharpe
 from nautilus_trader.analysis import InformationRatio
 from nautilus_trader.analysis import LongRatio
 from nautilus_trader.analysis import MaxDrawdown
+from nautilus_trader.analysis import MaxDrawdownDuration
 from nautilus_trader.analysis import MaxLoser
 from nautilus_trader.analysis import MaxWinner
 from nautilus_trader.analysis import MinLoser
@@ -52,6 +54,8 @@ from nautilus_trader.analysis import RiskReturnRatio
 from nautilus_trader.analysis import SharpeRatio
 from nautilus_trader.analysis import SortinoRatio
 from nautilus_trader.analysis import TailRatio
+from nautilus_trader.analysis import TotalCommissions
+from nautilus_trader.analysis import TotalTurnover
 from nautilus_trader.analysis import TrackingError
 from nautilus_trader.analysis import TreynorRatio
 from nautilus_trader.analysis import UlcerIndex
@@ -72,6 +76,7 @@ NO_ARG_STATISTICS = [
     (Expectancy, "Expectancy"),
     (LongRatio, "Long Ratio"),
     (MaxDrawdown, "Max Drawdown"),
+    (MaxDrawdownDuration, "Max Drawdown Duration"),
     (MaxLoser, "Max Loser"),
     (MaxWinner, "Max Winner"),
     (MinLoser, "Min Loser"),
@@ -84,6 +89,8 @@ NO_ARG_STATISTICS = [
     (ReturnsSkewness, "Returns Skewness"),
     (RiskReturnRatio, "Risk Return Ratio"),
     (TailRatio, "Tail Ratio"),
+    (TotalCommissions, "Total Commissions"),
+    (TotalTurnover, "Total Turnover"),
     (UlcerIndex, "Ulcer Index"),
     (WinRate, "Win Rate"),
 ]
@@ -94,6 +101,11 @@ PERIOD_STATISTICS = [
     (ReturnsVolatility, "Returns Volatility"),
     (SharpeRatio, "Sharpe Ratio"),
     (SortinoRatio, "Sortino Ratio"),
+]
+
+# Statistics carrying defaulted integer parameters that are not a single period.
+PARAMETERISED_STATISTICS = [
+    (ExponentiallyWeightedSharpe, "Exponentially Weighted Sharpe"),
 ]
 
 # Statistics carrying a single float parameter (threshold / confidence).
@@ -113,7 +125,13 @@ BENCHMARK_STATISTICS = [
     (UpCaptureRatio, "Up Capture Ratio"),
 ]
 
-ALL_STATISTICS = NO_ARG_STATISTICS + PERIOD_STATISTICS + THRESHOLD_STATISTICS + BENCHMARK_STATISTICS
+ALL_STATISTICS = (
+    NO_ARG_STATISTICS
+    + PERIOD_STATISTICS
+    + PARAMETERISED_STATISTICS
+    + THRESHOLD_STATISTICS
+    + BENCHMARK_STATISTICS
+)
 STATISTIC_METHODS = (
     "calculate_from_positions",
     "calculate_from_realized_pnls",
@@ -164,6 +182,31 @@ def test_period_statistic_custom_period(cls: object, expected_prefix: object) ->
     stat = cls(period=30)
 
     assert "30" in stat.name
+
+
+@pytest.mark.parametrize(("cls", "expected_prefix"), PARAMETERISED_STATISTICS)
+def test_parameterised_statistic_default_construction_and_name(
+    cls: object,
+    expected_prefix: object,
+) -> None:
+    """
+    Test parameterised statistic default construction and name.
+    """
+    stat = cls()
+
+    assert stat.name.startswith(expected_prefix)
+
+
+@pytest.mark.parametrize(("cls", "expected_prefix"), PARAMETERISED_STATISTICS)
+def test_parameterised_statistic_custom_parameters(cls: object, expected_prefix: object) -> None:
+    """
+    Test parameterised statistic custom parameters.
+    """
+    stat = cls(annualisation=365, halflife=10)
+
+    assert stat.name.startswith(expected_prefix)
+    assert "365" in stat.name
+    assert "10" in stat.name
 
 
 @pytest.mark.parametrize(("cls", "expected_prefix"), THRESHOLD_STATISTICS)

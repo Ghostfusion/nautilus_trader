@@ -59,6 +59,11 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::metric::MetricResult>()?;
     m.add_class::<crate::metric::MetricReport>()?;
 
+    // Performance-period frame
+    m.add_class::<crate::period::PeriodKind>()?;
+    m.add_class::<crate::period::CurrencyTotals>()?;
+    m.add_class::<crate::period::PerformancePeriod>()?;
+
     // Statistics - Returns-based
     m.add_class::<crate::statistics::cagr::CAGR>()?;
     m.add_class::<crate::statistics::calmar_ratio::CalmarRatio>()?;
@@ -78,6 +83,10 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::statistics::omega_ratio::OmegaRatio>()?;
     m.add_class::<crate::statistics::value_at_risk::ValueAtRisk>()?;
     m.add_class::<crate::statistics::expected_shortfall::ExpectedShortfall>()?;
+    m.add_class::<crate::statistics::exponentially_weighted_sharpe::ExponentiallyWeightedSharpe>()?;
+    m.add_class::<crate::statistics::max_drawdown_duration::MaxDrawdownDuration>()?;
+    m.add_class::<crate::statistics::total_commissions::TotalCommissions>()?;
+    m.add_class::<crate::statistics::total_turnover::TotalTurnover>()?;
 
     // Statistics - PnL-based
     m.add_class::<crate::statistics::expectancy::Expectancy>()?;
