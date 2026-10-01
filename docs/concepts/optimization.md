@@ -383,6 +383,40 @@ sample run the engine reports `Sharpe Ratio (252 days)` as `-27.2553412003192`, 
 `bridged_values` recomputes the same float from the run's returns series. The bridged
 `Max Drawdown`, which the run does not report, is `-0.014306129144533997` for that run.
 
+## Search strategies and the run description
+
+`GridSearch` enumerates the whole space. Two further strategies implement the same `SearchStrategy`
+protocol and are deterministic under a seed:
+
+- `RandomSearch(seed, budget)`: a seeded sample drawn without replacement from the space's
+  positions, so the same seed and space select the same experiments in the same order.
+- `EvolutionarySearch(evaluations, seed, operators, budget)`: breeds generations from a seeded
+  generator and the evaluations recorded so far. Parents are chosen by tournament over feasibility
+  first and score second, elite individuals survive unchanged, and children are crossed over and
+  mutated at the declared rates (`EvolutionaryOperators`). A search never computes a score.
+
+A run is described by a `RunDescription`: the space digest, the validation scheme, the seed, the
+search strategy, the evolutionary operators and the evaluation cache digest. Its digest identifies
+the run, so two runs are comparable only when their descriptions are.
+
+The validation scheme is part of the run, not a caller's convention:
+`ValidationScheme.single_split(search, held_out)` declares the searched window and the held-out
+window, and `ValidationScheme.walk_forward(windows)` declares a sequence of in-sample and
+out-of-sample windows. Overlapping windows are refused, and when a scheme is given the optimizer
+refuses a run whose window does not lie inside one of the scheme's search windows, so a held-out
+window can never be scored by the search. The report carries the scheme so a reader can see which
+windows were which.
+
+Constraints are evaluated before the objective. An infeasible candidate is recorded with
+`feasible=False` and no fictitious penalty in its score, and an evolutionary search reads
+feasibility as a separate attribute rather than as a penalty. Every evaluation is keyed by the
+canonical parameter digest in an `EvaluationCache`; the optimizer consults the cache before
+executing an experiment, so a resumed run over the same `ExperimentStore` executes none of the
+vectors it already holds. The `SearchReport` records the number of distinct evaluations, the
+searched space size, the number of executions and the seed, and `evaluated_fraction` reports the
+evaluated fraction of the space. A budget smaller than the space reports the best of what it
+evaluated.
+
 ## Persistence
 
 An `ExperimentStore` owns a caller-given directory and writes strict, digest-keyed JSON, so a
@@ -393,7 +427,9 @@ sweep can be reloaded without rerunning it:
   outcome, and metric values.
 - `canonical/<canonical-digest>.json`: the canonical backtest result document itself.
 - `failures/<experiment-digest>.json`: a failure's experiment, error type, and error message.
-- `report.json`: the sweep manifest, listing the ranked result digests and the failure digests.
+- `report.json`: the sweep manifest, listing the ranked result digests, the failure digests, the
+  number of evaluations, the searched space size, the number of executions, the seed and the
+  validation scheme.
 
 The digest's colon is replaced by an underscore in file names so the layout is valid on Windows.
 Non-finite metric values are written as the strings `"nan"`, `"inf"`, and `"-inf"` because strict
@@ -421,9 +457,16 @@ runner and produce the same results, in the same order.
 ## Public API
 
 - `Parameter`, `ParameterSpace`, `Experiment`: the parameter model and its digests.
-- `SearchStrategy`, `GridSearch`: enumeration of experiments.
+- `SearchStrategy`, `GridSearch`, `RandomSearch`, `EvolutionarySearch`, `EvolutionaryOperators`:
+  enumeration of experiments, the two seeded strategies and the operators they breed with.
 - `BacktestRunner`, `CanonicalRun`, `FailedExperiment`: one run through `BacktestNode`.
 - `Optimizer`, `ExperimentResult`, `SearchReport`: the sweep and its ranked report.
+- `ValidationScheme`, `ValidationMode`: the validation scheme a run is searched under, and its
+  searched and held-out windows.
+- `RunDescription`: the run's description (space, scheme, seed, search strategy, operators, cache)
+  and its digest.
+- `Evaluation`, `EvaluationCache`: the evaluations memoized by canonical parameter digest, so a
+  resumed run executes none of the vectors it already holds.
 - `ConcurrencyPolicy`: the memory-driven concurrency limit.
 - `ExperimentStore`: digest-keyed persistence.
 - `statistic_values`: the statistics bridge.
@@ -456,7 +499,8 @@ runner and produce the same results, in the same order.
 ## Where it lives
 
 The subsystem lives in `python/nautilus_trader/optimization/`: the parameter model in `space.py`,
-enumeration in `search.py`, execution in `runner.py`, the statistics bridge in `metrics.py`, result
+enumeration and the search strategies in `search.py`, the validation scheme and the run description
+in `run.py`, execution in `runner.py`, the statistics bridge in `metrics.py`, result
 aggregation in `report.py`, the sweep in `optimizer.py`, the stages in `stages.py`, the split
 contract and the leakage policy in `splits.py`, the label policies and their leakage reach in
 `labels.py`, the relative-value declarations and their refusals in `relative_value.py`, the execution

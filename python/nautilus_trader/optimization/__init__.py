@@ -74,6 +74,8 @@ from nautilus_trader.optimization.labels import MissingDataPolicy as MissingData
 from nautilus_trader.optimization.labels import label_series as label_series
 from nautilus_trader.optimization.metrics import statistic_values as statistic_values
 from nautilus_trader.optimization.optimizer import Optimizer as Optimizer
+from nautilus_trader.optimization.persistence import Evaluation as Evaluation
+from nautilus_trader.optimization.persistence import EvaluationCache as EvaluationCache
 from nautilus_trader.optimization.persistence import ExperimentStore as ExperimentStore
 from nautilus_trader.optimization.relative_value import (
     PersistenceConvention as PersistenceConvention,
@@ -85,10 +87,16 @@ from nautilus_trader.optimization.relative_value import ScreenOutcome as ScreenO
 from nautilus_trader.optimization.relative_value import SignalWindow as SignalWindow
 from nautilus_trader.optimization.report import ExperimentResult as ExperimentResult
 from nautilus_trader.optimization.report import SearchReport as SearchReport
+from nautilus_trader.optimization.run import RunDescription as RunDescription
+from nautilus_trader.optimization.run import ValidationMode as ValidationMode
+from nautilus_trader.optimization.run import ValidationScheme as ValidationScheme
 from nautilus_trader.optimization.runner import BacktestRunner as BacktestRunner
 from nautilus_trader.optimization.runner import CanonicalRun as CanonicalRun
 from nautilus_trader.optimization.runner import FailedExperiment as FailedExperiment
+from nautilus_trader.optimization.search import EvolutionaryOperators as EvolutionaryOperators
+from nautilus_trader.optimization.search import EvolutionarySearch as EvolutionarySearch
 from nautilus_trader.optimization.search import GridSearch as GridSearch
+from nautilus_trader.optimization.search import RandomSearch as RandomSearch
 from nautilus_trader.optimization.search import SearchStrategy as SearchStrategy
 from nautilus_trader.optimization.significance import DivisorConvention as DivisorConvention
 from nautilus_trader.optimization.significance import ReturnCompounding as ReturnCompounding
@@ -137,6 +145,10 @@ __all__ = [
     "ConfigError",
     "DatasetIdentity",
     "DivisorConvention",
+    "Evaluation",
+    "EvaluationCache",
+    "EvolutionaryOperators",
+    "EvolutionarySearch",
     "ExecutionStatus",
     "Experiment",
     "ExperimentResult",
@@ -160,11 +172,13 @@ __all__ = [
     "ParameterSpace",
     "PersistenceConvention",
     "PersistenceEstimate",
+    "RandomSearch",
     "RecursiveMemory",
     "ResearchCapabilityCode",
     "ResearchResult",
     "ReturnCompounding",
     "ReturnMoments",
+    "RunDescription",
     "ScreenFamily",
     "ScreenOutcome",
     "SearchReport",
@@ -189,7 +203,9 @@ __all__ = [
     "TriggerPrecedence",
     "UniverseIdentity",
     "ValidateStage",
+    "ValidationMode",
     "ValidationResult",
+    "ValidationScheme",
     "WalkForwardReport",
     "WalkForwardResult",
     "WalkForwardStage",

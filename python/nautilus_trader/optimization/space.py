@@ -33,6 +33,7 @@ import json
 from dataclasses import dataclass
 from dataclasses import field
 from typing import TYPE_CHECKING
+from typing import cast
 
 
 if TYPE_CHECKING:
@@ -203,3 +204,113 @@ class ParameterSpace:
             parameters = dict(self.base)
             parameters.update(dict(zip(names, combination, strict=True)))
             yield Experiment(parameters)
+
+    @property
+    def size(self) -> int:
+        """
+        Return the number of experiments the space expands to.
+
+        A space with no swept parameters expands to exactly one experiment, the base set, matching
+        the empty Cartesian product.
+
+        Returns
+        -------
+        int
+
+        """
+        total = 1
+        for parameter in self.parameters:
+            total *= len(parameter.choices)
+        return total
+
+    def indices_at(self, index: int) -> tuple[int, ...]:
+        """
+        Return the choice indices of the experiment at a mixed-radix position.
+
+        The position order matches `expand`: the last parameter varies fastest, so a sampled index
+        maps to the same experiment the deterministic sweep would reach.
+
+        Parameters
+        ----------
+        index : int
+            The experiment position, in `[0, size)`.
+
+        Returns
+        -------
+        tuple[int, ...]
+
+        """
+        if index < 0 or index >= self.size:
+            raise IndexError(f"experiment index {index} is outside the space of size {self.size}")
+        indices: list[int] = []
+        remaining = index
+        for parameter in reversed(self.parameters):
+            width = len(parameter.choices)
+            indices.append(remaining % width)
+            remaining //= width
+        indices.reverse()
+        return tuple(indices)
+
+    def experiment_from_indices(self, indices: Sequence[int]) -> Experiment:
+        """
+        Return the experiment for a tuple of per-parameter choice indices.
+
+        Parameters
+        ----------
+        indices : Sequence[int]
+            One choice index per parameter, in declaration order.
+
+        Returns
+        -------
+        Experiment
+
+        """
+        if len(indices) != len(self.parameters):
+            raise ValueError(f"expected {len(self.parameters)} indices, was {len(indices)}")
+        parameters = dict(self.base)
+        for parameter, index in zip(self.parameters, indices, strict=True):
+            if index < 0 or index >= len(parameter.choices):
+                raise ValueError(
+                    f"index {index} is outside parameter '{parameter.name}' with "
+                    f"{len(parameter.choices)} choices",
+                )
+            parameters[parameter.name] = parameter.choices[index]
+        return Experiment(parameters)
+
+    def experiment_at(self, index: int) -> Experiment:
+        """
+        Return the experiment at a mixed-radix position.
+
+        Parameters
+        ----------
+        index : int
+            The experiment position, in `[0, size)`.
+
+        Returns
+        -------
+        Experiment
+
+        """
+        return self.experiment_from_indices(self.indices_at(index))
+
+    @property
+    def digest(self) -> str:
+        """
+        Return the `sha256:<hex>` digest of the declared space.
+
+        The digest is over the base values and the parameters with their ordered choices, so two
+        studies declare the same space exactly when they declare the same sweep.
+
+        Returns
+        -------
+        str
+
+        """
+        payload = {
+            "base": dict(self.base),
+            "parameters": [
+                {"name": parameter.name, "choices": list(parameter.choices)}
+                for parameter in self.parameters
+            ],
+        }
+        return digest_of(cast("Mapping[str, JsonValue]", payload))

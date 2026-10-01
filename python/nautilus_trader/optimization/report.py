@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from nautilus_trader.optimization.run import ValidationScheme
     from nautilus_trader.optimization.runner import CanonicalRun
     from nautilus_trader.optimization.runner import FailedExperiment
     from nautilus_trader.optimization.space import Experiment
@@ -127,11 +128,27 @@ class SearchReport:
         The ranked survivors.
     failures : tuple[FailedExperiment, ...]
         The recorded failures, sorted by experiment digest.
+    evaluated : int, default 0
+        The number of distinct experiments evaluated, whether executed or reused from the cache.
+    space_size : int | None, default None
+        The number of experiments the searched space expands to, or None when undeclared.
+    executions : int, default 0
+        The number of experiments actually executed, which is the evaluation count a resumed run
+        lowers by reusing its cache.
+    scheme : ValidationScheme | None, default None
+        The validation scheme the search ran under, or None when undeclared.
+    seed : int | None, default None
+        The seed the search was derived from, or None when it declares none.
 
     """
 
     results: tuple[ExperimentResult, ...]
     failures: tuple[FailedExperiment, ...]
+    evaluated: int = 0
+    space_size: int | None = None
+    executions: int = 0
+    scheme: ValidationScheme | None = None
+    seed: int | None = None
 
     @property
     def digests(self) -> tuple[str, ...]:
@@ -139,6 +156,15 @@ class SearchReport:
         The canonical digests of the survivors, in ranked order.
         """
         return tuple(result.run.canonical_digest for result in self.results)
+
+    @property
+    def evaluated_fraction(self) -> float | None:
+        """
+        The fraction of the declared space that was evaluated, or None when the size is unknown.
+        """
+        if self.space_size is None or self.space_size <= 0:
+            return None
+        return self.evaluated / self.space_size
 
     def best(self) -> ExperimentResult | None:
         """
