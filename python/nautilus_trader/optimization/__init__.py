@@ -30,7 +30,18 @@ from nautilus_trader.optimization.assumptions import IntrabarPath as IntrabarPat
 from nautilus_trader.optimization.assumptions import TriggerFill as TriggerFill
 from nautilus_trader.optimization.assumptions import TriggerPrecedence as TriggerPrecedence
 from nautilus_trader.optimization.capability import ResearchCapabilityCode as ResearchCapabilityCode
+from nautilus_trader.optimization.capability import (
+    gapped_range_capability as gapped_range_capability,
+)
+from nautilus_trader.optimization.capability import history_capability as history_capability
 from nautilus_trader.optimization.capability import leakage_capability as leakage_capability
+from nautilus_trader.optimization.capability import (
+    pair_distinguishability_capability as pair_distinguishability_capability,
+)
+from nautilus_trader.optimization.capability import persistence_capability as persistence_capability
+from nautilus_trader.optimization.capability import (
+    screen_family_capability as screen_family_capability,
+)
 from nautilus_trader.optimization.capability import (
     significance_capability as significance_capability,
 )
@@ -64,6 +75,14 @@ from nautilus_trader.optimization.labels import label_series as label_series
 from nautilus_trader.optimization.metrics import statistic_values as statistic_values
 from nautilus_trader.optimization.optimizer import Optimizer as Optimizer
 from nautilus_trader.optimization.persistence import ExperimentStore as ExperimentStore
+from nautilus_trader.optimization.relative_value import (
+    PersistenceConvention as PersistenceConvention,
+)
+from nautilus_trader.optimization.relative_value import PersistenceEstimate as PersistenceEstimate
+from nautilus_trader.optimization.relative_value import RecursiveMemory as RecursiveMemory
+from nautilus_trader.optimization.relative_value import ScreenFamily as ScreenFamily
+from nautilus_trader.optimization.relative_value import ScreenOutcome as ScreenOutcome
+from nautilus_trader.optimization.relative_value import SignalWindow as SignalWindow
 from nautilus_trader.optimization.report import ExperimentResult as ExperimentResult
 from nautilus_trader.optimization.report import SearchReport as SearchReport
 from nautilus_trader.optimization.runner import BacktestRunner as BacktestRunner
@@ -139,16 +158,22 @@ __all__ = [
     "OutOfSampleStage",
     "Parameter",
     "ParameterSpace",
+    "PersistenceConvention",
+    "PersistenceEstimate",
+    "RecursiveMemory",
     "ResearchCapabilityCode",
     "ResearchResult",
     "ReturnCompounding",
     "ReturnMoments",
+    "ScreenFamily",
+    "ScreenOutcome",
     "SearchReport",
     "SearchStrategy",
     "SelectionRule",
     "SharpeEstimate",
     "SharpeFrequency",
     "SharpeSample",
+    "SignalWindow",
     "SignificanceReport",
     "SignificanceResult",
     "Split",
@@ -170,13 +195,18 @@ __all__ = [
     "WalkForwardStage",
     "WalkForwardWindow",
     "deflated_sharpe_ratio",
+    "gapped_range_capability",
+    "history_capability",
     "label_series",
     "leakage_capability",
     "load_config",
     "objective_definition_from_terms",
+    "pair_distinguishability_capability",
     "per_period_sharpe",
+    "persistence_capability",
     "return_moments",
     "run_config",
+    "screen_family_capability",
     "significance_capability",
     "significance_report",
     "split_capability",

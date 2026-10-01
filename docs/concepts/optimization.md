@@ -192,6 +192,42 @@ Every field is part of the definition digest, so two datasets assembled under di
 cannot share an identity. Extrema and trend-state labels are not built: they need the dataset
 contract of the earlier review, and neither it nor a stored point-in-time membership exists.
 
+## Relative-value declarations
+
+A screen over a universe of related series is a set of trials, and the trials are what the correction
+needs. A screen that reports its survivors without the family they came from has reported a selection
+with no count behind it, however good its gates are. `relative_value.py` carries the declarations a
+screen has to make before it reports anything, each one data with a digest and each one answered by
+the capability probe that owns its refusal.
+
+- `ScreenFamily` declares the universe and enumerates every unique pair of it, so a screen over `n`
+  series states `n * (n - 1) / 2` tests before any gate runs, and `ScreenOutcome` records the tests
+  that were evaluated and the ones that survived. `ScreenOutcome.significance` computes the
+  correction over the *evaluated* tests rather than over the survivors, because the dispersion the
+  correction needs is the dispersion of the trials that ran.
+- `PersistenceEstimate` carries a fitted coefficient on the lagged level together with the convention
+  its half-life is converted under: `ln(0.5) / ln(1 + coefficient)` for the discrete convention and
+  `-ln(2) / coefficient` for the continuous one, which are different numbers for one fit, so the
+  convention is declared rather than assumed. A fit below `minimum_observations`, or one outside the
+  revertible interval `(-1, 0)`, is answered as `unavailable` instead of being converted.
+- `SignalWindow` declares the fit window, the measurement window and the label whose measured reach
+  the signal carries, and refuses a declaration whose fit window does not end at or before the
+  measurement window's start. The reach is measured from the produced label series rather than
+  derived from the declaration, which is exactly what `leakage_capability` has to cover.
+- `RecursiveMemory` declares the state noise and the observation noise of a recursion together with
+  the memory the study believes it has and the warm-up it discards. A scalar recursion settles at
+  `P = (Q + sqrt(Q^2 + 4QR)) / 2` and `K = P / (P + R)`, so its memory is `1 / K` and is set by both
+  noises: a declaration whose memory is not the settled one, or whose warm-up is shorter than it, is
+  refused at construction rather than producing a number nobody chose.
+
+The refusals are the research vocabulary's own closed codes. A screen that declares no universe is
+`EFFECTIVE_TRIALS_UNDECLARED` and one whose family exceeds its declared maximum is
+`EFFECTIVE_TRIALS_OUT_OF_RANGE`; a gapped range, a history that begins after the window, two series
+that are indistinguishable up to scale and shift, and a universe too small for the requested family
+are `GAPPED_RANGE`, `HISTORY_AFTER_WINDOW`, `PAIR_INDISTINGUISHABLE` and `UNIVERSE_TOO_SMALL`; and a
+fit that does not revert is `NOT_MEAN_REVERTING`. Each carries the requirement it did not meet, and
+no caller reads a detail.
+
 ## Identity contracts
 
 Provenance is part of the meaning of a result: a number that cannot name the study that produced it,
@@ -398,9 +434,17 @@ runner and produce the same results, in the same order.
 - `LabelDefinition`, `LabelKind`, `ForwardAggregate`, `AlignmentConvention`, `MissingDataPolicy`,
   `LabelSeries`, `label_series`: the label policies on the target path, their alignment convention
   and the forward reach a leakage policy has to cover.
-- `ResearchCapabilityCode`, `leakage_capability`, `significance_capability`, `split_capability`: the
-  research domain's closed refusal codes and the probes that answer whether a request can be served
-  before the work is done.
+- `ResearchCapabilityCode`, `leakage_capability`, `significance_capability`, `split_capability`,
+  `screen_family_capability`, `persistence_capability`, `gapped_range_capability`,
+  `history_capability`, `pair_distinguishability_capability`: the research domain's closed refusal
+  codes and the probes that answer whether a request can be served before the work is done.
+- `ScreenFamily`, `ScreenOutcome`: the trial family a screen enumerates before its gates run, and the
+  tests it evaluated with the survivors among them.
+- `PersistenceEstimate`, `PersistenceConvention`: a fitted reversion speed with the convention its
+  half-life is reported under.
+- `SignalWindow`: the fit window, measurement window and label of a relative-value signal, with the
+  reach it measures over the bars.
+- `RecursiveMemory`: the calibration, memory and warm-up a recursive estimator declares.
 - `BarAmbiguityPolicy`, `IntrabarPath`, `TriggerPrecedence`, `TriggerFill`, `GapHandling`: the
   declared bar-derived execution assumptions and their identity.
 - `StudyIdentity`, `TrialIdentity`, `TrialProvenance`, `DatasetIdentity`, `UniverseIdentity`,
@@ -415,8 +459,8 @@ The subsystem lives in `python/nautilus_trader/optimization/`: the parameter mod
 enumeration in `search.py`, execution in `runner.py`, the statistics bridge in `metrics.py`, result
 aggregation in `report.py`, the sweep in `optimizer.py`, the stages in `stages.py`, the split
 contract and the leakage policy in `splits.py`, the label policies and their leakage reach in
-`labels.py`, the execution assumptions in `assumptions.py`, the identity contracts in `identity.py`,
-persistence in
+`labels.py`, the relative-value declarations and their refusals in `relative_value.py`, the execution
+assumptions in `assumptions.py`, the identity contracts in `identity.py`, persistence in
 `persistence.py`, process fan-out in `concurrency.py`, and the configuration-file entry point in
 `config.py`. The objective and constraints are the existing Rust types exposed from
 `nautilus_trader.analysis`; this subsystem adds no second objective and no second execution path.

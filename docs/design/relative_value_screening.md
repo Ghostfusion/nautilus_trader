@@ -16,10 +16,13 @@ No source code, fixture, documentation or dependency enters this repository, and
 added to do it: the measurements in section 5 use only `numpy`, which is already present transitively
 through `pandas` and is not declared as a project dependency by this document.
 
-**Status.** Analysis only. No production code changed, and no test was added: the measurements
-belong to a throwaway probe, not to the shipped suite. Sections 4 (candidate tranches) are proposals
-awaiting the owner's authorisation under the working agreement, which permits code changes only for
-defects unless a feature is authorised. Read section 4 as a menu, not as a work order.
+**Status.** Revision 2: the candidate tranches `RV1`-`RV5` are implemented, with the acceptance
+criteria in section 4 as their contract. The declarations live in
+`python/nautilus_trader/optimization/relative_value.py` and the refusals in `capability.py`, with
+their tests in `python/tests/unit/optimization/test_relative_value.py`. The measurements in sections
+2 and 5 still belong to a throwaway probe rather than to the shipped suite, and no gate is built:
+the screen enumerates and records its family, and the tests that decide whether a pair qualifies
+remain caller logic (section 6.4).
 
 **No market-specific semantics.** The source's subject matter is United States equity sector ETFs.
 Nothing proposed here touches a market rule: a screen family, an estimator's sample-size floor and a
@@ -30,9 +33,10 @@ market convention to be encoded.
 
 ### Revision summary
 
-| Revision | Change                                                                                                                                                                                                                         |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1        | Initial review: the source's mechanisms restated, nine defects established with measurements, the transferable obligations mapped onto the existing research contracts, and five candidate tranches proposed as not authorised |
+| Revision | Change                                                                                                                                                                                                                                                   |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Initial review: the source's mechanisms restated, nine defects established with measurements, the transferable obligations mapped onto the existing research contracts, and five candidate tranches proposed as not authorised                           |
+| 2        | `RV1`-`RV5` implemented: the declared screen family and the record of what it evaluated, the persistence estimate with its convention and floor, the signal window with its measured reach, the recursive memory declaration, and the data-side refusals |
 
 ## 1. What the source gets right
 
@@ -284,12 +288,16 @@ did not meet. A screen over a gapped, short or non-cointegrated universe should 
 
 ## 4. Candidate tranches
 
-All five are **not authorised, not implemented and not scheduled**. They are stated with acceptance
-criteria so that the owner can authorise one without a second design round, and so that a refusal is
-equally cheap. The listed order is cheapest first, and `RV1` is the only one that reuses an existing
-contract end to end.
+All five are **implemented**. The acceptance criteria below are their contract, so a tranche is
+finished when the criteria hold rather than when the names exist, and each tranche states the
+symbols that carry it. The listed order is cheapest first, and `RV1` is the only one that reuses an
+existing contract end to end.
 
 ### RV1. A declared screen family behind the statistical contract
+
+**Implemented as.** `ScreenFamily` (the declared universe and the pairs it enumerates),
+`ScreenOutcome` (the tests evaluated and the survivors, with `significance` recomputing the
+correction over the evaluated count), and `screen_family_capability` for the family's own refusals.
 
 **Specification.** A screen declares its universe, its pair enumeration and its gates; the enumerated
 family is counted before the gates run; the count and the surviving trials are carried into the
@@ -304,6 +312,9 @@ family; and a screen whose family is larger than the declared maximum answers
 
 ### RV2. A persistence estimator with a declared convention and a floor
 
+**Implemented as.** `PersistenceEstimate` with `PersistenceConvention`, and
+`persistence_capability` answering the floor and a fit outside the revertible interval.
+
 **Specification.** A single estimator of mean-reversion speed that declares its convention (discrete
 or continuous) and its minimum observation count, converts once, and refuses below the floor.
 
@@ -315,6 +326,9 @@ answer from an insufficient one.
 
 ### RV3. A relative-value window declaration
 
+**Implemented as.** `SignalWindow` with its measured `reach_ns`; the refusal of an exclusion shorter
+than that reach remains `leakage_capability` over the label series the window's label produces.
+
 **Specification.** A signal declares its fit window, its measurement window and its alignment, and
 reports the reach it covers, in the shape the label definition already uses.
 
@@ -324,6 +338,9 @@ a declaration whose fit window does not precede the measurement window is a cons
 
 ### RV4. A recursive estimator that declares its memory
 
+**Implemented as.** `RecursiveMemory`, refused at construction when its declared memory is not the
+memory its own calibration settles at, or when its warm-up is shorter than that memory.
+
 **Specification.** Any adaptive estimate declares its effective memory and its warm-up, and a
 warm-up shorter than the memory is refused.
 
@@ -332,6 +349,10 @@ declared tolerance; a warm-up shorter than the memory raises a construction erro
 refused estimate never reaches a caller as a number.
 
 ### RV5. Relative-value capability codes
+
+**Implemented as.** `GAPPED_RANGE`, `HISTORY_AFTER_WINDOW`, `PAIR_INDISTINGUISHABLE` and
+`UNIVERSE_TOO_SMALL`, with `NOT_MEAN_REVERTING` for `RV2`, answered by `gapped_range_capability`,
+`history_capability`, `pair_distinguishability_capability` and `screen_family_capability`.
 
 **Specification.** Extend the research capability vocabulary for the data-side refusals a screen
 produces: a gapped range, a series whose history begins after the screen's window, a pair whose
@@ -377,24 +398,35 @@ Regressor `x = 50 + cumsum(standard normal * 0.2)` recentred to a mean of 50, ob
 - Whether older releases of the price download library defaulted to unadjusted prices was not
   verified; section 2.8 states the version-dependence as a hazard, and the current default as
   verified from the library's own documentation.
+- The implementation computes no cointegration statistic, no hedge ratio and no position size, and
+  enforces none of the source's gate values: it declares the family, the convention, the windows and
+  the memory, and the tests that decide whether a pair qualifies are still the caller's.
+- No screen was run and no gate was measured: the code enumerates, records and refuses, and nothing
+  here reports how many pairs a real universe would have passed.
 
 ## 6. Open questions for the owner
 
 1. **Is a relative-value domain in scope at all?** Nothing here needs to be built for the source's
-   advice to be understood, and the record may be the entire deliverable.
+   advice to be understood, and the record may be the entire deliverable. *Answered at revision 2:*
+   the domain is in scope and `RV1`-`RV5` are implemented.
 2. **If it is, is `RV1` first?** It is the cheapest by a wide margin because it reuses the
    statistical contract, and it is the only one whose absence makes the other four unsafe to use: a
    half-life gate without a counted family is the defect in section 2.2 with extra steps.
+   *Answered at revision 2:* `RV1` was built first and is the only tranche that reuses the
+   statistical contract end to end.
 3. **Where would a persistence estimator live?** The precedents disagree and the choice matters. The
    portfolio statistics are compiled because they are calculations over a return series; the label
    layer is Python because a label is an object over a future path with a definition. A screen's
    estimator is batch and contextual, which points at the Python research surface, but a streaming
    relative-value indicator would point at the indicator crate, which already carries a rolling
-   z-score.
+   z-score. *Answered at revision 2:* the declarations are batch and contextual and live in the
+   Python research surface; nothing streams, so the indicator crate is untouched.
 4. **Are the source's gates wanted as policy objects?** Entry, exit, stop and holding bound could be
    declared data in the shape of the label definition, or left as caller logic. Declaring them is
    what makes them reviewable, and it is also what makes the leakage relation enforceable against
-   them.
+   them. *Open at revision 2:* the gates remain caller logic; the screen records which tests were
+   evaluated rather than declaring how each one is decided.
 5. **Does the source's options material need recording?** This document does not cover index premium
    selling or long-gamma structures: the research surface has no specification for them, no
-   measurement was taken, and the source's statements are unfalsifiable as written.
+   measurement was taken, and the source's statements are unfalsifiable as written. *Open at
+   revision 2:* nothing was added for the options material and none was measured.

@@ -28,19 +28,28 @@ the contract it consults would otherwise raise about.
 
 from __future__ import annotations
 
+import math
 from enum import Enum
 from enum import unique
 from typing import TYPE_CHECKING
 
 from nautilus_trader.core import Capability
+from nautilus_trader.optimization.significance import DEFAULT_MINIMUM_OBSERVATIONS
 from nautilus_trader.optimization.significance import StatisticalContract
 from nautilus_trader.optimization.significance import TrialDependence
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from nautilus_trader.optimization.labels import LabelSeries
     from nautilus_trader.optimization.splits import LeakagePolicy
     from nautilus_trader.optimization.splits import SplitContract
+
+
+# A standardised series needs a dispersion to scale by, which two observations is the fewest that
+# can define. A shorter series is a construction to refuse rather than a capability to answer.
+_PAIR_MINIMUM_OBSERVATIONS = 2
 
 
 @unique
@@ -59,6 +68,11 @@ class ResearchCapabilityCode(Enum):
     EFFECTIVE_TRIALS_UNEXPECTED = "EFFECTIVE_TRIALS_UNEXPECTED"
     EFFECTIVE_TRIALS_OUT_OF_RANGE = "EFFECTIVE_TRIALS_OUT_OF_RANGE"
     SPLIT_LAYOUT_UNSATISFIABLE = "SPLIT_LAYOUT_UNSATISFIABLE"
+    NOT_MEAN_REVERTING = "NOT_MEAN_REVERTING"
+    GAPPED_RANGE = "GAPPED_RANGE"
+    HISTORY_AFTER_WINDOW = "HISTORY_AFTER_WINDOW"
+    PAIR_INDISTINGUISHABLE = "PAIR_INDISTINGUISHABLE"
+    UNIVERSE_TOO_SMALL = "UNIVERSE_TOO_SMALL"
 
 
 def leakage_capability(series: LabelSeries, policy: LeakagePolicy) -> Capability:
@@ -242,3 +256,314 @@ def split_capability(contract: SplitContract, *, start: int, end: int) -> Capabi
         )
 
     return Capability.available()
+
+
+def persistence_capability(
+    coefficient: float,
+    observations: int,
+    *,
+    minimum_observations: int = DEFAULT_MINIMUM_OBSERVATIONS,
+) -> Capability:
+    """
+    Answer whether a mean-reversion fit supports a half-life.
+
+    The coefficient is the fitted coefficient on the lagged level of the spread, so a spread that
+    reverts gives a negative one. The floor is reported first, because below it the estimate is
+    biased toward reversion rather than merely noisy, and a fit outside the revertible interval is
+    a different answer from a fit that is simply too short.
+
+    A coefficient of zero means the level does not enter the first difference at all and a positive
+    one means the spread departs further each observation, so both are refused as not
+    mean-reverting; so is a coefficient at or below minus one, whose implied autoregressive
+    coefficient is not positive and whose discrete half-life therefore does not exist.
+
+    Parameters
+    ----------
+    coefficient : float
+        The fitted coefficient on the lagged level of the spread.
+    observations : int
+        The number of observations the fit used.
+    minimum_observations : int, default DEFAULT_MINIMUM_OBSERVATIONS
+        The declared floor below which the fit is not reported.
+
+    Returns
+    -------
+    Capability
+        Available when the fit is long enough and inside the revertible interval.
+
+    """
+    if observations < minimum_observations:
+        code = ResearchCapabilityCode.INSUFFICIENT_OBSERVATIONS.value
+        missing = minimum_observations - observations
+
+        return Capability.unavailable(
+            code,
+            f"a persistence estimate needs {minimum_observations} observations and the fit used "
+            f"{observations}",
+        ).requiring(f"{missing} more observations")
+
+    if coefficient >= 0.0 or coefficient <= -1.0:
+        code = ResearchCapabilityCode.NOT_MEAN_REVERTING.value
+
+        return Capability.unavailable(
+            code,
+            f"the fitted coefficient {coefficient!r} on the lagged level is outside the revertible "
+            "interval (-1, 0)",
+        ).requiring("a fit whose level coefficient is negative and above minus one")
+
+    return Capability.available()
+
+
+def screen_family_capability(
+    members: int,
+    *,
+    required_pairs: int | None = None,
+    maximum_family: int | None = None,
+) -> Capability:
+    """
+    Answer whether a screen over a declared universe enumerates a usable trial family.
+
+    The family is counted before any gate runs, because the correction needs the number of tests the
+    screen started from rather than the number that survived it. An undeclared universe is answered
+    rather than refused at construction, so a screen that never stated its members cannot report a
+    family; a universe too small for the requested family, and a family above the declared maximum,
+    are the two bounds on the size.
+
+    Parameters
+    ----------
+    members : int
+        The number of declared series in the universe.
+    required_pairs : int | None, default None
+        The number of pairs the screen requires, or None when it states no floor.
+    maximum_family : int | None, default None
+        The largest family the screen is allowed to enumerate, or None when it states no bound.
+
+    Returns
+    -------
+    Capability
+        Available when the universe is declared and the family is inside both bounds.
+
+    """
+    if members < 1:
+        code = ResearchCapabilityCode.EFFECTIVE_TRIALS_UNDECLARED.value
+
+        return Capability.unavailable(
+            code,
+            "the screen declares no universe, so the correction cannot count its trial family",
+        ).requiring("declare the screen universe")
+
+    family = members * (members - 1) // 2
+
+    if required_pairs is not None and family < required_pairs:
+        code = ResearchCapabilityCode.UNIVERSE_TOO_SMALL.value
+
+        return Capability.unavailable(
+            code,
+            f"the universe of {members} series enumerates {family} pairs and the screen requires "
+            f"{required_pairs}",
+        ).requiring(f"a universe enumerating at least {required_pairs} pairs")
+
+    if maximum_family is not None and family > maximum_family:
+        code = ResearchCapabilityCode.EFFECTIVE_TRIALS_OUT_OF_RANGE.value
+
+        return Capability.unavailable(
+            code,
+            f"the universe of {members} series enumerates {family} pairs, above the declared "
+            f"maximum of {maximum_family}",
+        ).requiring(f"a family of at most {maximum_family} pairs")
+
+    return Capability.available()
+
+
+def gapped_range_capability(
+    observed: Sequence[int],
+    *,
+    start: int,
+    end: int,
+    stride: int,
+) -> Capability:
+    """
+    Answer whether a range carries the cadence it declares without gaps.
+
+    The observations are the timestamps inside the half-open range, and the declared cadence is the
+    spacing they are expected at. A range with fewer observations than its cadence accounts for has
+    a gap of that many observations, which is a missing sample rather than a shorter range: a test
+    that silently drops a series with a gap reports the survivors as the universe.
+
+    Parameters
+    ----------
+    observed : Sequence[int]
+        The observation timestamps in the range, strictly increasing.
+    start : int
+        The range start in nanoseconds, inclusive.
+    end : int
+        The range end in nanoseconds, exclusive.
+    stride : int
+        The declared cadence in nanoseconds, positive.
+
+    Returns
+    -------
+    Capability
+        Available when the range carries at least the observations its cadence expects.
+
+    Raises
+    ------
+    ValueError
+        If the cadence or the range is not positive, or an observation is outside the range or
+        does not increase.
+
+    """
+    if stride <= 0:
+        raise ValueError(f"stride must be positive, was {stride}")
+    if end <= start:
+        raise ValueError(f"the range must be positive, was {start}..{end}")
+
+    carried = 0
+    previous: int | None = None
+
+    for timestamp in observed:
+        if timestamp < start or timestamp >= end:
+            raise ValueError(f"observation {timestamp} is outside the range {start}..{end}")
+        if previous is not None and timestamp <= previous:
+            raise ValueError(
+                f"observations must strictly increase, was {previous} then {timestamp}"
+            )
+
+        previous = timestamp
+        carried += 1
+
+    expected = -(-(end - start) // stride)
+    if carried >= expected:
+        return Capability.available()
+
+    code = ResearchCapabilityCode.GAPPED_RANGE.value
+    missing = expected - carried
+    unit = "observation" if missing == 1 else "observations"
+
+    return Capability.unavailable(
+        code,
+        f"the range {start}..{end} carries {carried} observations where a cadence of {stride} ns "
+        f"expects {expected}",
+    ).requiring(f"{missing} more {unit} between {start} and {end}")
+
+
+def history_capability(first_observation: int, *, required_start: int) -> Capability:
+    """
+    Answer whether a series begins early enough for the window that reads it.
+
+    A series whose history begins inside the window is shorter than the window rather than
+    approximately it, and the number of nanoseconds it is short by is the requirement.
+
+    Parameters
+    ----------
+    first_observation : int
+        The first observation timestamp of the series, in nanoseconds.
+    required_start : int
+        The window start the series has to reach, in nanoseconds.
+
+    Returns
+    -------
+    Capability
+        Available when the series begins at or before the window start.
+
+    """
+    if first_observation <= required_start:
+        return Capability.available()
+
+    code = ResearchCapabilityCode.HISTORY_AFTER_WINDOW.value
+    shortfall = first_observation - required_start
+
+    return Capability.unavailable(
+        code,
+        f"the series begins at {first_observation} while the window starts at {required_start}",
+    ).requiring(f"{shortfall} ns of earlier history")
+
+
+def _standardised(values: Sequence[float], where: str) -> tuple[float, ...]:
+    """
+    Return the values centred on their mean and scaled by their sample dispersion.
+
+    Raises
+    ------
+    ValueError
+        If the series is shorter than two observations, carries a non-finite value, or has no
+        dispersion to scale by.
+
+    """
+    if len(values) < _PAIR_MINIMUM_OBSERVATIONS:
+        raise ValueError(
+            f"{where} needs at least {_PAIR_MINIMUM_OBSERVATIONS} observations, was {len(values)}",
+        )
+
+    for value in values:
+        if not math.isfinite(value):
+            raise ValueError(f"{where} carries a non-finite value, was {value!r}")
+
+    mean = math.fsum(values) / len(values)
+    squared = math.fsum((value - mean) ** 2 for value in values)
+    dispersion = math.sqrt(squared / (len(values) - 1))
+    if dispersion == 0.0:
+        raise ValueError(f"{where} has no dispersion, so it cannot be standardised")
+
+    return tuple((value - mean) / dispersion for value in values)
+
+
+def pair_distinguishability_capability(
+    left: Sequence[float],
+    right: Sequence[float],
+    *,
+    tolerance: float,
+) -> Capability:
+    """
+    Answer whether two series are distinguishable rather than one series up to scale and shift.
+
+    The separation is the dispersion of the difference of the two standardised series, so an exact
+    affine copy of one series by the other has zero separation and a near-collinear pair lands
+    inside the tolerance. That is the input a cointegration test reports as an infinite statistic
+    and a p-value of zero, so a pair with no separation of its own is refused before it is tested.
+
+    Parameters
+    ----------
+    left : Sequence[float]
+        The observations of the first series.
+    right : Sequence[float]
+        The observations of the second series, over the same rows.
+    tolerance : float
+        The separation at or below which the two series are not distinguished, non-negative.
+
+    Returns
+    -------
+    Capability
+        Available when the two series are separated by more than the tolerance.
+
+    Raises
+    ------
+    ValueError
+        If the series are of different lengths, either is shorter than two observations, either
+        carries a non-finite value or no dispersion, or the tolerance is negative.
+
+    """
+    if len(left) != len(right):
+        raise ValueError(
+            f"a pair must share its rows, was {len(left)} and {len(right)} observations",
+        )
+    if not math.isfinite(tolerance) or tolerance < 0.0:
+        raise ValueError(f"tolerance must be finite and non-negative, was {tolerance!r}")
+
+    left_standard = _standardised(left, "the left series")
+    right_standard = _standardised(right, "the right series")
+    differences = [a - b for a, b in zip(left_standard, right_standard, strict=True)]
+    mean = math.fsum(differences) / len(differences)
+    squared = math.fsum((value - mean) ** 2 for value in differences)
+    separation = math.sqrt(squared / (len(differences) - 1))
+
+    if separation > tolerance:
+        return Capability.available()
+
+    code = ResearchCapabilityCode.PAIR_INDISTINGUISHABLE.value
+
+    return Capability.unavailable(
+        code,
+        f"the two series are separated by {separation!r} standard deviations, at or below the "
+        f"declared tolerance of {tolerance!r}",
+    ).requiring(f"a pair separated by more than {tolerance}")
