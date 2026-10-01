@@ -134,6 +134,12 @@ Execution reports, portfolio analysis, PnL accounting, and backtest post-run ana
 
 High-performance logging for both backtesting and live trading, implemented in Rust.
 
+## Notifications
+
+[Notifications](notifications.md) describes the closed notification event set, the router that
+turns the events already on the bus into outbound messages, per-sink bounded queues with coalescing
+and drop counters, and the SMTP and HTTP sink transports.
+
 ## Backtesting
 
 Backtest APIs, data and venue setup, execution sequencing, fill simulation,
