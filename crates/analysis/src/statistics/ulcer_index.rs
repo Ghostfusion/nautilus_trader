@@ -20,7 +20,10 @@ use std::collections::BTreeMap;
 use nautilus_core::UnixNanos;
 use nautilus_model::position::Position;
 
-use crate::statistic::PortfolioStatistic;
+use crate::{
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the Ulcer Index of portfolio returns.
 ///
@@ -72,6 +75,17 @@ impl PortfolioStatistic for UlcerIndex {
 
     fn name(&self) -> String {
         "Ulcer Index".to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "ulcer_index",
+            "Ulcer Index",
+            MetricUnits::Fraction,
+            MetricDirection::Minimize,
+            [MetricInput::Returns],
+        )
+        .with_tags([MetricTag::Drawdown, MetricTag::Risk])
     }
 
     fn calculate_from_returns(&self, returns: &BTreeMap<UnixNanos, f64>) -> Option<Self::Item> {

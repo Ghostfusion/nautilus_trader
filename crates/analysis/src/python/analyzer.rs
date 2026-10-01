@@ -23,7 +23,12 @@ use nautilus_model::{
 };
 use pyo3::prelude::*;
 
-use crate::{Returns, analyzer::PortfolioAnalyzer, python::statistic::statistic_from_pyobject};
+use crate::{
+    Returns,
+    analyzer::PortfolioAnalyzer,
+    metric::{MetricDefinition, MetricReport},
+    python::statistic::statistic_from_pyobject,
+};
 
 #[pymethods]
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -115,6 +120,82 @@ impl PortfolioAnalyzer {
     #[pyo3(name = "get_performance_stats_general")]
     fn py_get_performance_stats_general(&self) -> HashMap<String, f64> {
         self.get_performance_stats_general().into_iter().collect()
+    }
+
+    /// Returns the metric definition of every registered statistic, ordered by identity.
+    ///
+    /// This is the declarative metadata behind a report: the stable identity, the title
+    /// rendered from its parameters, and the units, tags, direction and inputs of each metric.
+    #[pyo3(name = "metric_definitions")]
+    fn py_metric_definitions(&self) -> Vec<MetricDefinition> {
+        let mut definitions: Vec<MetricDefinition> = self
+            .statistics
+            .values()
+            .map(|statistic| statistic.definition())
+            .collect();
+        definitions.sort_by(|a, b| a.id().cmp(b.id()));
+
+        definitions
+    }
+
+    /// Reports the requested return-based metrics, one result per request.
+    ///
+    /// Every requested metric appears in the report. A metric that is not registered, is not
+    /// defined over returns, requires a benchmark that was not supplied, or produced no
+    /// meaningful value is reported with its status and reason rather than dropped, which is
+    /// what distinguishes this from `Self.get_performance_stats_returns`.
+    ///
+    /// A request is matched against a statistic's stable definition id first and its display
+    /// name second, so both `"sharpe_ratio"` and `"Sharpe Ratio (252 days)"` address the same
+    /// metric. A statistic whose definition declares the benchmark input is calculated from the
+    /// returns and the supplied benchmark; when the definition requires a benchmark and
+    /// `benchmark` is `None` the metric is reported `unavailable` with
+    /// `MetricReason.MissingBenchmark` rather than calculated from the returns alone.
+    #[expect(clippy::needless_pass_by_value)]
+    #[pyo3(name = "report_returns_metrics", signature = (requested, benchmark=None))]
+    fn py_report_returns_metrics(
+        &self,
+        requested: Vec<String>,
+        benchmark: Option<BTreeMap<u64, f64>>,
+    ) -> MetricReport {
+        let benchmark: Option<Returns> = benchmark.map(|benchmark| {
+            benchmark
+                .into_iter()
+                .map(|(timestamp, value)| (UnixNanos::from(timestamp), value))
+                .collect()
+        });
+        let requested: Vec<&str> = requested.iter().map(String::as_str).collect();
+
+        self.report_returns_metrics(&requested, benchmark.as_ref())
+    }
+
+    /// Reports the requested position-based metrics, one result per request.
+    ///
+    /// See `Self.report_returns_metrics` for the status semantics.
+    #[expect(clippy::needless_pass_by_value)]
+    #[pyo3(name = "report_position_metrics")]
+    fn py_report_position_metrics(&self, requested: Vec<String>) -> MetricReport {
+        let requested: Vec<&str> = requested.iter().map(String::as_str).collect();
+
+        self.report_position_metrics(&requested)
+    }
+
+    /// Reports the requested realized-PnL-based metrics, one result per request.
+    ///
+    /// A metric whose definition requires the realized PnL input is reported `unavailable` with
+    /// `MetricReason.UnresolvedCurrency` when the portfolio holds realized PnLs in more than
+    /// one currency and the requested currency does not resolve, rather than being calculated
+    /// from an arbitrary subset of them.
+    #[expect(clippy::needless_pass_by_value)]
+    #[pyo3(name = "report_pnls_metrics", signature = (requested, currency=None))]
+    fn py_report_pnls_metrics(
+        &self,
+        requested: Vec<String>,
+        currency: Option<&Currency>,
+    ) -> MetricReport {
+        let requested: Vec<&str> = requested.iter().map(String::as_str).collect();
+
+        self.report_pnls_metrics(&requested, currency)
     }
 
     /// Records a position return at a specific timestamp.

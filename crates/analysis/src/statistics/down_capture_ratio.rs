@@ -21,6 +21,7 @@ use nautilus_model::position::Position;
 
 use crate::{
     Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
     statistics::up_capture_ratio::{MarketSide, capture_ratio},
 };
@@ -86,6 +87,18 @@ impl PortfolioStatistic for DownCaptureRatio {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "down_capture_ratio",
+            "Down Capture Ratio ({annualisation} days)",
+            MetricUnits::Fraction,
+            MetricDirection::Minimize,
+            [MetricInput::Returns, MetricInput::Benchmark],
+        )
+        .with_count("annualisation", self.period)
+        .with_tags([MetricTag::BenchmarkRelative, MetricTag::Annualised])
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

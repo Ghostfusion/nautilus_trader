@@ -21,6 +21,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from nautilus_trader._libnautilus.analysis import MetricDirection
+from nautilus_trader._libnautilus.analysis import MetricInput
+from nautilus_trader._libnautilus.analysis import MetricTag
+from nautilus_trader._libnautilus.analysis import MetricUnits
+
 
 if TYPE_CHECKING:
     from nautilus_trader.model import Position
@@ -60,6 +65,103 @@ class PortfolioStatistic:
         klass = type(self).__name__
         matches = re.finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", klass)
         return " ".join([m.group(0) for m in matches])
+
+    @property
+    def metric_id(self) -> str:
+        """
+        Return the stable machine-facing identity for the metric.
+
+        The default is the class name in snake_case, so `MyCustomRatio` becomes
+        `my_custom_ratio`. Override this to pin an identity that must not move when the class
+        is renamed, because a result reports this id rather than the display name.
+
+        Returns
+        -------
+        str
+
+        """
+        klass = type(self).__name__
+        matches = re.finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", klass)
+        return "_".join([m.group(0).lower() for m in matches])
+
+    @property
+    def units(self) -> MetricUnits:
+        """
+        Return the units the value is expressed in.
+
+        The default is `MetricUnits.RATIO`. Override this to declare what the value means.
+
+        Returns
+        -------
+        MetricUnits
+
+        """
+        return MetricUnits.RATIO
+
+    @property
+    def tags(self) -> tuple[MetricTag, ...]:
+        """
+        Return the cross-cutting tags for the metric.
+
+        The default is empty. Override this to declare the facets a report consumer can
+        select or group by.
+
+        Returns
+        -------
+        tuple[MetricTag, ...]
+
+        """
+        return ()
+
+    @property
+    def direction(self) -> MetricDirection:
+        """
+        Return the direction in which a consumer rewards the value.
+
+        The default is `MetricDirection.INFORMATIONAL`, which claims no direction. Override
+        this to declare that a larger or smaller value is preferred, or that a target value
+        is preferred together with `target`.
+
+        Returns
+        -------
+        MetricDirection
+
+        """
+        return MetricDirection.INFORMATIONAL
+
+    @property
+    def target(self) -> float | None:
+        """
+        Return the target value for a `MetricDirection.TARGET` metric.
+
+        The default is `None`. It is only read when `direction` is `MetricDirection.TARGET`.
+
+        Returns
+        -------
+        float or ``None``
+
+        """
+        return None
+
+    @property
+    def inputs(self) -> tuple[MetricInput, ...]:
+        """
+        Return the inputs the definition requires.
+
+        The default declares every input category the analyzer feeds. Override this to narrow
+        it, so a metric is reported as unavailable rather than omitted when the source it
+        needs was not supplied.
+
+        Returns
+        -------
+        tuple[MetricInput, ...]
+
+        """
+        return (
+            MetricInput.RETURNS,
+            MetricInput.REALIZED_PNLS,
+            MetricInput.POSITIONS,
+        )
 
     def calculate_from_returns(self, returns: dict[int, float]) -> float | None:
         """

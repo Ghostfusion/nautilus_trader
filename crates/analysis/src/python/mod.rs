@@ -21,6 +21,7 @@
 )]
 
 pub mod analyzer;
+pub mod metric;
 pub mod objective;
 pub mod snapshot;
 pub mod statistic;
@@ -46,6 +47,17 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::objective::ObjectiveTerm>()?;
     m.add_class::<crate::objective::Objective>()?;
     m.add_class::<crate::objective::Constraint>()?;
+
+    // Metric identity, metadata and status
+    m.add_class::<crate::metric::MetricUnits>()?;
+    m.add_class::<crate::metric::MetricTag>()?;
+    m.add_class::<crate::metric::MetricDirection>()?;
+    m.add_class::<crate::metric::MetricInput>()?;
+    m.add_class::<crate::metric::MetricStatus>()?;
+    m.add_class::<crate::metric::MetricReason>()?;
+    m.add_class::<crate::metric::MetricDefinition>()?;
+    m.add_class::<crate::metric::MetricResult>()?;
+    m.add_class::<crate::metric::MetricReport>()?;
 
     // Statistics - Returns-based
     m.add_class::<crate::statistics::cagr::CAGR>()?;

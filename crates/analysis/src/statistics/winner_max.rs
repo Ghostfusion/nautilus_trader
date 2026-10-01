@@ -17,7 +17,11 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the largest winning trade from realized PnLs.
 ///
@@ -46,6 +50,17 @@ impl PortfolioStatistic for MaxWinner {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "max_winner",
+            "Max Winner",
+            MetricUnits::Currency,
+            MetricDirection::Maximize,
+            [MetricInput::RealizedPnls],
+        )
+        .with_tags([MetricTag::Trade])
     }
 
     fn calculate_from_realized_pnls(&self, realized_pnls: &[f64]) -> Option<Self::Item> {

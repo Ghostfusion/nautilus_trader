@@ -26,6 +26,7 @@ use pyo3::{
 use crate::{
     Returns,
     analyzer::Statistic,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
     statistics::{
         alpha::Alpha, beta_ratio::BetaRatio, cagr::CAGR, calmar_ratio::CalmarRatio,
@@ -52,6 +53,7 @@ use crate::{
 /// Calculated values must be numeric, matching the `f64` item type the analyzer collects.
 pub struct PythonStatistic {
     name: String,
+    definition: MetricDefinition,
     statistic: Py<PyAny>,
 }
 
@@ -88,7 +90,135 @@ impl PythonStatistic {
             ));
         }
 
-        Ok(Self { name, statistic })
+        let definition = Self::metric_definition(py, &name, &statistic)?;
+
+        Ok(Self {
+            name,
+            definition,
+            statistic,
+        })
+    }
+
+    /// Builds the error for a mistyped declared attribute.
+    fn invalid_attribute(attribute: &str, expected: &str, error: impl std::fmt::Display) -> PyErr {
+        to_pyvalue_err(format!(
+            "Invalid statistic: `{attribute}` must be {expected}, was {error}"
+        ))
+    }
+
+    /// Builds the metric definition the wrapped object declares.
+    ///
+    /// The base class `nautilus_trader.analysis.PortfolioStatistic` declares every attribute, so a
+    /// subclass that overrides nothing still registers. An object that declares nothing at all -
+    /// a duck-typed statistic exposing only `name` and the calculation methods - also registers,
+    /// with its identity derived from its name and its metadata defaulted, and the definition is
+    /// marked [`MetricDefinition::is_derived`] so the difference is visible rather than silent. A
+    /// declaration that is present but mistyped is an error: a value outside the vocabulary is a
+    /// defect, not a default.
+    fn metric_definition(
+        py: Python<'_>,
+        name: &str,
+        statistic: &Py<PyAny>,
+    ) -> PyResult<MetricDefinition> {
+        let bound = statistic.bind(py);
+
+        // Returns `None` when the attribute is absent, which is what marks the definition derived;
+        // any other lookup failure is an error rather than a silent default.
+        let attribute = |attribute: &str| -> PyResult<Option<Bound<'_, PyAny>>> {
+            match bound.getattr(attribute) {
+                Ok(value) => Ok(Some(value)),
+                Err(e) if e.is_instance_of::<PyAttributeError>(py) => Ok(None),
+                Err(e) => Err(to_pyvalue_err(format!(
+                    "Invalid statistic: `{attribute}` could not be read, was {e}"
+                ))),
+            }
+        };
+
+        let id = match attribute("metric_id")? {
+            Some(value) => Some(
+                value
+                    .extract::<String>()
+                    .map_err(|e| Self::invalid_attribute("metric_id", "a string", e))?,
+            ),
+            None => None,
+        };
+
+        if id.as_ref().is_some_and(|id| id.trim().is_empty()) {
+            return Err(to_pyvalue_err(
+                "Invalid statistic: `metric_id` must not be empty".to_string(),
+            ));
+        }
+
+        let units = match attribute("units")? {
+            Some(value) => Some(
+                value
+                    .extract::<MetricUnits>()
+                    .map_err(|e| Self::invalid_attribute("units", "a MetricUnits", e))?,
+            ),
+            None => None,
+        };
+
+        let tags = match attribute("tags")? {
+            Some(value) => Some(
+                value
+                    .extract::<Vec<MetricTag>>()
+                    .map_err(|e| Self::invalid_attribute("tags", "a sequence of MetricTag", e))?,
+            ),
+            None => None,
+        };
+
+        let direction = match attribute("direction")? {
+            Some(value) => Some(
+                value
+                    .extract::<MetricDirection>()
+                    .map_err(|e| Self::invalid_attribute("direction", "a MetricDirection", e))?,
+            ),
+            None => None,
+        };
+
+        let target = match attribute("target")? {
+            Some(value) => Some(
+                value
+                    .extract::<Option<f64>>()
+                    .map_err(|e| Self::invalid_attribute("target", "a float or None", e))?,
+            ),
+            None => None,
+        };
+
+        let inputs =
+            match attribute("inputs")? {
+                Some(value) => Some(value.extract::<Vec<MetricInput>>().map_err(|e| {
+                    Self::invalid_attribute("inputs", "a sequence of MetricInput", e)
+                })?),
+                None => None,
+            };
+
+        // `target` is optional by definition, so its absence derives nothing.
+        let derived = id.is_none()
+            || units.is_none()
+            || tags.is_none()
+            || direction.is_none()
+            || inputs.is_none();
+
+        let definition = MetricDefinition::new(
+            id.unwrap_or_else(|| derived_metric_id(name)),
+            name.to_string(),
+            units.unwrap_or(MetricUnits::Ratio),
+            direction.unwrap_or(MetricDirection::Informational),
+            inputs.unwrap_or_else(defined_over_every_input),
+        )
+        .with_tags(tags.unwrap_or_default());
+
+        let definition = match target.flatten() {
+            Some(target) => definition.with_target(target),
+            None => definition,
+        };
+
+        Ok(if derived {
+            definition.as_derived()
+        } else {
+            definition
+        })
     }
 
     /// Returns the bound `method` callable, or `None` when the statistic does not define it.
@@ -176,11 +306,49 @@ impl PythonStatistic {
     }
 }
 
+/// Returns the metric identity derived from a statistic's display name.
+///
+/// A statistic that declares no identity gets its name in `snake_case`: lowercased, with each run of
+/// non-alphanumeric characters collapsed into a single underscore and the ends trimmed, so
+/// `"Category Sentinel"` becomes `category_sentinel`.
+fn derived_metric_id(name: &str) -> String {
+    let mut id = String::with_capacity(name.len());
+    let mut separator = false;
+
+    for character in name.chars() {
+        if character.is_alphanumeric() {
+            if separator && !id.is_empty() {
+                id.push('_');
+            }
+
+            id.extend(character.to_lowercase());
+            separator = false;
+        } else {
+            separator = true;
+        }
+    }
+
+    id
+}
+
+/// Returns the inputs a statistic that declares none is assumed to be defined over.
+fn defined_over_every_input() -> Vec<MetricInput> {
+    vec![
+        MetricInput::Returns,
+        MetricInput::RealizedPnls,
+        MetricInput::Positions,
+    ]
+}
+
 impl PortfolioStatistic for PythonStatistic {
     type Item = f64;
 
     fn name(&self) -> String {
         self.name.clone()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        self.definition.clone()
     }
 
     fn calculate_from_returns(&self, returns: &Returns) -> Option<f64> {

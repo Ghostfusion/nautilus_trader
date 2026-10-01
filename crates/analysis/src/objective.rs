@@ -412,7 +412,7 @@ pub fn supported_metric_names() -> &'static [String] {
 ///
 /// This is the matching source for [`supported_metric_names`]: the accepted strings are these
 /// statistics' own names, so they cannot drift from the statistics.
-fn builtin_statistics() -> Vec<Statistic> {
+pub(crate) fn builtin_statistics() -> Vec<Statistic> {
     vec![
         // Returns-based
         Arc::new(CAGR::new(None)),

@@ -329,6 +329,69 @@ Portfolio method that mutates state from inside one panics. Keep a statistic a p
 the data it is given.
 :::
 
+### Metric identity, metadata and status
+
+Every statistic declares a *definition* beside its calculation. The definition separates the
+machine-facing identity from the presentation:
+
+| Field       | Meaning                                                                                          |
+| ----------- | ------------------------------------------------------------------------------------------------ |
+| `id`        | Stable identity, e.g. `sharpe_ratio`. It does not carry a parameter.                             |
+| `title`     | Presentation, rendered from the declared parameters, e.g. `Sharpe Ratio (252 days)`.             |
+| `units`     | `RATIO`, `FRACTION` or `CURRENCY`.                                                               |
+| `tags`      | Cross-cutting facets, e.g. `RISK_ADJUSTED`, `DRAWDOWN`, `ANNUALISED`, `BENCHMARK_RELATIVE`.      |
+| `direction` | `MAXIMIZE`, `MINIMIZE`, `TARGET` or `INFORMATIONAL`, with `target` for a `TARGET` direction.     |
+| `inputs`    | The inputs the definition is defined over: `RETURNS`, `BENCHMARK`, `REALIZED_PNLS`, `POSITIONS`. |
+
+`PortfolioAnalyzer.metric_definitions()` returns the definition of every registered statistic,
+ordered by identity. Because the identity is stable, a result can name the metric that produced a
+value even when its title changes with a parameter, and a consumer can select metrics by tag or
+direction instead of by display string.
+
+A user statistic declares its own metadata by overriding the `metric_id`, `units`, `tags`,
+`direction`, `target` and `inputs` properties of `PortfolioStatistic`. The base class declares
+defaults, so a subclass that overrides nothing still registers; the defaults state that the metric
+is a dimensionless ratio, informational, and defined over every input category the analyzer feeds.
+A declaration that is not a member of the vocabulary is rejected at registration.
+
+An object that does not subclass the base class at all, and exposes only `name` and the calculation
+methods, also registers: its identity is derived from its name and its metadata is defaulted. Such a
+definition reports `is_derived` as `True`, so a report consumer can tell an inferred declaration from
+a made one rather than finding them indistinguishable.
+
+```python
+from nautilus_trader.analysis import MetricDirection, MetricTag, MetricUnits, PortfolioStatistic
+
+
+class TradeCount(PortfolioStatistic):
+    metric_id = "trade_count"
+    units = MetricUnits.RATIO
+    tags = (MetricTag.TRADE,)
+    direction = MetricDirection.INFORMATIONAL
+
+    def calculate_from_realized_pnls(self, realized_pnls: list[float]) -> float:
+        return float(len(realized_pnls))
+```
+
+The name-keyed dictionaries (`stats_pnls`, `stats_returns`, `stats_general`, and
+`get_performance_stats_*`) are unchanged. The report methods are the channel that keeps every
+requested metric visible:
+
+```python
+report = analyzer.report_returns_metrics(["max_drawdown", "long_ratio", "no_such_metric"])
+
+report.get("max_drawdown").status   # MetricStatus.COMPUTED
+report.get("long_ratio").status     # MetricStatus.UNAVAILABLE (UNSUPPORTED_INPUT)
+report.get("no_such_metric").status # MetricStatus.NOT_REGISTERED (NOT_IN_METRIC_SET)
+```
+
+Four statuses are distinguished, and every status other than `COMPUTED` carries a reason code:
+`COMPUTED` is a value; `UNAVAILABLE` means an input the definition requires was absent;
+`INVALID` means the inputs were present and no meaningful value could be produced, such as a
+non-finite input or a degenerate series; `NOT_REGISTERED` means the metric is not in the metric set
+at all. A name-keyed dictionary cannot distinguish the last two from a metric that was simply never
+asked for, so a data defect would look like an applicability rule.
+
 ## Returns: position vs portfolio
 
 The analyzer tracks two distinct return series:

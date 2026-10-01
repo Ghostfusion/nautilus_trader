@@ -17,7 +17,11 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the Sharpe ratio for portfolio returns.
 ///
@@ -68,6 +72,18 @@ impl PortfolioStatistic for SharpeRatio {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "sharpe_ratio",
+            "Sharpe Ratio ({annualisation} days)",
+            MetricUnits::Ratio,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_count("annualisation", self.period)
+        .with_tags([MetricTag::RiskAdjusted, MetricTag::Annualised])
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

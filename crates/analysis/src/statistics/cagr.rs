@@ -20,7 +20,10 @@ use std::collections::BTreeMap;
 use nautilus_core::UnixNanos;
 use nautilus_model::position::Position;
 
-use crate::statistic::PortfolioStatistic;
+use crate::{
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the Compound Annual Growth Rate (CAGR) for returns.
 ///
@@ -66,6 +69,18 @@ impl PortfolioStatistic for CAGR {
 
     fn name(&self) -> String {
         format!("CAGR ({} days)", self.period)
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "cagr",
+            "CAGR ({annualisation} days)",
+            MetricUnits::Fraction,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_count("annualisation", self.period)
+        .with_tags([MetricTag::Returns, MetricTag::Annualised])
     }
 
     fn calculate_from_returns(&self, returns: &BTreeMap<UnixNanos, f64>) -> Option<Self::Item> {

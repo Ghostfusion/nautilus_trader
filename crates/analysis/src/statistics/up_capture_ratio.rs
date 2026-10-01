@@ -19,7 +19,11 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the up capture ratio of portfolio returns relative to a benchmark.
 ///
@@ -82,6 +86,18 @@ impl PortfolioStatistic for UpCaptureRatio {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "up_capture_ratio",
+            "Up Capture Ratio ({annualisation} days)",
+            MetricUnits::Fraction,
+            MetricDirection::Maximize,
+            [MetricInput::Returns, MetricInput::Benchmark],
+        )
+        .with_count("annualisation", self.period)
+        .with_tags([MetricTag::BenchmarkRelative, MetricTag::Annualised])
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

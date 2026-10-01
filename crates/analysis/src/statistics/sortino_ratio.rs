@@ -17,7 +17,11 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the Sortino ratio for portfolio returns.
 ///
@@ -71,6 +75,18 @@ impl PortfolioStatistic for SortinoRatio {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "sortino_ratio",
+            "Sortino Ratio ({annualisation} days)",
+            MetricUnits::Ratio,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_count("annualisation", self.period)
+        .with_tags([MetricTag::RiskAdjusted, MetricTag::Annualised])
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

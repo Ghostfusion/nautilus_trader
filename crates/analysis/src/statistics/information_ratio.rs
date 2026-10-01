@@ -20,7 +20,10 @@ use std::fmt::Display;
 use nautilus_model::position::Position;
 
 use crate::{
-    Returns, statistic::PortfolioStatistic, statistics::tracking_error::active_return_stats,
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+    statistics::tracking_error::active_return_stats,
 };
 
 /// Calculates the information ratio of portfolio returns relative to a benchmark.
@@ -73,6 +76,22 @@ impl PortfolioStatistic for InformationRatio {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "information_ratio",
+            "Information Ratio ({annualisation} days)",
+            MetricUnits::Ratio,
+            MetricDirection::Maximize,
+            [MetricInput::Returns, MetricInput::Benchmark],
+        )
+        .with_count("annualisation", self.period)
+        .with_tags([
+            MetricTag::RiskAdjusted,
+            MetricTag::BenchmarkRelative,
+            MetricTag::Annualised,
+        ])
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

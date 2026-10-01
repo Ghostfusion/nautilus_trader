@@ -18,7 +18,7 @@ use std::{collections::BTreeMap, fmt::Debug};
 use nautilus_core::DurationNanos;
 use nautilus_model::position::Position;
 
-use crate::Returns;
+use crate::{Returns, metric::MetricDefinition};
 
 const IMPL_ERR: &str = "is not implemented for";
 
@@ -38,6 +38,14 @@ pub trait PortfolioStatistic: Debug {
 
     /// Returns the name of this statistic for display and identification purposes.
     fn name(&self) -> String;
+
+    /// Returns the declarative definition of this metric.
+    ///
+    /// The definition carries a stable machine-facing id, a title rendered from named
+    /// parameters, and the metadata a report consumer needs: units, tags, direction and the
+    /// inputs the statistic is defined over. It is required rather than defaulted, so that a
+    /// statistic cannot reach a report without declaring what it reports and over what.
+    fn definition(&self) -> MetricDefinition;
 
     /// Calculates the statistic from time-indexed returns data.
     ///
@@ -155,6 +163,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::metric::{MetricDirection, MetricInput, MetricUnits};
 
     #[derive(Debug)]
     struct DummyStat;
@@ -164,6 +173,16 @@ mod tests {
 
         fn name(&self) -> String {
             "DummyStat".to_string()
+        }
+
+        fn definition(&self) -> MetricDefinition {
+            MetricDefinition::new(
+                "dummy_stat",
+                "DummyStat",
+                MetricUnits::Ratio,
+                MetricDirection::Informational,
+                [MetricInput::Returns],
+            )
         }
     }
 

@@ -17,7 +17,11 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the annualized volatility (standard deviation) of portfolio returns.
 ///
@@ -69,6 +73,18 @@ impl PortfolioStatistic for ReturnsVolatility {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "returns_volatility",
+            "Returns Volatility ({annualisation} days)",
+            MetricUnits::Fraction,
+            MetricDirection::Minimize,
+            [MetricInput::Returns],
+        )
+        .with_count("annualisation", self.period)
+        .with_tags([MetricTag::Risk, MetricTag::Annualised])
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

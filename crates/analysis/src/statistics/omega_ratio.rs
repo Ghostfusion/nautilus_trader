@@ -20,7 +20,11 @@ use std::fmt::Display;
 use nautilus_core::correctness::check_predicate_true;
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the Omega ratio of portfolio returns.
 ///
@@ -88,6 +92,18 @@ impl PortfolioStatistic for OmegaRatio {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "omega_ratio",
+            "Omega Ratio (threshold {threshold})",
+            MetricUnits::Ratio,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_number("threshold", self.threshold)
+        .with_tags([MetricTag::RiskAdjusted, MetricTag::Tail])
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

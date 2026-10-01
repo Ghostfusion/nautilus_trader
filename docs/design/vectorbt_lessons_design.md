@@ -12,10 +12,10 @@ either exposes or closes, never as a port of a vectorbt subsystem.
 **Status.** Architecture approved; contracts under revision. The probe changed no production code,
 because the authorising instruction permits code changes only for defects and none were found
 (section 5.1 of the companion document). The owner then authorised implementation in the order of
-section 12, and **D2 is implemented** (section 4.2 of the companion document records it); every other
-item here is specified and ordered but marked **not implemented**. The identity contracts in section 8
-are the centre of gravity: they are cross-cutting, they sit underneath the decisions rather than
-beside them, and the remaining sections are read as their consequences.
+section 12, and **D1 and D2 are implemented** (sections 4.1 and 4.2 of the companion document record
+them); every other item here is specified and ordered but marked **not implemented**. The identity
+contracts in section 8 are the centre of gravity: they are cross-cutting, they sit underneath the
+decisions rather than beside them, and the remaining sections are read as their consequences.
 
 ### Revision summary
 
@@ -25,6 +25,7 @@ beside them, and the remaining sections are read as their consequences.
 | 2        | Decisions renumbered and classified by layer; the deflated Sharpe ratio rescoped to a first statistic behind a trial-provenance requirement; leakage became a policy with optional values; the ambiguity resolution became a versioned policy; metrics gained a direction; labels split into tranches; caching deferred; the provider adapter relocated; study identity added                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 3        | Identity promoted to a first-class contract section covering study, trial, dataset, universe and result, with the trial level made explicit; the D1/D3/D4 graph split into a contract graph and a work order, so the graph no longer contradicts its own explanation; the leakage policy gained an exclusion relation rather than a time distance alone; the ambiguity default became an owner decision separate from the policy contract, and ambiguity was separated from execution simulation; the statistical contract for the correction was specified; the stability obligation was classified by kernel type; the metric status vocabulary gained `invalid`; capability codes became domain-scoped; the label definition gained an alignment convention; a no-decision-authority invariant was added; two identity questions were added to the open list |
 | 4        | D2 implemented after the owner authorised the work order: the split contract and the leakage exclusion relation now exist in `nautilus_trader.optimization.splits`, the walk-forward stages consume the contract with their windows unchanged, and the policy is reachable from the configuration document. No other decision changed status. Section 4.2 of the companion document records the implementation, its deviations and its verification                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 5        | D1 implemented: the metric vocabulary is closed and declared (units, tags, action-oriented directions with an optional target, inputs, four statuses and seven reason codes), every statistic declares a `MetricDefinition`, and report methods keep every requested metric visible with a status and a reason. Question 6 of section 14 is answered by the implementation as a replaceable proposal, and section 4.1 of the companion document records the two deviations                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ## 1. Purpose and scope
 
@@ -416,6 +417,14 @@ means the requirement was exposed by the comparison and vectorbt does not close 
 architecture, confirmed`** means the pattern is already ours and vectorbt merely agrees with it.
 
 ### L1 Metric identity is not metric presentation
+
+**Status.** Implemented in revision 5: `crates/analysis/src/metric.rs` holds the closed vocabularies,
+`MetricDefinition` and `MetricResult`, the `PortfolioStatistic` trait requires a `definition()`, all 34
+built-in statistics declare one, and the analyzer reports every requested metric with a status and a
+reason. The companion document's section 4.1 records what was built, its two deviations (the rendered
+display string is preserved, and `definition()` is required rather than defaulted) and the
+verification. The units, tags and direction membership is proposed by the implementation and remains
+the owner's to replace.
 
 vectorbt declares each statistic as data: a title for humans, a calculation resolved by name or
 callable, an optional post-processing step, an aggregation function, tags, and filters that decide
@@ -842,7 +851,7 @@ every later phase records into them.
 
 1. **D2, the split contract and its leakage policy.** Implemented. First, because every out-of-sample number
    depends on it and because D6 and D4 both consume it.
-2. **D1, metric identity, status and reason codes.** The contract that defines the shape of a result.
+2. **D1, metric identity, status and reason codes.** Implemented. The contract that defines the shape of a result.
 3. **D3, the ambiguity policy and its identity.** Because a result that cannot name its assumptions
    cannot be compared with another result.
 4. **Study identity and trial identity** (8.1, 8.2), with the selection rule included.
@@ -884,19 +893,19 @@ D11, which records a decision to keep the current direction.
 Each decision carries its layer, because the layers are adopted for different reasons and phased
 differently.
 
-| ID  | Decision                                                                                    | Layer                 | Provenance                       | Status                                                            |
-| --- | ------------------------------------------------------------------------------------------- | --------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| D1  | Metric identity, metadata, four-state status and reason codes                               | Research integrity    | vectorbt, extended               | Adopt                                                             |
-| D2  | Reusable split contract with a leakage exclusion relation                                   | Research integrity    | vectorbt, extended               | Implemented (companion 4.2); concept mandatory, values optional   |
-| D3  | Ambiguity policy identity, distinct from execution simulation; default is an owner decision | Research integrity    | Comparison                       | Adopt                                                             |
-| D4  | Multiple-testing-aware reporting with a specified statistical contract                      | Research integrity    | vectorbt, extended               | Adopt; the deflated Sharpe ratio is the first statistic           |
-| D5  | Numerical-stability obligation classified by kernel type                                    | Numerical correctness | vectorbt                         | Adopt                                                             |
-| D6  | Label and target policy framework, with alignment in the definition                         | Research integrity    | vectorbt, extended               | Adopt in tranches; the first tranche is scoped                    |
-| D7  | Secondary implementation parity protocol                                                    | Engineering policy    | vectorbt                         | Adopt as policy; implement only if a second implementation exists |
-| D8  | Domain-scoped capability results, sharing one shape                                         | Engineering policy    | Existing architecture, confirmed | Generalize the existing pattern                                   |
-| D9  | Declarative research caching                                                                | Deferred              | vectorbt                         | Deferred until a measured need; identity model specified          |
-| D10 | Provider adapter                                                                            | Relocated             | vectorbt, extended               | Moved to the data-provider architecture review                    |
-| D11 | Rust schema ownership                                                                       | No change             | Comparison                       | Keep our direction; recorded disagreement                         |
+| ID  | Decision                                                                                    | Layer                 | Provenance                       | Status                                                                           |
+| --- | ------------------------------------------------------------------------------------------- | --------------------- | -------------------------------- | -------------------------------------------------------------------------------- |
+| D1  | Metric identity, metadata, four-state status and reason codes                               | Research integrity    | vectorbt, extended               | Implemented (companion 4.1); the vocabulary membership is the owner's to replace |
+| D2  | Reusable split contract with a leakage exclusion relation                                   | Research integrity    | vectorbt, extended               | Implemented (companion 4.2); concept mandatory, values optional                  |
+| D3  | Ambiguity policy identity, distinct from execution simulation; default is an owner decision | Research integrity    | Comparison                       | Adopt                                                                            |
+| D4  | Multiple-testing-aware reporting with a specified statistical contract                      | Research integrity    | vectorbt, extended               | Adopt; the deflated Sharpe ratio is the first statistic                          |
+| D5  | Numerical-stability obligation classified by kernel type                                    | Numerical correctness | vectorbt                         | Adopt                                                                            |
+| D6  | Label and target policy framework, with alignment in the definition                         | Research integrity    | vectorbt, extended               | Adopt in tranches; the first tranche is scoped                                   |
+| D7  | Secondary implementation parity protocol                                                    | Engineering policy    | vectorbt                         | Adopt as policy; implement only if a second implementation exists                |
+| D8  | Domain-scoped capability results, sharing one shape                                         | Engineering policy    | Existing architecture, confirmed | Generalize the existing pattern                                                  |
+| D9  | Declarative research caching                                                                | Deferred              | vectorbt                         | Deferred until a measured need; identity model specified                         |
+| D10 | Provider adapter                                                                            | Relocated             | vectorbt, extended               | Moved to the data-provider architecture review                                   |
+| D11 | Rust schema ownership                                                                       | No change             | Comparison                       | Keep our direction; recorded disagreement                                        |
 
 The identity contracts in section 8 carry no decision identifier. They are cross-cutting requirements
 that the decisions above express, not a twelfth decision competing with them.
@@ -908,7 +917,7 @@ item may be called done.
 
 | ID  | Minimum acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Every registered statistic declares a title, units, tags and direction; a result reports a status from the four-state vocabulary and a reason code from that domain's closed set for every statistic that is not computed; a test asserts that `invalid` and `unavailable` are distinguishable on the same metric                                                                                                                                                                     |
+| D1  | Every registered statistic declares a title, units, tags and direction; a result reports a status from the four-state vocabulary and a reason code from that domain's closed set for every statistic that is not computed; a test asserts that `invalid` and `unavailable` are distinguishable on the same metric. Met: implemented, with the tests listed in companion document 4.1                                                                                                  |
 | D2  | A split is produced by a contract that works for any series length, supports fractional and absolute set lengths, filters short windows and takes a leakage policy capable of expressing purge before, purge after, embargo after and a label overlap rule; a test asserts that no training observation overlaps an evaluation observation's label information; a zero interval without a justification is refused. Met: implemented, with the tests listed in companion document 4.2 |
 | D3  | Each bar-derived assumption is documented, an ambiguous configuration is rejected, and a result records the ambiguity policy identity; a test asserts that two results produced under different policy versions are distinguishable; the default is named by an owner decision and, if pessimistic, is tested as such                                                                                                                                                                 |
 | D4  | A study records study and trial identity; every element of the statistical contract in L4 is specified before the first test is written; the value is reported, never a gate                                                                                                                                                                                                                                                                                                          |
@@ -943,7 +952,11 @@ Ordered by what they gate. The placement questions are preconditions (section 1.
 5. **Does a multiple-testing correction ever become a gate?** If it does, it is a risk rule and belongs
    with the risk caps, under invariant 7.6. The same question was left open by the earlier review.
 6. **What is the units, tags and direction vocabulary, and is it closed?** A closed set is checkable;
-   an open set is a spelling competition. This gates D1.
+   an open set is a spelling competition. The implementation (companion document 4.1) proposes a
+   closed vocabulary and the mechanism does not depend on its membership, so the owner may replace
+   members without touching the contract: units `ratio`, `fraction`, `currency`; ten tags from
+   `returns` to `annualised`; the four directions; four inputs; four statuses; seven reason codes,
+   each mapped to one status.
 7. **Which kernel classes exist, and which class does each research kernel belong to?** The
    classification is part of the D5 specification, so an unclassified kernel is an incomplete
    obligation. This gates D5.

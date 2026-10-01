@@ -20,7 +20,11 @@ use std::fmt::Display;
 use nautilus_core::correctness::check_predicate_true;
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the historical Value at Risk (`VaR`) of portfolio returns.
 ///
@@ -118,6 +122,18 @@ impl PortfolioStatistic for ValueAtRisk {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "value_at_risk",
+            "Value at Risk (confidence {confidence})",
+            MetricUnits::Fraction,
+            MetricDirection::Minimize,
+            [MetricInput::Returns],
+        )
+        .with_number("confidence", self.confidence)
+        .with_tags([MetricTag::Risk, MetricTag::Tail])
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

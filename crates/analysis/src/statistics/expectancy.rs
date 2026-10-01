@@ -18,7 +18,11 @@ use std::fmt::Display;
 use nautilus_model::position::Position;
 
 use super::{loser_avg::AvgLoser, winner_avg::AvgWinner};
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the expectancy of a trading strategy based on realized PnLs.
 ///
@@ -57,6 +61,17 @@ impl PortfolioStatistic for Expectancy {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "expectancy",
+            "Expectancy",
+            MetricUnits::Currency,
+            MetricDirection::Maximize,
+            [MetricInput::RealizedPnls],
+        )
+        .with_tags([MetricTag::Trade])
     }
 
     fn calculate_from_realized_pnls(&self, realized_pnls: &[f64]) -> Option<Self::Item> {

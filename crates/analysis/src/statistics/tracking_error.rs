@@ -19,7 +19,11 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the tracking error of portfolio returns relative to a benchmark.
 ///
@@ -72,6 +76,23 @@ impl PortfolioStatistic for TrackingError {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "tracking_error",
+            "Tracking Error ({annualisation} days)",
+            MetricUnits::Fraction,
+            MetricDirection::Target,
+            [MetricInput::Returns, MetricInput::Benchmark],
+        )
+        .with_count("annualisation", self.period)
+        .with_target(0.0)
+        .with_tags([
+            MetricTag::Risk,
+            MetricTag::BenchmarkRelative,
+            MetricTag::Annualised,
+        ])
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

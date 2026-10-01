@@ -21,6 +21,7 @@ use nautilus_core::UnixNanos;
 use nautilus_model::position::Position;
 
 use crate::{
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
     statistics::{cagr::CAGR, max_drawdown::MaxDrawdown},
 };
@@ -68,6 +69,22 @@ impl PortfolioStatistic for CalmarRatio {
 
     fn name(&self) -> String {
         format!("Calmar Ratio ({} days)", self.period)
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "calmar_ratio",
+            "Calmar Ratio ({annualisation} days)",
+            MetricUnits::Ratio,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_count("annualisation", self.period)
+        .with_tags([
+            MetricTag::RiskAdjusted,
+            MetricTag::Drawdown,
+            MetricTag::Annualised,
+        ])
     }
 
     fn calculate_from_returns(&self, returns: &BTreeMap<UnixNanos, f64>) -> Option<Self::Item> {

@@ -19,7 +19,12 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic, statistics::beta_ratio::beta};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+    statistics::beta_ratio::beta,
+};
 
 /// Calculates Jensen's alpha of portfolio returns relative to a benchmark.
 ///
@@ -79,6 +84,23 @@ impl PortfolioStatistic for Alpha {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "alpha",
+            "Alpha ({annualisation} days)",
+            MetricUnits::Ratio,
+            MetricDirection::Maximize,
+            [MetricInput::Returns, MetricInput::Benchmark],
+        )
+        .with_count("annualisation", self.period)
+        .with_parameter("risk_free_rate", format!("{}", self.risk_free_rate))
+        .with_tags([
+            MetricTag::RiskAdjusted,
+            MetricTag::BenchmarkRelative,
+            MetricTag::Annualised,
+        ])
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

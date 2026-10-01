@@ -17,7 +17,11 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the profit factor based on portfolio returns.
 ///
@@ -59,6 +63,17 @@ impl PortfolioStatistic for ProfitFactor {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "profit_factor",
+            "Profit Factor",
+            MetricUnits::Ratio,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_tags([MetricTag::Trade])
     }
 
     fn calculate_from_returns(&self, returns: &Returns) -> Option<Self::Item> {

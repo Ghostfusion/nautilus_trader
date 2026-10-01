@@ -17,7 +17,11 @@ use std::fmt::Display;
 
 use nautilus_model::{enums::OrderSide, position::Position};
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the ratio of long positions to total positions.
 ///
@@ -60,6 +64,18 @@ impl PortfolioStatistic for LongRatio {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "long_ratio",
+            "Long Ratio",
+            MetricUnits::Ratio,
+            MetricDirection::Informational,
+            [MetricInput::Positions],
+        )
+        .with_count("precision", self.precision)
+        .with_tags([MetricTag::Exposure])
     }
 
     fn calculate_from_positions(&self, positions: &[Position]) -> Option<Self::Item> {

@@ -17,7 +17,11 @@
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the tail ratio of portfolio returns.
 ///
@@ -90,6 +94,17 @@ impl PortfolioStatistic for TailRatio {
 
     fn name(&self) -> String {
         "Tail Ratio".to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "tail_ratio",
+            "Tail Ratio",
+            MetricUnits::Ratio,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_tags([MetricTag::Tail, MetricTag::Risk])
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

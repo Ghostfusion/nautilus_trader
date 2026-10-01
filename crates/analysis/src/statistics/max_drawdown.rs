@@ -20,7 +20,10 @@ use std::collections::BTreeMap;
 use nautilus_core::UnixNanos;
 use nautilus_model::position::Position;
 
-use crate::statistic::PortfolioStatistic;
+use crate::{
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the Maximum Drawdown for returns.
 ///
@@ -62,6 +65,17 @@ impl PortfolioStatistic for MaxDrawdown {
 
     fn name(&self) -> String {
         "Max Drawdown".to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "max_drawdown",
+            "Max Drawdown",
+            MetricUnits::Fraction,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_tags([MetricTag::Drawdown, MetricTag::Risk])
     }
 
     fn calculate_from_returns(&self, returns: &BTreeMap<UnixNanos, f64>) -> Option<Self::Item> {

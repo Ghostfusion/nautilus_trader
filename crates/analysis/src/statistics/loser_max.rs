@@ -17,7 +17,11 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the largest losing trade (most negative PnL) from realized PnLs.
 ///
@@ -46,6 +50,17 @@ impl PortfolioStatistic for MaxLoser {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "max_loser",
+            "Max Loser",
+            MetricUnits::Currency,
+            MetricDirection::Maximize,
+            [MetricInput::RealizedPnls],
+        )
+        .with_tags([MetricTag::Trade])
     }
 
     fn calculate_from_realized_pnls(&self, realized_pnls: &[f64]) -> Option<Self::Item> {

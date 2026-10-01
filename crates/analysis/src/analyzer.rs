@@ -29,6 +29,9 @@ use rust_decimal::Decimal;
 
 use crate::{
     Returns,
+    metric::{
+        MetricDefinition, MetricInput, MetricReason, MetricReport, MetricResult, MetricStatus,
+    },
     snapshot::PortfolioStatistics,
     statistic::PortfolioStatistic,
     statistics::{
@@ -835,6 +838,191 @@ impl PortfolioAnalyzer {
         output
     }
 
+    /// Reports the requested return-based metrics, one result per request.
+    ///
+    /// Every requested metric appears in the report. A metric that is not registered, is not
+    /// defined over returns, requires a benchmark that was not supplied, or produced no
+    /// meaningful value is reported with its status and reason rather than dropped, which is
+    /// what distinguishes this from [`Self::get_performance_stats_returns`].
+    ///
+    /// A request is matched against a statistic's stable definition id first and its display
+    /// name second, so both `"sharpe_ratio"` and `"Sharpe Ratio (252 days)"` address the same
+    /// metric. A statistic whose definition declares the benchmark input is calculated from the
+    /// returns and the supplied benchmark; when the definition requires a benchmark and
+    /// `benchmark` is `None` the metric is reported `unavailable` with
+    /// [`MetricReason::MissingBenchmark`] rather than calculated from the returns alone.
+    #[must_use]
+    pub fn report_returns_metrics(
+        &self,
+        requested: &[&str],
+        benchmark: Option<&Returns>,
+    ) -> MetricReport {
+        let returns = self.returns();
+        let mut results = Vec::with_capacity(requested.len());
+
+        for requested in requested {
+            let Some(statistic) = self.find_metric(requested) else {
+                results.push(not_registered(requested));
+                continue;
+            };
+
+            let definition = statistic.definition();
+
+            if !definition.is_defined_over(MetricInput::Returns) {
+                results.push(not_computed(
+                    &definition,
+                    MetricReason::UnsupportedInput,
+                    MetricStatus::Unavailable,
+                ));
+                continue;
+            }
+
+            let mut input_non_finite = has_non_finite(returns);
+            let mut input_present = !returns.is_empty();
+
+            let value = if definition.is_defined_over(MetricInput::Benchmark) {
+                let Some(benchmark) = benchmark else {
+                    results.push(not_computed(
+                        &definition,
+                        MetricReason::MissingBenchmark,
+                        MetricStatus::Unavailable,
+                    ));
+                    continue;
+                };
+
+                input_non_finite |= has_non_finite(benchmark);
+                input_present &= !benchmark.is_empty();
+
+                statistic.calculate_from_returns_with_benchmark(returns, benchmark)
+            } else {
+                statistic.calculate_from_returns(returns)
+            };
+
+            results.push(classify(
+                &definition,
+                value,
+                input_present,
+                input_non_finite,
+            ));
+        }
+
+        MetricReport::new(results)
+    }
+
+    /// Reports the requested position-based metrics, one result per request.
+    ///
+    /// See [`Self::report_returns_metrics`] for the status semantics.
+    #[must_use]
+    pub fn report_position_metrics(&self, requested: &[&str]) -> MetricReport {
+        let mut results = Vec::with_capacity(requested.len());
+        let input_present = !self.positions.is_empty();
+
+        for requested in requested {
+            let Some(statistic) = self.find_metric(requested) else {
+                results.push(not_registered(requested));
+                continue;
+            };
+
+            let definition = statistic.definition();
+
+            if !definition.is_defined_over(MetricInput::Positions) {
+                results.push(not_computed(
+                    &definition,
+                    MetricReason::UnsupportedInput,
+                    MetricStatus::Unavailable,
+                ));
+                continue;
+            }
+
+            results.push(classify(
+                &definition,
+                statistic.calculate_from_positions(&self.positions),
+                input_present,
+                false,
+            ));
+        }
+
+        MetricReport::new(results)
+    }
+
+    /// Reports the requested realized-PnL-based metrics, one result per request.
+    ///
+    /// A metric whose definition requires the realized PnL input is reported `unavailable` with
+    /// [`MetricReason::UnresolvedCurrency`] when the portfolio holds realized PnLs in more than
+    /// one currency and the requested currency does not resolve, rather than being calculated
+    /// from an arbitrary subset of them.
+    #[must_use]
+    pub fn report_pnls_metrics(
+        &self,
+        requested: &[&str],
+        currency: Option<&Currency>,
+    ) -> MetricReport {
+        let records = self.trade_pnl_records(currency);
+        let has_records = !self.realized_pnls.is_empty() || !self.recorded_realized_pnls.is_empty();
+        let unresolved = records.is_none() && has_records;
+
+        let realized_pnls: Vec<f64> = if unresolved {
+            Vec::new()
+        } else {
+            records
+                .unwrap_or_default()
+                .iter()
+                .map(|(_, _, pnl)| *pnl)
+                .collect()
+        };
+
+        let input_non_finite = realized_pnls.iter().any(|value| !value.is_finite());
+        let input_present = !realized_pnls.is_empty();
+        let mut results = Vec::with_capacity(requested.len());
+
+        for requested in requested {
+            let Some(statistic) = self.find_metric(requested) else {
+                results.push(not_registered(requested));
+                continue;
+            };
+
+            let definition = statistic.definition();
+
+            if !definition.is_defined_over(MetricInput::RealizedPnls) {
+                results.push(not_computed(
+                    &definition,
+                    MetricReason::UnsupportedInput,
+                    MetricStatus::Unavailable,
+                ));
+                continue;
+            }
+
+            if unresolved {
+                results.push(not_computed(
+                    &definition,
+                    MetricReason::UnresolvedCurrency,
+                    MetricStatus::Unavailable,
+                ));
+                continue;
+            }
+
+            results.push(classify(
+                &definition,
+                statistic.calculate_from_realized_pnls(&realized_pnls),
+                input_present,
+                input_non_finite,
+            ));
+        }
+
+        MetricReport::new(results)
+    }
+
+    /// Finds a registered statistic by its definition id, then by its registry name.
+    fn find_metric(&self, requested: &str) -> Option<&Statistic> {
+        if let Some(statistic) = self.statistics.get(requested) {
+            return Some(statistic);
+        }
+
+        self.statistics
+            .values()
+            .find(|statistic| statistic.definition().id() == requested)
+    }
+
     /// Calculates the maximum length of statistic names for formatting.
     fn get_max_length_name(&self) -> usize {
         self.statistics.keys().map(String::len).max().unwrap_or(0)
@@ -971,6 +1159,85 @@ impl PortfolioAnalyzer {
     }
 }
 
+/// Returns whether any value in the series is not finite.
+fn has_non_finite(returns: &Returns) -> bool {
+    returns.values().any(|value| !value.is_finite())
+}
+
+/// Returns a `not_registered` result for a request that matched no statistic.
+///
+/// The request string stands in for both identity and title: there is no definition to render.
+fn not_registered(requested: &str) -> MetricResult {
+    MetricResult::not_computed(
+        requested.to_string(),
+        requested.to_string(),
+        MetricReason::NotInMetricSet,
+        MetricStatus::NotRegistered,
+    )
+}
+
+/// Returns a result for a metric that was not calculated, from its definition.
+fn not_computed(
+    definition: &MetricDefinition,
+    reason: MetricReason,
+    status: MetricStatus,
+) -> MetricResult {
+    MetricResult::not_computed(
+        definition.id().to_string(),
+        definition.title(),
+        reason,
+        status,
+    )
+}
+
+/// Classifies a calculation into a result.
+///
+/// A non-finite value is `invalid` rather than `unavailable`: the inputs were present and the
+/// computation had no meaningful value. When an input value was itself not finite the reason
+/// names the input, because that is a data defect rather than a definitional gap. A statistic
+/// that declines to produce a value is `unavailable` with `InsufficientData`: the definition
+/// requires an input it did not receive, whether the series was absent or too short.
+fn classify(
+    definition: &MetricDefinition,
+    value: Option<f64>,
+    input_present: bool,
+    input_non_finite: bool,
+) -> MetricResult {
+    let id = definition.id().to_string();
+    let title = definition.title();
+
+    if !input_present {
+        return MetricResult::not_computed(
+            id,
+            title,
+            MetricReason::InsufficientData,
+            MetricStatus::Unavailable,
+        );
+    }
+
+    match value {
+        Some(value) if value.is_finite() => MetricResult::computed(id, title, value),
+        Some(_) if input_non_finite => MetricResult::not_computed(
+            id,
+            title,
+            MetricReason::NonFiniteInput,
+            MetricStatus::Invalid,
+        ),
+        Some(_) => MetricResult::not_computed(
+            id,
+            title,
+            MetricReason::UndefinedResult,
+            MetricStatus::Invalid,
+        ),
+        None => MetricResult::not_computed(
+            id,
+            title,
+            MetricReason::InsufficientData,
+            MetricStatus::Unavailable,
+        ),
+    }
+}
+
 fn canonical_position_id(position_id: PositionId) -> PositionId {
     const UUID4_STRING_LEN: usize = 36;
 
@@ -1014,7 +1281,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::statistics::beta_ratio::BetaRatio;
+    use crate::{
+        metric::{MetricDirection, MetricUnits},
+        statistics::{beta_ratio::BetaRatio, max_drawdown::MaxDrawdown},
+    };
 
     /// Mock implementation of `PortfolioStatistic` for testing.
     #[derive(Debug)]
@@ -1035,6 +1305,21 @@ mod tests {
 
         fn name(&self) -> String {
             self.name.clone()
+        }
+
+        fn definition(&self) -> MetricDefinition {
+            MetricDefinition::new(
+                "mock_statistic",
+                "{title}",
+                MetricUnits::Ratio,
+                MetricDirection::Informational,
+                [
+                    MetricInput::Returns,
+                    MetricInput::RealizedPnls,
+                    MetricInput::Positions,
+                ],
+            )
+            .with_parameter("title", self.name.clone())
         }
 
         fn calculate_from_realized_pnls(&self, pnls: &[f64]) -> Option<f64> {
@@ -1074,6 +1359,21 @@ mod tests {
 
         fn name(&self) -> String {
             self.name.clone()
+        }
+
+        fn definition(&self) -> MetricDefinition {
+            MetricDefinition::new(
+                "constant_statistic",
+                "{title}",
+                MetricUnits::Ratio,
+                MetricDirection::Informational,
+                [
+                    MetricInput::Returns,
+                    MetricInput::RealizedPnls,
+                    MetricInput::Positions,
+                ],
+            )
+            .with_parameter("title", self.name.clone())
         }
 
         fn calculate_from_realized_pnls(&self, _pnls: &[f64]) -> Option<f64> {
@@ -2476,5 +2776,198 @@ mod tests {
             epsilon = 1e-9
         ));
         assert!(!stats.contains_key("Sharpe Ratio (252 days)"));
+    }
+
+    fn daily_returns(values: &[f64]) -> Returns {
+        let one_day = 86_400_000_000_000_u64;
+        let start = 1_600_000_000_000_000_000_u64;
+
+        values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| (UnixNanos::from(start + i as u64 * one_day), *value))
+            .collect()
+    }
+
+    #[rstest]
+    fn test_metric_report_distinguishes_the_four_states_in_one_report() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.register_statistic(Arc::new(MaxDrawdown::new()));
+        for (i, value) in [0.02, -0.05, 0.01, -0.02].iter().enumerate() {
+            let one_day = 86_400_000_000_000_u64;
+            let start = 1_600_000_000_000_000_000_u64;
+            analyzer.add_return(UnixNanos::from(start + i as u64 * one_day), *value);
+        }
+
+        let report = analyzer
+            .report_returns_metrics(&["max_drawdown", "long_ratio", "no_such_metric"], None);
+
+        // Computed: defined over returns and calculable.
+        let computed = report.get("max_drawdown").unwrap();
+        assert_eq!(computed.status(), MetricStatus::Computed);
+        assert!(computed.value().is_some());
+        assert_eq!(computed.reason(), None);
+        assert_eq!(computed.title(), "Max Drawdown");
+
+        // Unavailable: a position statistic requested from a returns report.
+        let unavailable = report.get("long_ratio").unwrap();
+        assert_eq!(unavailable.status(), MetricStatus::Unavailable);
+        assert_eq!(unavailable.reason(), Some(MetricReason::UnsupportedInput));
+        assert_eq!(unavailable.value(), None);
+
+        // Not registered: the metric is not in the metric set at all.
+        let not_registered = report.get("no_such_metric").unwrap();
+        assert_eq!(not_registered.status(), MetricStatus::NotRegistered);
+        assert_eq!(not_registered.reason(), Some(MetricReason::NotInMetricSet));
+
+        // Every non-computed result carries a reason, and every status is present.
+        assert_eq!(report.len(), 3);
+        assert_eq!(report.with_status(MetricStatus::Computed).len(), 1);
+        assert_eq!(report.with_status(MetricStatus::Unavailable).len(), 1);
+        assert_eq!(report.with_status(MetricStatus::NotRegistered).len(), 1);
+        for result in report.results() {
+            assert_eq!(
+                result.status() == MetricStatus::Computed,
+                result.value().is_some()
+            );
+            assert_eq!(
+                result.status() == MetricStatus::Computed,
+                result.reason().is_none(),
+            );
+        }
+    }
+
+    #[rstest]
+    fn test_metric_report_separates_invalid_from_unavailable() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.register_statistic(Arc::new(BetaRatio::new()));
+        let mut returns = daily_returns(&[0.02, -0.05, 0.01, -0.02]);
+        returns.insert(UnixNanos::from(1_700_000_000_000_000_000_u64), f64::NAN);
+        for (timestamp, value) in returns {
+            analyzer.add_return(timestamp, value);
+        }
+
+        // The same metric, reported invalid when its inputs are present but defective.
+        let report = analyzer.report_returns_metrics(&["sharpe_ratio", "beta"], None);
+
+        let invalid = report.get("sharpe_ratio").unwrap();
+        assert_eq!(invalid.status(), MetricStatus::Invalid);
+        assert_eq!(invalid.reason(), Some(MetricReason::NonFiniteInput));
+        assert_eq!(invalid.value(), None);
+        assert_eq!(invalid.title(), "Sharpe Ratio (252 days)");
+
+        // Unavailable is a different state for a different cause: a missing benchmark.
+        let unavailable = report.get("beta").unwrap();
+        assert_eq!(unavailable.status(), MetricStatus::Unavailable);
+        assert_eq!(unavailable.reason(), Some(MetricReason::MissingBenchmark));
+        assert_ne!(invalid.status(), unavailable.status());
+
+        // Supplying the benchmark makes the same metric calculable.
+        let benchmark = daily_returns(&[0.01, 0.005, 0.005, 0.01]);
+        let benchmarked = analyzer.report_returns_metrics(&["beta"], Some(&benchmark));
+        assert_eq!(
+            benchmarked.get("beta").unwrap().status(),
+            MetricStatus::Computed
+        );
+    }
+
+    #[rstest]
+    fn test_metric_report_addresses_a_metric_by_id_and_by_name() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        for (timestamp, value) in daily_returns(&[0.02, -0.05, 0.01, -0.02]) {
+            analyzer.add_return(timestamp, value);
+        }
+
+        let by_id = analyzer.report_returns_metrics(&["sharpe_ratio"], None);
+        let by_name = analyzer.report_returns_metrics(&["Sharpe Ratio (252 days)"], None);
+
+        let by_id = by_id.get("sharpe_ratio").unwrap();
+        let by_name = by_name.get("sharpe_ratio").unwrap();
+
+        assert_eq!(by_id.id(), by_name.id());
+        assert_eq!(by_id.title(), by_name.title());
+        assert_eq!(by_id.status(), by_name.status());
+        assert_eq!(by_id.value(), by_name.value());
+    }
+
+    #[rstest]
+    fn test_metric_report_reports_an_empty_input_as_unavailable() {
+        let analyzer = PortfolioAnalyzer::default();
+
+        let report = analyzer.report_returns_metrics(&["sharpe_ratio"], None);
+        let result = report.get("sharpe_ratio").unwrap();
+
+        // Sharpe ratio returns a non-finite value for an empty series, which is an
+        // applicability judgement about absent data rather than a defect in present data.
+        assert_eq!(result.status(), MetricStatus::Unavailable);
+        assert_eq!(result.reason(), Some(MetricReason::InsufficientData));
+        assert_eq!(result.value(), None);
+    }
+
+    #[rstest]
+    fn test_builtin_definitions_match_their_names_ids_and_inputs() {
+        let returns = daily_returns(&[0.02, -0.05, 0.01, -0.02, 0.03, -0.01]);
+        let benchmark = daily_returns(&[0.01, 0.005, 0.005, 0.01, 0.008, -0.002]);
+        let realized_pnls = [12.0, -7.5, 4.25, -2.0, 9.5, -1.25];
+        let positions = vec![create_mock_position("AUD/USD", 10.0, 0.01, Currency::USD())];
+
+        let statistics = crate::objective::builtin_statistics();
+        let mut ids: Vec<String> = Vec::with_capacity(statistics.len());
+
+        for statistic in &statistics {
+            let definition = statistic.definition();
+
+            // The rendered title is the display name, so a report cannot drift from it.
+            assert_eq!(
+                definition.title(),
+                statistic.name(),
+                "definition title must render to the statistic name for `{}`",
+                definition.id(),
+            );
+            assert!(!definition.id().is_empty());
+            assert!(!definition.inputs().is_empty());
+            ids.push(definition.id().to_string());
+
+            // A declared input must be the one the statistic computes from: the metadata is not
+            // a comment. Each probe uses non-empty, finite inputs, so a statistic that produces
+            // a value would otherwise be reported unavailable with the wrong reason.
+            for (input, computed) in [
+                (
+                    MetricInput::Returns,
+                    statistic.calculate_from_returns(&returns).is_some(),
+                ),
+                (
+                    MetricInput::RealizedPnls,
+                    statistic
+                        .calculate_from_realized_pnls(&realized_pnls)
+                        .is_some(),
+                ),
+                (
+                    MetricInput::Positions,
+                    statistic.calculate_from_positions(&positions).is_some(),
+                ),
+                (
+                    MetricInput::Benchmark,
+                    statistic
+                        .calculate_from_returns_with_benchmark(&returns, &benchmark)
+                        .is_some(),
+                ),
+            ] {
+                if computed {
+                    assert!(
+                        definition.is_defined_over(input),
+                        "`{}` computes from {input} but does not declare it",
+                        definition.id(),
+                    );
+                }
+            }
+        }
+
+        // The identities are unique across the built-in set.
+        ids.sort_unstable();
+        let count = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), count);
+        assert_eq!(count, 34);
     }
 }

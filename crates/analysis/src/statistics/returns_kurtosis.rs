@@ -17,7 +17,11 @@
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the excess kurtosis of portfolio returns.
 ///
@@ -63,6 +67,17 @@ impl PortfolioStatistic for ReturnsKurtosis {
 
     fn name(&self) -> String {
         "Returns Kurtosis".to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "returns_kurtosis",
+            "Returns Kurtosis",
+            MetricUnits::Ratio,
+            MetricDirection::Informational,
+            [MetricInput::Returns],
+        )
+        .with_tags([MetricTag::Distribution, MetricTag::Returns])
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

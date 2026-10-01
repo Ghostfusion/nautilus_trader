@@ -17,7 +17,11 @@ use std::fmt::Display;
 
 use nautilus_model::position::Position;
 
-use crate::{Returns, statistic::PortfolioStatistic};
+use crate::{
+    Returns,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 
 /// Calculates the arithmetic mean of the negative portfolio returns.
 ///
@@ -46,6 +50,17 @@ impl PortfolioStatistic for ReturnsAverageLoss {
 
     fn name(&self) -> String {
         self.to_string()
+    }
+
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "returns_average_loss",
+            "Average Loss (Return)",
+            MetricUnits::Fraction,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_tags([MetricTag::Returns])
     }
 
     fn calculate_from_returns(&self, returns: &Returns) -> Option<Self::Item> {
