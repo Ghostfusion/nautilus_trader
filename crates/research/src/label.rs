@@ -295,8 +295,9 @@ mod tests {
     #[test]
     fn forward_max_drawdown_is_non_positive() {
         let label = Label::forward_max_drawdown("dd", 2).unwrap();
-        // Peak 10 then trough 7: 7 / 10 - 1 = -0.3.
-        assert_eq!(label.compute(&[10.0, 8.0, 7.0], 0), Ok(Some(-0.3)));
+        // Peak 10 then trough 7: 7 / 10 - 1 = -0.3 (within floating point).
+        let drawdown = label.compute(&[10.0, 8.0, 7.0], 0).unwrap().unwrap();
+        assert!((drawdown - (-0.3)).abs() < 1e-12);
     }
 
     #[test]
