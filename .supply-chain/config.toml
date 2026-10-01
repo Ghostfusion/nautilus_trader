@@ -73,6 +73,9 @@ audit-as-crates-io = false
 [policy.nautilus-dydx]
 audit-as-crates-io = false
 
+[policy.nautilus-eodhd]
+audit-as-crates-io = false
+
 [policy.nautilus-event-store]
 audit-as-crates-io = false
 

@@ -234,6 +234,7 @@ def test_known_adapter_set_is_complete() -> None:
         "deribit",
         "derive",
         "dydx",
+        "eodhd",
         "hyperliquid",
         "interactive_brokers",
         "kraken",

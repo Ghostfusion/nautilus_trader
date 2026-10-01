@@ -378,6 +378,7 @@ databento nautilus_databento::python::databento
 deribit nautilus_deribit::python::deribit
 derive nautilus_derive::python::derive
 dydx nautilus_dydx::python::dydx
+eodhd nautilus_eodhd::python::eodhd
 execution nautilus_execution::python::execution
 hyperliquid nautilus_hyperliquid::python::hyperliquid
 indicators nautilus_indicators::python::indicators

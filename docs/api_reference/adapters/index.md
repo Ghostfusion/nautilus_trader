@@ -18,6 +18,7 @@
    databento.md
    deribit.md
    dydx.md
+   eodhd.md
    hyperliquid.md
    interactive_brokers.md
    kraken.md

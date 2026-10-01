@@ -11,6 +11,7 @@ from . import databento
 from . import deribit
 from . import derive
 from . import dydx
+from . import eodhd
 from . import hyperliquid
 from . import interactive_brokers
 from . import kraken
@@ -31,6 +32,7 @@ __all__ = [
     "deribit",
     "derive",
     "dydx",
+    "eodhd",
     "hyperliquid",
     "interactive_brokers",
     "kraken",
