@@ -27,6 +27,10 @@
 //! size cannot form a valid child sends nothing and is re-checked by the next quote. A denied or
 //! rejected child is not retried: the sequence completes and the primary carries the child's refusal.
 //!
+//! A caller that needs an upper bound on the sequence declares the policy horizon; without one a
+//! sniper waits for the touch to become reachable rather than quoting at a price the market is not
+//! showing, which is the behaviour it is for but leaves the sequence open indefinitely.
+//!
 //! # Parameters
 //!
 //! Orders submitted to this algorithm must include `exec_algorithm_params` with:
