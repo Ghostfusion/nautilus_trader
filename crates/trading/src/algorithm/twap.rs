@@ -22,8 +22,14 @@
 //! # Parameters
 //!
 //! Orders submitted to this algorithm must include `exec_algorithm_params` with:
-//! - `horizon_secs`: Total execution horizon in seconds.
-//! - `interval_secs`: Interval between child orders in seconds.
+//! - `horizon_secs`: Total execution horizon in seconds. This is the policy's horizon, and it is
+//!   the only policy part TWAP can honour.
+//! - `interval_secs`: Interval between child orders in seconds. This is this algorithm's own
+//!   scheduling parameter rather than a policy part.
+//!
+//! A declared policy part that TWAP cannot honour - a price limit, a slippage cap, a participation
+//! rate, a preference or an urgency - is refused with a denial naming the field, rather than
+//! executed as though it had not been declared.
 //!
 //! # Example
 //!
@@ -50,11 +56,20 @@ use ustr::Ustr;
 
 use super::{
     ExecutionAlgorithm, ExecutionAlgorithmConfig, ExecutionAlgorithmCore, ExecutionAlgorithmNative,
+    ExecutionIntent, ExecutionPolicy, PolicyError, PolicyPart,
 };
 use crate::nautilus_execution_algorithm;
 
 /// Configuration for [`TwapAlgorithm`].
 pub type TwapAlgorithmConfig = ExecutionAlgorithmConfig;
+
+/// The policy parts TWAP can honour.
+///
+/// TWAP schedules market children over a horizon, so the horizon is the only policy part it can
+/// honour: a price limit, a slippage cap, a participation rate, a preference or an urgency would
+/// each have to change how the children are placed, which this algorithm does not do. Declaring one
+/// is refused rather than ignored.
+static TWAP_SUPPORTED_POLICY_PARTS: [PolicyPart; 1] = [PolicyPart::Horizon];
 
 /// Time-Weighted Average Price (TWAP) execution algorithm.
 ///
@@ -113,6 +128,10 @@ impl DataActor for TwapAlgorithm {
 }
 
 nautilus_execution_algorithm!(TwapAlgorithm, {
+    fn supported_policy_parts(&self) -> &'static [PolicyPart] {
+        &TWAP_SUPPORTED_POLICY_PARTS
+    }
+
     fn on_order(&mut self, order: OrderAny) -> anyhow::Result<()> {
         let primary_id = order.client_order_id();
 
@@ -148,25 +167,6 @@ nautilus_execution_algorithm!(TwapAlgorithm, {
             return self.deny_order(&order, validation_failed("exec_algorithm_params not found"));
         };
 
-        let Some(horizon_secs_str) = exec_params.get(&Ustr::from("horizon_secs")) else {
-            return self.deny_order(
-                &order,
-                validation_failed("horizon_secs not found in exec_algorithm_params"),
-            );
-        };
-
-        let horizon_secs: f64 = match horizon_secs_str.parse() {
-            Ok(value) => value,
-            Err(_) => {
-                return self.deny_order(
-                    &order,
-                    validation_failed(format!(
-                        "horizon_secs={horizon_secs_str} is not a valid number"
-                    )),
-                );
-            }
-        };
-
         let Some(interval_secs_str) = exec_params.get(&Ustr::from("interval_secs")) else {
             return self.deny_order(
                 &order,
@@ -186,15 +186,6 @@ nautilus_execution_algorithm!(TwapAlgorithm, {
             }
         };
 
-        if !horizon_secs.is_finite() || horizon_secs <= 0.0 {
-            return self.deny_order(
-                &order,
-                validation_failed(format!(
-                    "horizon_secs={horizon_secs} must be finite and positive"
-                )),
-            );
-        }
-
         if !interval_secs.is_finite() || interval_secs <= 0.0 {
             return self.deny_order(
                 &order,
@@ -203,6 +194,73 @@ nautilus_execution_algorithm!(TwapAlgorithm, {
                 )),
             );
         }
+
+        // The interval is validated before the policy, because a schedule the clock cannot
+        // represent is refused whichever way the policy is declared.
+        let interval = match Duration::try_from_secs_f64(interval_secs) {
+            Ok(interval) => interval,
+            Err(e) => {
+                return self.deny_order(
+                    &order,
+                    validation_failed(format!(
+                        "interval_secs={interval_secs} is not a valid duration: {e}"
+                    )),
+                );
+            }
+        };
+
+        if interval == Duration::ZERO {
+            return self.deny_order(
+                &order,
+                validation_failed(format!(
+                    "interval_secs={interval_secs} rounds to a zero duration"
+                )),
+            );
+        }
+        let Ok(interval_ns) = u64::try_from(interval.as_nanos()) else {
+            return self.deny_order(
+                &order,
+                validation_failed(format!(
+                    "interval_secs={interval_secs} exceeds the clock nanosecond range"
+                )),
+            );
+        };
+        let timestamp_ns = ExecutionAlgorithmNative::exec_algorithm_core_mut(self)
+            .clock_mut()
+            .timestamp_ns()
+            .as_u64();
+
+        if timestamp_ns.checked_add(interval_ns).is_none() {
+            return self.deny_order(
+                &order,
+                validation_failed(format!(
+                    "interval_secs={interval_secs} exceeds the clock timestamp headroom"
+                )),
+            );
+        }
+
+        let policy = match ExecutionPolicy::from_params(exec_params) {
+            Ok(policy) => policy,
+            Err(err) => return self.deny_order(&order, validation_failed(err.message())),
+        };
+
+        if let Some(part) = policy.unsupported(self.supported_policy_parts()) {
+            return self.deny_order(
+                &order,
+                validation_failed(PolicyError::unsupported(part).message()),
+            );
+        }
+
+        if let Err(err) = policy.validate(&ExecutionIntent::from(&order)) {
+            return self.deny_order(&order, validation_failed(err.message()));
+        }
+
+        let Some(horizon_secs) = policy.horizon_secs() else {
+            return self.deny_order(
+                &order,
+                validation_failed("horizon_secs not found in exec_algorithm_params"),
+            );
+        };
 
         if horizon_secs < interval_secs {
             return self.deny_order(
@@ -254,48 +312,6 @@ nautilus_execution_algorithm!(TwapAlgorithm, {
             self.submit_order(order, None, None)?;
             self.complete_sequence(primary_id);
             return Ok(());
-        }
-
-        let interval = match Duration::try_from_secs_f64(interval_secs) {
-            Ok(interval) => interval,
-            Err(e) => {
-                return self.deny_order(
-                    &order,
-                    validation_failed(format!(
-                        "interval_secs={interval_secs} is not a valid duration: {e}"
-                    )),
-                );
-            }
-        };
-
-        if interval == Duration::ZERO {
-            return self.deny_order(
-                &order,
-                validation_failed(format!(
-                    "interval_secs={interval_secs} rounds to a zero duration"
-                )),
-            );
-        }
-        let Ok(interval_ns) = u64::try_from(interval.as_nanos()) else {
-            return self.deny_order(
-                &order,
-                validation_failed(format!(
-                    "interval_secs={interval_secs} exceeds the clock nanosecond range"
-                )),
-            );
-        };
-        let timestamp_ns = ExecutionAlgorithmNative::exec_algorithm_core_mut(self)
-            .clock_mut()
-            .timestamp_ns()
-            .as_u64();
-
-        if timestamp_ns.checked_add(interval_ns).is_none() {
-            return self.deny_order(
-                &order,
-                validation_failed(format!(
-                    "interval_secs={interval_secs} exceeds the clock timestamp headroom"
-                )),
-            );
         }
 
         let mut scheduled_sizes: Vec<Quantity> = vec![qty_per_interval; num_intervals as usize];
@@ -1802,5 +1818,112 @@ mod tests {
             &order,
             "VALIDATION_FAILED: horizon_secs=inf must be finite and positive",
         );
+    }
+
+    #[rstest]
+    #[case(
+        "max_slippage_bps",
+        "15",
+        "VALIDATION_FAILED: max_slippage_bps is not supported by this execution algorithm"
+    )]
+    #[case(
+        "price_limit",
+        "100.50",
+        "VALIDATION_FAILED: price_limit is not supported by this execution algorithm"
+    )]
+    #[case(
+        "participation_rate",
+        "0.15",
+        "VALIDATION_FAILED: participation_rate is not supported by this execution algorithm"
+    )]
+    #[case(
+        "preference",
+        "aggressive",
+        "VALIDATION_FAILED: preference is not supported by this execution algorithm"
+    )]
+    #[case(
+        "urgency",
+        "high",
+        "VALIDATION_FAILED: urgency is not supported by this execution algorithm"
+    )]
+    fn test_twap_refuses_a_policy_part_it_cannot_honour(
+        #[case] key: &str,
+        #[case] value: &str,
+        #[case] expected_reason: &str,
+    ) {
+        let mut algo = create_twap_algorithm();
+        register_algorithm(&mut algo);
+
+        add_instrument_to_cache(&algo);
+
+        let mut params = IndexMap::new();
+        params.insert(Ustr::from("horizon_secs"), Ustr::from("60"));
+        params.insert(Ustr::from("interval_secs"), Ustr::from("10"));
+        params.insert(Ustr::from(key), Ustr::from(value));
+
+        let order = create_market_order_with_params(params);
+
+        assert_twap_denied(&mut algo, &order, expected_reason);
+    }
+
+    #[rstest]
+    fn test_twap_refuses_a_malformed_policy_field_before_the_part_it_cannot_honour() {
+        let mut algo = create_twap_algorithm();
+        register_algorithm(&mut algo);
+
+        add_instrument_to_cache(&algo);
+
+        let mut params = IndexMap::new();
+        params.insert(Ustr::from("horizon_secs"), Ustr::from("60"));
+        params.insert(Ustr::from("interval_secs"), Ustr::from("10"));
+        params.insert(Ustr::from("max_slippage_bps"), Ustr::from("-1"));
+
+        let order = create_market_order_with_params(params);
+
+        assert_twap_denied(
+            &mut algo,
+            &order,
+            "VALIDATION_FAILED: max_slippage_bps=-1 must not be negative",
+        );
+    }
+
+    #[rstest]
+    fn test_twap_policy_horizon_reproduces_the_size_schedule() {
+        let mut algo = create_twap_algorithm();
+        register_algorithm(&mut algo);
+
+        add_instrument_to_cache(&algo);
+
+        // The declaration the algorithm took before the policy existed: 1.2 over 60 seconds in
+        // 20 second intervals. The horizon now arrives through the policy, and the schedule for
+        // that equivalent declaration is unchanged: three slices of 0.4.
+        let mut params = IndexMap::new();
+        params.insert(Ustr::from("horizon_secs"), Ustr::from("60"));
+        params.insert(Ustr::from("interval_secs"), Ustr::from("20"));
+
+        let order = create_market_order_with_params_and_qty(params, Quantity::from("1.2"));
+        let primary_id = order.client_order_id();
+
+        algo.on_order(order).unwrap();
+
+        let cache = algo.cache();
+        let primary = cache.order(&primary_id).unwrap();
+        let spawned = cache.order(&ClientOrderId::from("O-001-E1")).unwrap();
+
+        // The first slice is spawned at submission and the primary is reduced to the remaining two.
+        assert_eq!(spawned.quantity(), Quantity::from("0.4"));
+        assert_eq!(spawned.exec_spawn_id(), Some(primary_id));
+        assert_eq!(primary.quantity(), Quantity::from("0.8"));
+
+        let remaining = &algo
+            .scheduled_orders
+            .get(&primary_id)
+            .unwrap()
+            .remaining_sizes;
+        assert_eq!(
+            remaining.as_slice(),
+            &[Quantity::from("0.4"), Quantity::from("0.4")]
+        );
+        assert!(algo.clock().timer_names().contains(&primary_id.to_string()));
     }
 }

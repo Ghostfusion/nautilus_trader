@@ -39,11 +39,17 @@ use std::fmt::Display;
 
 pub mod config;
 pub mod core;
+pub mod policy;
 pub mod twap;
 
 pub use core::{ExecutionAlgorithmCore, ExecutionAlgorithmNative, StrategyEventHandlers};
 
 pub use config::{ExecutionAlgorithmConfig, ImportableExecutionAlgorithmConfig};
+pub use policy::{
+    ExecutionIntent, ExecutionPolicy, ExecutionPreference, ExecutionUrgency, PolicyError,
+    PolicyPart,
+};
+
 use nautilus_common::{
     actor::{DataActor, DataActorNative, registry::try_get_actor_unchecked},
     enums::ComponentState,
@@ -107,6 +113,15 @@ pub trait ExecutionAlgorithm: DataActor {
         Self: ExecutionAlgorithmNative,
     {
         ExecutionAlgorithmNative::exec_algorithm_core(self).exec_algorithm_id
+    }
+
+    /// Returns the policy parts this algorithm can honour.
+    ///
+    /// A part this algorithm cannot honour is refused rather than ignored, so a caller who
+    /// declares a constraint always receives an execution that respects it or a denial naming it.
+    /// The default honours nothing, which refuses every policy that constrains an algorithm.
+    fn supported_policy_parts(&self) -> &'static [PolicyPart] {
+        &[]
     }
 
     /// Executes a trading command.

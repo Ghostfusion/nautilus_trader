@@ -24,15 +24,21 @@ engine.add_native_exec_algorithm(
 
 Orders routed to TWAP require these string-valued `exec_algorithm_params`:
 
-| Key             | Meaning                                                 |
-| --------------- | ------------------------------------------------------- |
-| `horizon_secs`  | Horizon used with the interval to determine the slices. |
-| `interval_secs` | Time between slices.                                    |
+| Key             | Meaning                                                                           |
+| --------------- | --------------------------------------------------------------------------------- |
+| `horizon_secs`  | The execution policy's horizon, used with the interval to determine the slices.   |
+| `interval_secs` | Time between slices. The algorithm's own scheduling parameter, not a policy part. |
 
 Both values must parse as positive numbers, and `horizon_secs` must be at least
 `interval_secs`. The algorithm submits the first slice immediately and the remaining slices at
 the configured interval. TWAP denies the primary order before submission when the order type,
 instrument, or schedule is unsupported or invalid.
+
+`horizon_secs` is the execution policy's horizon, and it is the only policy part TWAP can honour.
+The other policy keys - `participation_rate`, `price_limit`, `max_slippage_bps`, `preference` and
+`urgency` - are refused with a denial naming the field, because a declared constraint the
+algorithm cannot satisfy must not be silently ignored. A malformed or out-of-domain value for any
+policy key is refused and named in the same way.
 
 ## Custom execution algorithms
 
