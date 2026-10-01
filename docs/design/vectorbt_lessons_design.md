@@ -12,9 +12,10 @@ either exposes or closes, never as a port of a vectorbt subsystem.
 **Status.** Architecture approved; contracts under revision. The probe changed no production code,
 because the authorising instruction permits code changes only for defects and none were found
 (section 5.1 of the companion document). The owner then authorised implementation in the order of
-section 12, and **D1, D2 and D3 are implemented** (sections 4.1, 4.2 and 4.3 of the companion
-document record them); every other item here is specified and ordered but marked **not
-implemented**. The identity contracts in section 8 are the centre of gravity: they are cross-cutting,
+section 12. **D1, D2 and D3 are implemented** (sections 4.1, 4.2 and 4.3 of the companion document
+record them), and **the identity contracts of section 8 are implemented** (section 4.11 of the
+companion document records them, including which fields were pruned); every other item here is
+specified and ordered but marked **not implemented**. The identity contracts in section 8 are the centre of gravity: they are cross-cutting,
 they sit underneath the decisions rather than beside them, and the remaining sections are read as
 their consequences.
 
@@ -288,6 +289,13 @@ component must therefore not be importable from the live path, and no live compo
 research metric as a control input.
 
 ## 8. Identity contracts
+
+**Status.** Implemented in revision 7: `python/nautilus_trader/optimization/identity.py` holds the
+contracts, their digests and the bridges from an objective's terms, a split contract and an optimizer
+run. The field lists were pruned rather than filled in, the counts were moved out of the study
+identity, and the dataset and universe fields are declarations their caller makes because the
+repository has no dataset digest, no point-in-time read and no stored membership. The companion
+document's section 4.11 records the pruning, its reasons and the verification.
 
 Identity is the centre of the design, not a logging concern: **provenance is part of the meaning of a
 result.** This section defines the contracts that the decisions below consume, and it is cross-cutting
@@ -863,9 +871,12 @@ every later phase records into them.
 2. **D1, metric identity, status and reason codes.** Implemented. The contract that defines the shape of a result.
 3. **D3, the ambiguity policy and its identity.** Implemented. Because a result that cannot name its assumptions
    cannot be compared with another result.
-4. **Study identity and trial identity** (8.1, 8.2), with the selection rule included.
+4. **Study identity and trial identity** (8.1, 8.2), with the selection rule included. Implemented,
+   with the counts moved to a provenance record and the field lists pruned (companion document 4.11).
 5. **Dataset and universe identity** (8.3, 8.4), which consume the point-in-time and membership
-   workstream from the earlier review rather than starting a new one.
+   workstream from the earlier review rather than starting a new one. Implemented as declared
+   contracts: the fields are carried, and the stored-membership workstream that would make them
+   enforceable is still outstanding (companion document 4.11).
 
 ### Phase 1: validation integrity
 
@@ -976,6 +987,12 @@ Ordered by what they gate. The placement questions are preconditions (section 1.
    information state, universe membership, a corporate-action policy, a calendar, an adjustment policy
    and a missing-data policy are all plausible constituents, and every one of them is defensible in
    isolation. This gates the reproducibility of every study and is the largest of the open questions.
+   The contract now carries all seven (companion document 4.11) as declarations its caller makes;
+   which of them the catalog can *derive* is still open, because it has no dataset digest, no
+   point-in-time read and no stored membership.
 9. **What constitutes trial identity?** Parameter values, seed, feature configuration, label
    configuration, split assignment, objective and execution status are the candidates, and the
-   answer decides whether a trial can be re-run at all. This gates D4.
+   answer decides whether a trial can be re-run at all. This gates D4. The contract now carries the
+   parameter values and their digest, the seed, the execution status, the objective value and the
+   result digest, so the question is narrowed to whether a feature or label configuration belongs in
+   a trial or in the study that declares it.

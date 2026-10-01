@@ -34,6 +34,20 @@ from nautilus_trader.optimization.config import ConfigError as ConfigError
 from nautilus_trader.optimization.config import OptimizationConfig as OptimizationConfig
 from nautilus_trader.optimization.config import load_config as load_config
 from nautilus_trader.optimization.config import run_config as run_config
+from nautilus_trader.optimization.identity import ComputationIdentity as ComputationIdentity
+from nautilus_trader.optimization.identity import DatasetIdentity as DatasetIdentity
+from nautilus_trader.optimization.identity import ExecutionStatus as ExecutionStatus
+from nautilus_trader.optimization.identity import ResearchResult as ResearchResult
+from nautilus_trader.optimization.identity import SelectionRule as SelectionRule
+from nautilus_trader.optimization.identity import StudyIdentity as StudyIdentity
+from nautilus_trader.optimization.identity import TrialIdentity as TrialIdentity
+from nautilus_trader.optimization.identity import TrialProvenance as TrialProvenance
+from nautilus_trader.optimization.identity import UniverseIdentity as UniverseIdentity
+from nautilus_trader.optimization.identity import (
+    objective_definition_from_terms as objective_definition_from_terms,
+)
+from nautilus_trader.optimization.identity import split_contract_digest as split_contract_digest
+from nautilus_trader.optimization.identity import trial_identity as trial_identity
 from nautilus_trader.optimization.metrics import statistic_values as statistic_values
 from nautilus_trader.optimization.optimizer import Optimizer as Optimizer
 from nautilus_trader.optimization.persistence import ExperimentStore as ExperimentStore
@@ -68,8 +82,11 @@ __all__ = [
     "BacktestRunner",
     "BarAmbiguityPolicy",
     "CanonicalRun",
+    "ComputationIdentity",
     "ConcurrencyPolicy",
     "ConfigError",
+    "DatasetIdentity",
+    "ExecutionStatus",
     "Experiment",
     "ExperimentResult",
     "ExperimentStore",
@@ -85,14 +102,20 @@ __all__ = [
     "OutOfSampleStage",
     "Parameter",
     "ParameterSpace",
+    "ResearchResult",
     "SearchReport",
     "SearchStrategy",
+    "SelectionRule",
     "Split",
     "SplitContract",
     "SplitDirection",
+    "StudyIdentity",
     "TrainStage",
+    "TrialIdentity",
+    "TrialProvenance",
     "TriggerFill",
     "TriggerPrecedence",
+    "UniverseIdentity",
     "ValidateStage",
     "ValidationResult",
     "WalkForwardReport",
@@ -100,7 +123,10 @@ __all__ = [
     "WalkForwardStage",
     "WalkForwardWindow",
     "load_config",
+    "objective_definition_from_terms",
     "run_config",
+    "split_contract_digest",
     "statistic_values",
+    "trial_identity",
     "walk_forward_windows",
 ]

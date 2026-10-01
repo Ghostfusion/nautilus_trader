@@ -140,6 +140,67 @@ This is a research record, not an execution model. Nothing here changes an engin
 a fill; the policy states what a result assumed, which is why it stays on this side of the boundary
 described above.
 
+## Identity contracts
+
+Provenance is part of the meaning of a result: a number that cannot name the study that produced it,
+the data it read, the code that computed it and the assumptions it made is an observation, not a
+research result. `identity.py` makes that naming mechanical, and the digests compose from values
+that already exist where they can: the parameter digest is the experiment digest, the result digest
+is the canonical backtest document digest, and the leakage and assumption policies carry their own.
+
+| Contract              | Carries                                                                                                                                                                                            |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StudyIdentity`       | The dataset identity, the parameter-space digest, the objective definition, the selection rule, the metric set, the split contract and leakage policy, and the study seed. Stable across a re-run. |
+| `TrialIdentity`       | The study, the parameter values and their digest, the seed, the execution status, the objective value and the canonical result digest.                                                             |
+| `TrialProvenance`     | The trial and failed-trial counts, and whether the study can distinguish a nominal count from an effective one.                                                                                    |
+| `DatasetIdentity`     | The dataset digest, the source version, the as-of time, the calendar identity, the universe identity, the adjustment policy and the missing-data policy.                                           |
+| `UniverseIdentity`    | The universe digest, the membership policy id and the membership as-of time.                                                                                                                       |
+| `ComputationIdentity` | The code version, the schema version, the numeric kernel version, the numerical backend and the parameter digest.                                                                                  |
+| `ResearchResult`      | The study, the trial, the computation identity, the assumption policy and the metric results.                                                                                                      |
+
+```python
+study = StudyIdentity(
+    dataset=DatasetIdentity(
+        dataset_digest="sha256:...",
+        universe=UniverseIdentity(
+            universe_digest="sha256:...",
+            membership_policy_id="static",
+        ),
+        adjustment_policy="raw",
+    ),
+    parameter_space_digest="sha256:...",
+    objective_definition=objective_definition_from_terms(objective.terms),
+    selection_rule=SelectionRule.RANK_FIRST,
+    metric_set=("Sharpe Ratio (252 days)", "Max Drawdown"),
+)
+trial = trial_identity(study.study_id, report.best().run)
+result = ResearchResult(
+    study=study,
+    trial=trial,
+    computation=computation,
+    assumption_policy=BarAmbiguityPolicy.declared_default(),
+)
+```
+
+Three properties are structural rather than conventional. A result cannot be built without a study
+identity, because its constructor requires one and rejects a trial that belongs to a different
+study. A trial cannot record a parameter digest that does not describe its own parameter values, and
+a completed trial must record its result digest. A changed numeric kernel version changes the
+implementation identity while the study identity stays stable, so a numerical drift is visible
+rather than a mystery.
+
+Two boundaries are stated rather than implied:
+
+- **The counts are not part of a study's identity.** They describe how a study ended, and a transient
+  failure would otherwise change the identity of the study that suffered it. `TrialProvenance`
+  carries them for the correction that needs them.
+- **A universe identity is a declaration, not yet a guarantee.** Nothing in this repository stores
+  point-in-time membership history: a `UniverseIdentity` records the policy and the as-of time its
+  caller declares, and the stored-membership workstream proposed by the earlier design review
+  (`vnpy_lessons_design.md`, decisions D5 and D13) is what would make membership recoverable rather
+  than re-evaluated. Until then a study can state its membership, and the statement is auditable but
+  not enforced.
+
 ## The statistics bridge
 
 A default run reports its returns statistics in `BacktestResult.stats_returns`, but that set is the
@@ -212,6 +273,9 @@ runner and produce the same results, in the same order.
   contract, the bounds it yields, and the leakage exclusion relation it applies.
 - `BarAmbiguityPolicy`, `IntrabarPath`, `TriggerPrecedence`, `TriggerFill`, `GapHandling`: the
   declared bar-derived execution assumptions and their identity.
+- `StudyIdentity`, `TrialIdentity`, `TrialProvenance`, `DatasetIdentity`, `UniverseIdentity`,
+  `ComputationIdentity`, `ResearchResult`, `objective_definition_from_terms`, `trial_identity`,
+  `split_contract_digest`: the provenance contracts and the bridges that build them from a run.
 - `OptimizationConfig`, `load_config`, `run_config`: the JSON configuration-file entry point the
   `nautilus optimize` command and notebooks share.
 
@@ -220,8 +284,8 @@ runner and produce the same results, in the same order.
 The subsystem lives in `python/nautilus_trader/optimization/`: the parameter model in `space.py`,
 enumeration in `search.py`, execution in `runner.py`, the statistics bridge in `metrics.py`, result
 aggregation in `report.py`, the sweep in `optimizer.py`, the stages in `stages.py`, the split
-contract and the leakage policy in `splits.py`, the execution assumptions in `assumptions.py`,
-persistence in
+contract and the leakage policy in `splits.py`, the execution assumptions in `assumptions.py`, the
+identity contracts in `identity.py`, persistence in
 `persistence.py`, process fan-out in `concurrency.py`, and the configuration-file entry point in
 `config.py`. The objective and constraints are the existing Rust types exposed from
 `nautilus_trader.analysis`; this subsystem adds no second objective and no second execution path.

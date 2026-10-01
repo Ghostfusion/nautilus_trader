@@ -24,6 +24,7 @@ process fan-out and sequential execution agree on the best result and the digest
 
 from __future__ import annotations
 
+import dataclasses
 from decimal import Decimal
 from functools import partial
 from pathlib import Path
@@ -45,7 +46,10 @@ from nautilus_trader.model import BarType
 from nautilus_trader.model import InstrumentId
 from nautilus_trader.model import NautilusDataType
 from nautilus_trader.optimization import BacktestRunner
+from nautilus_trader.optimization import BarAmbiguityPolicy
+from nautilus_trader.optimization import ComputationIdentity
 from nautilus_trader.optimization import ConcurrencyPolicy
+from nautilus_trader.optimization import DatasetIdentity
 from nautilus_trader.optimization import Experiment
 from nautilus_trader.optimization import ExperimentResult
 from nautilus_trader.optimization import ExperimentStore
@@ -53,12 +57,18 @@ from nautilus_trader.optimization import Optimizer
 from nautilus_trader.optimization import OptimizeStage
 from nautilus_trader.optimization import Parameter
 from nautilus_trader.optimization import ParameterSpace
+from nautilus_trader.optimization import ResearchResult
+from nautilus_trader.optimization import SelectionRule
+from nautilus_trader.optimization import StudyIdentity
 from nautilus_trader.optimization import TrainStage
+from nautilus_trader.optimization import UniverseIdentity
 from nautilus_trader.optimization import ValidateStage
 from nautilus_trader.optimization import ValidationResult
 from nautilus_trader.optimization import WalkForwardStage
 from nautilus_trader.optimization import WalkForwardWindow
+from nautilus_trader.optimization import objective_definition_from_terms
 from nautilus_trader.optimization import statistic_values
+from nautilus_trader.optimization import trial_identity
 from nautilus_trader.optimization import walk_forward_windows
 from nautilus_trader.optimization.metrics import bridged_values
 from nautilus_trader.persistence import ParquetDataCatalog
@@ -448,6 +458,99 @@ def test_fan_out_matches_sequential(tmp_path: Path) -> None:
     assert fanned_best.digest == sequential_best.digest
     assert fanned_best.score == sequential_best.score
     assert dict(fanned_best.experiment.parameters) == dict(sequential_best.experiment.parameters)
+
+
+def test_two_runs_of_one_study_produce_the_same_result_digest(tmp_path: Path) -> None:
+    """
+    Test a re-run of the same study over the same data reproduces the result digest.
+
+    A changed numerical kernel changes the implementation identity while the study identity is
+    stable, so a numerical drift is visible rather than a mystery.
+    """
+    catalog_path = _build_catalog(tmp_path / "catalog")
+    runner = _runner(catalog_path)
+    objective = _objective()
+    space = _space()
+
+    study = StudyIdentity(
+        dataset=DatasetIdentity(
+            dataset_digest="sha256:" + "0" * 64,
+            universe=UniverseIdentity(
+                universe_digest="sha256:" + "1" * 64,
+                membership_policy_id="static",
+            ),
+            adjustment_policy="raw",
+        ),
+        parameter_space_digest="sha256:" + "2" * 64,
+        objective_definition=objective_definition_from_terms(objective.terms),
+        selection_rule=SelectionRule.RANK_FIRST,
+        metric_set=tuple(sorted(term.metric for term in objective.terms)),
+    )
+
+    first = Optimizer(
+        runner=runner,
+        objective=objective,
+        concurrency=ConcurrencyPolicy.sequential(),
+    ).optimize(space)
+    second = Optimizer(
+        runner=runner,
+        objective=objective,
+        concurrency=ConcurrencyPolicy.sequential(),
+    ).optimize(space)
+
+    first_best = first.best()
+    second_best = second.best()
+    assert first_best is not None
+    assert second_best is not None
+
+    first_trial = trial_identity(study.study_id, first_best.run, objective_value=first_best.score)
+    second_trial = trial_identity(
+        study.study_id, second_best.run, objective_value=second_best.score
+    )
+
+    assert first_trial.trial_id == second_trial.trial_id
+    assert first_trial.result_digest == second_trial.result_digest
+
+    computation = ComputationIdentity(
+        code_version="2.0.0rc6",
+        numeric_kernel_version="nautilus-analysis-0.65.0",
+        numerical_backend="rust",
+        parameter_digest=first_trial.parameter_digest,
+    )
+    first_result = ResearchResult(
+        study=study,
+        trial=first_trial,
+        computation=computation,
+        assumption_policy=BarAmbiguityPolicy.declared_default(),
+        metric_results=tuple(sorted(term.metric for term in objective.terms)),
+    )
+    second_result = ResearchResult(
+        study=study,
+        trial=second_trial,
+        computation=computation,
+        assumption_policy=BarAmbiguityPolicy.declared_default(),
+        metric_results=tuple(sorted(term.metric for term in objective.terms)),
+    )
+
+    print(f"study_id={study.study_id}")  # noqa: T201
+    print(f"trial_id={first_trial.trial_id}")  # noqa: T201
+    print(f"result_digest={first_result.result_digest}")  # noqa: T201
+
+    assert first_result.result_digest == second_result.result_digest
+
+    # A different numerical kernel is a different implementation identity, and the study is
+    # unchanged: the drift is visible rather than a mystery.
+    other_computation = dataclasses.replace(computation, numeric_kernel_version="0.66.0")
+    other_result = ResearchResult(
+        study=study,
+        trial=first_trial,
+        computation=other_computation,
+        assumption_policy=BarAmbiguityPolicy.declared_default(),
+    )
+
+    assert other_result.study.study_id == first_result.study.study_id
+    assert other_result.computation.digest != first_result.computation.digest
+    assert other_result.result_digest != first_result.result_digest
 
 
 def test_experiment_store_round_trip(tmp_path: Path) -> None:
