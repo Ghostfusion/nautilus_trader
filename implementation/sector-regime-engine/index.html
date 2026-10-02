@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sector Regime Engine</title>
+    <link rel="stylesheet" href="src/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Sector Regime Engine</h1>
+      <p class="sub">
+        A regime-gated sector allocation tool implementing
+        <code>strategies/sector_rotation_strategies.md</code>. It measures two independent axes, gates
+        every directional overlay on statistical significance, and attributes the result by comparison
+        type. Nothing here predicts sector leadership.
+      </p>
+    </header>
+
+    <main>
+      <section class="panel" id="controls">
+        <h2>1. Data</h2>
+        <div class="row">
+          <label>
+            <input type="radio" name="source" id="source-synthetic" checked />
+            Synthetic universe (known regime)
+          </label>
+          <label>
+            <input type="radio" name="source" id="source-csv" />
+            CSV file
+          </label>
+        </div>
+
+        <div id="synthetic-controls" class="grid">
+          <label>
+            Ground-truth regime
+            <select id="gen-regime">
+              <option value="memoryless">memoryless</option>
+              <option value="persistent">persistent</option>
+              <option value="reverting">reverting</option>
+              <option value="uncertain">uncertain (short sample)</option>
+            </select>
+          </label>
+          <label>
+            Seed
+            <input type="number" id="gen-seed" value="20261002" step="1" />
+          </label>
+          <label>
+            Years
+            <input type="number" id="gen-years" value="8" step="1" min="1" max="30" />
+          </label>
+          <label>
+            Annual volatility
+            <input type="number" id="gen-vol" value="0.2" step="0.01" />
+          </label>
+          <label>
+            Average correlation
+            <input type="number" id="gen-corr" value="0.6" step="0.05" min="0" max="0.99" />
+          </label>
+          <label>
+            Latent share of variance
+            <input type="number" id="gen-latent" value="0.3" step="0.05" min="0" max="0.9" />
+          </label>
+        </div>
+
+        <div id="csv-controls" class="grid hidden">
+          <label>
+            Total-return prices CSV
+            <input type="file" id="csv-file" accept=".csv,text/csv" />
+          </label>
+          <label>
+            CSV contains
+            <select id="csv-mode">
+              <option value="prices">prices</option>
+              <option value="returns">returns</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="row">
+          <button id="run" class="primary">Run analysis</button>
+          <button id="export-json">Export results JSON</button>
+          <span id="status" class="status"></span>
+        </div>
+        <div id="ground-truth" class="note"></div>
+      </section>
+
+      <section class="panel" id="config-panel">
+        <h2>2. Frozen configuration</h2>
+        <p class="sub">
+          Freeze these before looking at results. The fingerprint identifies the exact configuration a
+          result was produced under.
+        </p>
+        <div class="grid">
+          <label>
+            Significance level
+            <input type="number" id="cfg-alpha" value="0.05" step="0.01" min="0.001" max="0.5" />
+          </label>
+          <label>
+            <input type="checkbox" id="cfg-bonferroni" checked />
+            Bonferroni across primary tests
+          </label>
+          <label>
+            Minimum observations
+            <input type="number" id="cfg-minobs" value="252" step="21" min="30" />
+          </label>
+          <label>
+            Rolling window (days)
+            <input type="number" id="cfg-rollwindow" value="63" step="21" min="21" />
+          </label>
+          <label>
+            Rebalance check
+            <select id="cfg-interval">
+              <option value="daily-band">daily, band only</option>
+              <option value="weekly">weekly</option>
+              <option value="monthly">monthly</option>
+              <option value="quarterly">quarterly</option>
+            </select>
+          </label>
+          <label>
+            Drift band (relative to target)
+            <input type="number" id="cfg-band" value="0.05" step="0.01" min="0" max="1" />
+          </label>
+          <label>
+            Trading cost (bps per trade)
+            <input type="number" id="cfg-costbps" value="5" step="1" min="0" />
+          </label>
+          <label>
+            Expense ratio (bps per year)
+            <input type="number" id="cfg-expensebps" value="10" step="1" min="0" />
+          </label>
+          <label>
+            Overlay
+            <select id="cfg-overlay">
+              <option value="none">none</option>
+              <option value="momentum">momentum</option>
+              <option value="contrarian">contrarian</option>
+            </select>
+          </label>
+          <label>
+            Overlay frequency
+            <select id="cfg-overlayfreq">
+              <option value="monthly">monthly</option>
+              <option value="weekly">weekly</option>
+              <option value="quarterly">quarterly</option>
+            </select>
+          </label>
+          <label>
+            Overlay lookback (days)
+            <input type="number" id="cfg-lookback" value="126" step="21" min="5" />
+          </label>
+          <label>
+            Overlay skip (days)
+            <input type="number" id="cfg-skip" value="21" step="1" min="0" />
+          </label>
+          <label>
+            Overlay top N sectors
+            <input type="number" id="cfg-top" value="3" step="1" min="1" />
+          </label>
+          <label>
+            Held-out fraction
+            <input type="number" id="cfg-holdout" value="0.3" step="0.05" min="0.1" max="0.5" />
+          </label>
+        </div>
+        <p class="fingerprint">
+          Frozen configuration fingerprint: <code id="fingerprint">not yet computed</code>
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>3. Regime verdict</h2>
+        <div id="verdict" class="stack"></div>
+      </section>
+
+      <section class="panel">
+        <h2>4. Two independent axes</h2>
+        <div id="axes" class="grid two"></div>
+      </section>
+
+      <section class="panel">
+        <h2>5. Eligibility</h2>
+        <div id="eligibility"></div>
+      </section>
+
+      <section class="panel">
+        <h2>6. Metrics with the evidence hierarchy</h2>
+        <div id="metrics"></div>
+      </section>
+
+      <section class="panel">
+        <h2>7. Equity curves</h2>
+        <p class="sub" id="equity-caption"></p>
+        <canvas id="chart-equity" height="280"></canvas>
+        <div id="legend" class="legend"></div>
+      </section>
+
+      <section class="panel">
+        <h2>8. Attribution</h2>
+        <p class="sub">
+          All lines are sums of log returns, so they are exactly additive. The residual is printed so
+          the identity can be checked rather than assumed.
+        </p>
+        <div id="attribution"></div>
+      </section>
+
+      <section class="panel">
+        <h2>9. Cross-sectional structure</h2>
+        <div class="grid two">
+          <div>
+            <canvas id="chart-dispersion" height="200"></canvas>
+            <p class="sub">Rolling cross-sectional dispersion of daily sector returns.</p>
+          </div>
+          <div>
+            <canvas id="chart-corr" height="200"></canvas>
+            <p class="sub">Rolling average pairwise correlation. The premium is inversely proportional.</p>
+          </div>
+        </div>
+        <div id="heatmap" class="heatmap-wrap"></div>
+      </section>
+
+      <section class="panel">
+        <h2>10. Frequency and band grid</h2>
+        <p class="sub">Section 10.4. The interesting question is whether frequency matters much once the band is set.</p>
+        <div id="grid"></div>
+      </section>
+
+      <section class="panel">
+        <h2>11. Held-out window</h2>
+        <p class="sub">
+          The regime is decided on the observation window only and then frozen. Held-out results are
+          hidden until revealed, which is the point of pre-registration.
+        </p>
+        <div id="holdout" class="stack"></div>
+        <button id="reveal-holdout">Reveal held-out results</button>
+      </section>
+
+      <section class="panel">
+        <h2>12. Instrument validation</h2>
+        <p class="sub">
+          The engine is a measuring instrument, so it is measured: the same data is generated with a
+          known regime and the classifier is scored against it, across several seeds and all three
+          worlds.
+        </p>
+        <button id="validate">Run validation sweep</button>
+        <div id="validation" class="stack"></div>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Every number shown is produced by <code>src/engine.js</code>, which is covered by
+        <code>tests/engine.test.mjs</code>. No forecasting library, no network calls, no build
+        dependencies beyond the bundler.
+      </p>
+    </footer>
+
+    <script src="app.js"></script>
+    <script>
+      // app.js is generated by "bun run build" and is not tracked, so a fresh checkout has no
+      // bundle. Say so instead of rendering an empty page.
+      window.addEventListener('load', function () {
+        var verdict = document.getElementById('verdict');
+        if (verdict && verdict.children.length === 0) {
+          verdict.innerHTML =
+            '<p class="note">The bundle <code>app.js</code> is not present. ' +
+            'Run <code>bun run build</code> in this directory, then reload.</p>';
+        }
+      });
+    </script>
+  </body>
+</html>

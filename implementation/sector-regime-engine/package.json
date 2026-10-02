@@ -1,0 +1,14 @@
+{
+  "name": "sector-regime-engine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Regime-gated sector allocation engine implementing strategies/sector_rotation_strategies.md",
+  "scripts": {
+    "build": "bun build src/ui.js --target=browser --format=iife --outfile=app.js",
+    "test": "bun test",
+    "serve": "bun run tools/serve.mjs",
+    "fetch": "bun run tools/fetch-eodhd.mjs"
+  },
+  "devDependencies": {}
+}
