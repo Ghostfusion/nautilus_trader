@@ -34,8 +34,8 @@ use crate::{
     connection::{Connection, RET_OK},
     generated::{
         qot_common::{self, KLine},
-        qot_get_security_snapshot, qot_get_static_info, qot_get_sub_info, qot_request_history_kl,
-        qot_request_history_kl_quota, qot_sub,
+        qot_get_order_book, qot_get_security_snapshot, qot_get_static_info, qot_get_sub_info,
+        qot_request_history_kl, qot_request_history_kl_quota, qot_sub,
     },
     mappers::{
         bars::{Adjustment, BarSession, Interval, build_bars},
@@ -145,6 +145,59 @@ pub async fn request_snapshot(
         .and_then(|s2c| s2c.snapshot_list.into_iter().next())
         .map(|snapshot| snapshot.basic)
         .with_context(|| format!("no snapshot returned for {}", describe(&security)))
+}
+
+/// The protocol identifier of the order book request.
+pub const PROTO_ID_GET_ORDER_BOOK: u32 = 3012;
+
+/// The deepest book the venue will send in one answer.
+///
+/// Observed by asking for one hundred levels and being given sixty, which is the full ladder the
+/// venue holds rather than a truncation of the request. A larger configured depth is clamped here
+/// rather than passed through.
+pub const MAX_BOOK_DEPTH: i32 = 60;
+
+/// Requests the order book for one security.
+///
+/// The request is only served while the order book is subscribed for that security: the gateway
+/// refuses it outright with a message naming the missing subscription. That makes this a companion
+/// to a held subscription rather than a standalone read, and the refusal is passed through rather
+/// than retried, because retrying cannot supply the subscription.
+///
+/// The board asked for is a request, not a promise. Observed against the gateway, asking for the
+/// odd-lot board returned the ordinary one and reported it as ordinary, so the caller must read the
+/// board off the answer rather than from what it asked for.
+///
+/// # Errors
+///
+/// Returns an error if the request fails, the gateway refuses it, the answer cannot be decoded, or
+/// it carries no book for the security.
+pub async fn request_order_book(
+    connection: &Connection,
+    security: qot_common::Security,
+    depth: i32,
+    board: i32,
+) -> anyhow::Result<qot_get_order_book::S2c> {
+    let request = qot_get_order_book::Request {
+        c2s: qot_get_order_book::C2s {
+            security: security.clone(),
+            num: depth.clamp(1, MAX_BOOK_DEPTH),
+            order_book_type: Some(board),
+            header: None,
+        },
+    };
+
+    let message = connection
+        .request(PROTO_ID_GET_ORDER_BOOK, &request.encode_to_vec())
+        .await?;
+
+    let response = qot_get_order_book::Response::decode(message.body.as_slice())
+        .context("cannot decode an order book response")?;
+    check_outcome(response.ret_type, response.ret_msg, "order book")?;
+
+    response
+        .s2c
+        .with_context(|| format!("no order book returned for {}", describe(&security)))
 }
 
 /// Loads one instrument definition from the gateway.

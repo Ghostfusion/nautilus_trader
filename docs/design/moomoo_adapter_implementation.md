@@ -513,6 +513,15 @@ quote path is built on the order book:
 The snapshot's other fields are not discarded: last price, session prices, and instrument status
 have uses, but none of them is a quote tick, and the adapter must not pretend otherwise.
 
+As implemented, two refinements were needed. The venue states a side it has none of as an empty
+list, which is the rule above, but it can also send a level priced at zero, and that is a degraded
+record rather than a side quoted at nothing; a tick is not built from one either, because a price
+nothing can trade at is worse than no tick. And the quote is stamped with the later of the two
+sides' receive times, because the state being reported is only true once both sides have arrived.
+
+Against the gateway the path produced a real book: `AAPL.US` bid 332.91 for 201 against an ask of
+332.95 for 99, from a book of ten levels a side.
+
 ### 13.2 Order book
 
 The book arrives as a structured object with bid and ask arrays, each level a tuple of price,
@@ -525,6 +534,47 @@ Implementation requirements:
 - Respect the venue's maximum depth, and do not request more levels than the entitlement serves.
 - Emit `OrderBookDeltas` with the venue's receive timestamp for the changed side, not the local
   clock.
+
+As implemented, six things were learned against the gateway, and two of them correct this section.
+
+**The push is the whole book, not the changes to it.** Every push carried sixty levels a side with
+the complete price ladder, and consecutive pushes differed only in the size of a few rungs. Seeding
+from a snapshot and then applying deltas, as the requirements above describe, does not describe this
+feed: each record is itself a snapshot, so it is mapped as a clear carrying the snapshot flag
+followed by an add per level, ending with the last flag. Nothing is carried over from the previous
+record, which also removes the gap the reseeding requirement exists to close.
+
+**The push ignores the depth the subscription named.** Sixty levels arrived on a subscription taken
+for the ordinary book with no depth, and the request honoured its own depth exactly: asking for one,
+ten, and twenty returned one, ten, and twenty levels, while asking for one hundred returned sixty.
+The ceiling is therefore sixty, and it is applied on the push path in the adapter, because a book
+sixty levels deep under a subscription taken for ten would claim more than the gateway granted.
+
+**The request is only served while the book is subscribed.** Without one the gateway refuses it with
+a message naming the missing subscription, so the request is a companion to a held subscription
+rather than a standalone read, and the refusal is passed through rather than retried.
+
+**The board asked for is not the board served.** Asking for the odd-lot board returned the ordinary
+board and reported it as ordinary. A check on what the request asked for would therefore have
+accepted ordinary prices as odd-lot ones with nothing to signal it, so the record's own board field
+is what is checked.
+
+**The venue states the receive time twice, and only one of them is usable.** The number is a
+fractional count of seconds since the epoch; the text field beside it is the market's wall clock,
+observed reading four hours ahead of UTC while the number read UTC exactly. The protocol comment
+says this field supports Hong Kong only, which is wrong: the United States equities carried it. The
+number is placed with its fraction handled separately, because a nanosecond count near the epoch is
+past the range a float states exactly and scaling the whole value first would round away part of the
+instant the venue did send.
+
+**Zero is the venue saying it has no instant.** The first push of a subscription is the cached
+record and carried zero for both sides, exactly as the protocol describes, so zero is not the epoch
+and the local receive time is used instead. That same push is the one the trade path rejects.
+
+The domain book is told a sequence of zero, because the venue assigns none, and the domain book
+skips its ordering check for zero rather than failing it. Each level carries the receive time of its
+own side: against the gateway the two sides differed, and the bid side's timestamp lagged the ask's
+by fifty milliseconds on one recorded push.
 
 ## 14. Corporate actions
 

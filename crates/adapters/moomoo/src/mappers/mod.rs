@@ -21,5 +21,6 @@
 //! at all.
 
 pub mod bars;
+pub mod book;
 pub mod instrument;
 pub mod trades;
