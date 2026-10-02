@@ -10,9 +10,10 @@ This plan maps the work onto the phase sequence in
 than release gates. A market-data-only adapter omits the execution phases entirely, and this one
 does: there is no order submission in the first release.
 
-| Revision | Change                                                                                                    |
-| -------- | --------------------------------------------------------------------------------------------------------- |
-| 1        | Initial plan from the live OpenD probe, with the protocol core proven from the shipped client's own codec |
+| Revision | Change                                                                                                                                                                                    |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Initial plan from the live OpenD probe, with the protocol core proven from the shipped client's own codec                                                                                 |
+| 2        | Recorded the build-time generation constraint, since `prost-build` needs a host `protoc` that this repository does not require, and the push confirmation with its `push_data_type` field |
 
 ## 1. Scope and reading order
 
@@ -105,13 +106,27 @@ New dependencies are deliberately few and all justified:
 | `zeroize` | Clearing the secret-bearing buffers          | Matches the existing adapter credential handling         |
 | `tokio`   | The socket, the heartbeat, the dispatch loop | Already the async runtime in use                         |
 
-`prost` and `prost-build` are new to the workspace and are the only additions that need review on
-their own merits. The vendored `.proto` files remove any need for a network fetch at build time.
+`prost` and `prost-build` are the only additions that need review on their own merits, with two
+corrections to the earlier claim that both would be new to the workspace.
+
+- **Both are already in the workspace lockfile.** `prost` 0.13.5 and 0.14.4, `prost-build` 0.13.5,
+  and `prost-derive` are present as dependencies of `dydx-proto` and `tonic-build`, and the
+  supply-chain configuration already exempts `prost-build` 0.13.5 and `prost` 0.14.4. Pinning the
+  adapter to a version already in the graph avoids introducing a new version to review.
+  `prost-types` is exempted at 0.13.1 only, so a direct dependency on it would need its own review.
+- **Generation at build time needs a `protoc` this repository does not require.** `prost-build`
+  0.13.5 locates `protoc` on `PATH`, through `PROTOC`, or through an explicit path, and neither
+  bundles nor downloads it; the only protoc-free route is compiling a `FileDescriptorSet` that
+  something else produced. No workspace `build.rs` invokes `protoc`, there is no `protoc` step in
+  the repository's automation, and `protoc` is not installed on the development host. The one
+  in-tree precedent, `dydx-proto`, sidesteps the problem by returning from its build script unless
+  `V4_PROTO_REBUILD` is set, so its generated types are checked in and no ordinary build runs
+  `protoc`.
 
 ## 5. Vendoring the message definitions
 
 Copy the subset of the gateway client's Protobuf definitions that the adapter uses into `proto/`,
-with a file recording the source package and version, and generate Rust types in `build.rs`:
+with a file recording the source package and version:
 
 ```
 proto/
@@ -144,6 +159,32 @@ rediscovered.
 
 The definitions are from the same package version whose codec was read during the probe, so the
 generated types and the verified frame layout are known to be mutually consistent.
+
+### Generation strategy
+
+Generation happens once, deliberately, and the result is checked in. A build-time `protoc` would make
+the crate unbuildable on a host without it, which contradicts the property the repository has today:
+a clean checkout builds with nothing but the Rust toolchain. The check-in follows the only precedent
+in the tree, `dydx-proto`, whose generated types are committed and whose build script is inert unless
+explicitly asked to regenerate.
+
+The concrete shape:
+
+- `proto/` holds the vendored definitions and a `README.md` recording the source package, its
+  version, and the exact regeneration command.
+- The generated Rust is committed under `src/generated/`, with a header naming the generator, its
+  version, and the `.proto` revision, so a diff is attributable to a source revision.
+- Regeneration is a documented one-off that needs `protoc`; the gateway client ships a usable one at
+  `moomoo/common/pb/protoc.exe`, so the tooling exists without a global install.
+- Regeneration is not part of `cargo build`, so a stale generated file is a review finding rather
+  than a build failure. The conformance tests in section 17 are what catch a mismatch between the
+  vendored definitions and the committed code.
+
+The alternative, generating in `build.rs` from a pure-Rust compiler such as `protox` and calling
+`Config::compile_fds`, would keep generation automatic and add no host prerequisite, at the cost of a
+new build dependency that would need its own supply-chain review. It is recorded as the alternative
+rather than adopted: adding no dependency and matching the existing precedent is the smaller change,
+and the choice is reversible because both routes consume the same vendored `.proto` files.
 
 ## 6. Protocol core: the frame codec
 
@@ -304,8 +345,21 @@ Mapping:
 - **Time** is exchange-local with millisecond precision, converted by the same single time function
   as bars.
 
-The push path is the primary source. The query path exists for seeding and for verifying a push
-against a query during conformance testing.
+The push path is the primary source, and its delivery has been confirmed on a live session (design
+section 12.4). The query path exists for seeding and for verifying a push against a query during
+conformance testing.
+
+The push payload is not the same shape as the query payload, and the difference carries a data
+correctness rule:
+
+- **The ticker push carries a `push_data_type` column the query does not return.** A `CACHE` value
+  means the venue is replaying its last-known trade rather than reporting a new one, and it is the
+  first push a fresh subscription receives. The consumer must not emit a trade tick for a cached
+  push, or every session opens with a phantom trade at the previous close. Any other value is a live
+  trade.
+- **The order book is the densest of the three feeds**, and the quote push carries the same 62
+  columns as the snapshot, which is a second confirmation that a quote tick cannot be built from it
+  (section 13.1).
 
 ## 13. Quotes and the order book
 

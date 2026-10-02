@@ -19,6 +19,7 @@ section 10 lists what remains unverified.
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1        | Initial record from a live probe of OpenD with `moomoo-api` 10.10.7008, a plan-and-entitlement read, and a 39-case endpoint sweep                                                              |
 | 2        | Resolved the six open questions from a design review; the venue decision was checked against the repository's provider adapters and was not changed, with the reasoning recorded in section 12 |
+| 3        | Confirmed push delivery on a live session after the document was written, and recorded the `push_data_type` field that only the push payload carries                                           |
 
 ## 1. Purpose and scope
 
@@ -512,12 +513,19 @@ rather than as tested.
 
 ## 10. Risks and unverified areas
 
+**Resolved after this document was written:**
+
+- **Push delivery.** Subscribing to `US.AAPL` for ticker, order book, and quote delivered pushes on
+  all three channels within a single 150-second session, including 30 order-book pushes in the first
+  minute, while the market state was outside the regular session. The confirmation carried one
+  finding the design did not anticipate: the ticker push has a tenth column, `push_data_type`, which
+  the query path does not return, and its first value was `CACHE`, marking a replayed last-known
+  trade rather than a new one. A consumer that ignores it turns the first ticker push of every
+  session into a phantom trade. Section 12.4 records the gate as passed, and the implementation plan
+  carries the handling rule.
+
 **Unverified on this setup:**
 
-- **Push delivery.** The push protocol identifiers exist and subscriptions succeed, but no push
-  frame was observed being delivered, because the probe queried rather than listened and the market
-  was outside the regular session. Push is the primary data path, so this is the first thing the
-  implementation must confirm before anything is built on top of it.
 - **The encrypted and remote gateway path.** Read in the client, not exercised.
 - **The JSON payload format.** The frame supports it; only Protobuf was used.
 - **Push ordering and gap semantics** across a reconnect.
@@ -629,11 +637,19 @@ backfills automatically as a side effect of a subscription.
 ### 12.4 Push confirmation: a gate, not a fallback
 
 Adopted as recommended. Push is the adapter's primary data path and the reason it is not a polling
-client. No push frame was observed during the probe, so the first implementation task is to confirm
-push delivery on a live session across the four channels, and the first release does not ship until
-it is confirmed. A polling fallback would not be a safety net: it would spend the subscription
-allowance, add latency and load, and, worst of all, leave the event path unproven while appearing to
-work.
+client. No push frame was observed during the probe, so confirming push delivery on a live session
+was made the first implementation task, and the first release does not ship until it is confirmed. A
+polling fallback would not be a safety net: it would spend the subscription allowance, add latency
+and load, and, worst of all, leave the event path unproven while appearing to work.
+
+**The gate has since passed.** Ticker, order-book, and quote pushes were all delivered on a live
+session against `US.AAPL`, and they arrived while the market was outside the regular session, which
+also shows the push path can be exercised without waiting for market hours. Two consequences are
+recorded rather than left implicit. First, the ticker push payload carries a `push_data_type` column
+that the query path does not return, and a `CACHE` value means the venue is replaying a last-known
+value rather than reporting a new trade, so the consumer must not emit a tick for it. Second, the
+order book is the densest of the three feeds by a wide margin, which is consistent with building
+quote ticks from book level one (D5, section 13.1).
 
 ### 12.5 Deployment: local first, remote reserved
 
