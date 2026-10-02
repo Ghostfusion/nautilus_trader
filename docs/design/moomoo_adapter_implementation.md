@@ -593,6 +593,40 @@ Dates arrive as calendar dates, not instants, so the effective date is set at th
 in UTC while the observation time remains the event's own timestamp, matching the separation the
 domain type already draws between the two.
 
+What the two event feeds actually carry, read from the gateway, decides most of the mapping.
+
+**The dividend feed has no amount field.** Its only field describing the payment is `statement`, a
+sentence the venue writes in English and states the amount inside: `Cash Dividend: 0.27 USD Per
+Share` for a United States equity and `Cash Dividend: 5.30000 HKD Per Share` for a Hong Kong one.
+The amount, the currency, and the per-share basis are all in the text, so a record is valued by
+reading the sentence and is refused when the sentence is not that form. It is not always that form:
+`Distribution in Specie: 1.00000 MEITUAN-W Share for Every 10.00000 Shares Held` appeared in the
+same field for the same instrument, and it is not a cash amount at all. Valuing that one as though
+it were a dividend would feed a share count into an adjustment stage that expects cash.
+
+**The date fields are `MM/DD/YYYY`, and the protocol comment saying `YYYY/MM/DD` is wrong.** The
+shipped client passes the field through unmodified, so the recorded values are the wire values, and
+they include `07/31/2026` and `11/16/2022`, neither of which has a month in its middle position.
+Reading them as the comment describes would fail loudly rather than silently, but it would fail.
+
+**The split feed states the ratio as a string**, the old share count, then a right arrow (U+2192),
+then the new share count, which together are the new shares per old share: the records for one
+United States equity include the four-for-one split dated 2020-08-31 and the seven-for-one dated
+2014-06-09. This is the same quantity the domain type holds for a split, and a consolidation is the
+same quantity below one.
+
+**The ex-date is a Hong Kong field.** The Hong Kong record carried `exDate` and the United States
+ones did not, so the effective date is the ex-date when the venue states one and the announcement
+date when it does not. Both agree with the known dates of the splits they describe.
+
+**Splits paginate and dividends do not.** The split request takes `num` between one and fifty with a
+`nextKey` that is `-1` once exhausted; the dividend request takes no page arguments and returns
+everything it holds. Neither request needs a subscription, unlike the order book.
+
+The effective date will be the calendar date at midnight UTC, the same instant the daily bars carry,
+for the reason the bar decision gives: an action describes the same price series the bars describe,
+and placing the two on different instants would put them on different days across a market offset.
+
 ## 15. Configuration and environment
 
 Configuration fields, following the existing adapter shape:
