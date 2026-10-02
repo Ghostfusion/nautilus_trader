@@ -6521,6 +6521,8 @@ dependencies = [
  "prost 0.13.5",
  "prost-build",
  "rstest",
+ "sha1 0.10.7",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

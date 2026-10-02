@@ -274,6 +274,7 @@ serde_json = { version = "1.0.151", default-features = false, features = [
   "std",
 ] }
 serde_urlencoded = "0.7.1"
+sha1 = "0.10.7"
 smallvec = { version = "1.16.2", features = ["serde"] }
 socket2 = { version = "0.6.5", features = ["all"] }
 sockudo-ws = { version = "2.1.0", default-features = false, features = [

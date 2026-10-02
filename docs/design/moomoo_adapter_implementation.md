@@ -236,6 +236,21 @@ reject frame-by-frame, and should be reported with the protocol id and the lengt
 The protocol version field is zero, the format type is Protobuf, and the header length is a derived
 constant rather than a literal, so that a future field cannot silently shift the body offset.
 
+Three deliberate divergences from the shipped client's reader are worth recording, because in each
+case following it exactly would be worse.
+
+- **Magic.** The client never checks it, so a desynchronised stream is read as though the next byte
+  were a header. The codec rejects a frame that does not open with `FT`, and the connection closes,
+  because once the boundary is lost no later byte can be trusted to be a header.
+- **Zero-length body.** The client's length test is `len(data) <= head_len`, so a frame whose body
+  length is zero is never parsed and the reader waits for a byte that will not arrive. The codec
+  treats 44 bytes as a complete header and accepts a zero-length body. A working gateway probably
+  never sends one, but the off-by-one is not a behaviour worth reproducing.
+- **Bound on the declared length.** The client has none. The length is a 32-bit count, so an
+  unchecked header can ask the reader to hold four gigabytes before it can decide the frame was
+  invalid. The codec rejects a length beyond 64 MiB, which is generous against a page of a thousand
+  bars at roughly a hundred kilobytes.
+
 ## 7. Protocol core: the connection
 
 ### 7.1 Handshake

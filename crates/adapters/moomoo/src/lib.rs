@@ -32,9 +32,9 @@
 //!
 //! # Scope
 //!
-//! This crate currently provides the protocol layer only: the vendored schema and its generated
-//! Rust types. The frame codec, the connection, the entitlement record, and the data client build
-//! on top of them.
+//! This crate currently provides the protocol layer: the frame codec, and the vendored schema with
+//! the Rust types generated from it. The connection, the entitlement record, and the data client
+//! build on top of them.
 
 #![warn(rustc::all)]
 #![deny(unsafe_code)]
@@ -43,6 +43,8 @@
 #![deny(clippy::missing_errors_doc)]
 #![deny(clippy::missing_panics_doc)]
 #![deny(rustdoc::broken_intra_doc_links)]
+
+pub mod codec;
 
 /// The generated types for the vendored gateway schema.
 ///
