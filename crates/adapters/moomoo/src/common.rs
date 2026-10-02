@@ -15,8 +15,6 @@
 
 //! Constants shared across the adapter, and the markets it serves.
 
-use std::fmt;
-
 use nautilus_model::types::Currency;
 use serde::{Deserialize, Serialize};
 
@@ -118,8 +116,8 @@ impl Market {
     }
 }
 
-impl fmt::Display for Market {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for Market {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.code())
     }
 }

@@ -388,6 +388,7 @@ kraken nautilus_kraken::python::kraken
 lighter nautilus_lighter::python::lighter
 live nautilus_live::python::live
 model nautilus_model::python::model
+moomoo nautilus_moomoo::python::moomoo
 network nautilus_network::python::network
 okx nautilus_okx::python::okx
 persistence nautilus_persistence::python::persistence

@@ -110,6 +110,7 @@ nautilus-hyperliquid = { path = "crates/adapters/hyperliquid", version = "0.65.0
 nautilus-interactive-brokers = { path = "crates/adapters/interactive_brokers", version = "0.65.0" }
 nautilus-kraken = { path = "crates/adapters/kraken", version = "0.65.0", default-features = false }
 nautilus-lighter = { path = "crates/adapters/lighter", version = "0.65.0", default-features = false }
+nautilus-moomoo = { path = "crates/adapters/moomoo", version = "0.65.0", default-features = false }
 nautilus-okx = { path = "crates/adapters/okx", version = "0.65.0", default-features = false }
 nautilus-polymarket = { path = "crates/adapters/polymarket", version = "0.65.0", default-features = false }
 nautilus-sandbox = { path = "crates/adapters/sandbox", version = "0.65.0", default-features = false }

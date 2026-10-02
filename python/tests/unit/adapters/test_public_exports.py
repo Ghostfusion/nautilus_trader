@@ -239,6 +239,7 @@ def test_known_adapter_set_is_complete() -> None:
         "interactive_brokers",
         "kraken",
         "lighter",
+        "moomoo",
         "okx",
         "polymarket",
         "sandbox",

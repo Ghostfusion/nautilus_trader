@@ -16,6 +16,7 @@ from . import hyperliquid
 from . import interactive_brokers
 from . import kraken
 from . import lighter
+from . import moomoo
 from . import okx
 from . import polymarket
 from . import sandbox
@@ -37,6 +38,7 @@ __all__ = [
     "interactive_brokers",
     "kraken",
     "lighter",
+    "moomoo",
     "okx",
     "polymarket",
     "sandbox",

@@ -1120,7 +1120,7 @@ mod tests {
     use nautilus_core::UnixNanos;
     use nautilus_model::{
         data::BarSpecification,
-        enums::{BarAggregation, PriceType},
+        enums::{BarAggregation, BookAction, PriceType, RecordFlag},
         types::Price,
     };
     use rstest::rstest;
@@ -1380,12 +1380,9 @@ mod tests {
         // whole ladder, and the last flag rides on the final level rather than on a record of its
         // own.
         assert_eq!(deltas.deltas.len(), 3, "a clear and one level a side");
-        assert_eq!(
-            deltas.deltas[0].action,
-            nautilus_model::enums::BookAction::Clear
-        );
+        assert_eq!(deltas.deltas[0].action, BookAction::Clear);
         assert_ne!(
-            deltas.deltas.last().unwrap().flags & nautilus_model::enums::RecordFlag::F_LAST as u8,
+            deltas.deltas.last().unwrap().flags & RecordFlag::F_LAST as u8,
             0
         );
     }
