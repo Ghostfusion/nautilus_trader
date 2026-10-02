@@ -19,10 +19,7 @@ use nautilus_core::string::secret::SecretString;
 use nautilus_model::types::Currency;
 use serde::{Deserialize, Serialize};
 
-use crate::common::EODHD_DEFAULT_PRICE_PRECISION;
-
-/// The default EODHD exchange used for instrument discovery.
-pub const EODHD_DEFAULT_EXCHANGE: &str = "US";
+use crate::common::{EODHD_DEFAULT_EXCHANGE, EODHD_DEFAULT_PRICE_PRECISION};
 
 /// The default poll interval, in seconds, for a live bar subscription.
 pub const EODHD_DEFAULT_POLL_INTERVAL_SECS: u64 = 60;

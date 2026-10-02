@@ -28,7 +28,7 @@ use crate::{
     },
     common::EODHD_DEFAULT_PRICE_PRECISION,
     http::EodhdHttpClient,
-    providers::{equity_from_ticker, is_equity},
+    providers::{equity_from_ticker, fetch_exchange_equities},
 };
 
 /// A historical data loader for EODHD end-of-day and intraday market data.
@@ -105,26 +105,7 @@ impl EodhdDataLoader {
     ///
     /// Returns an error if the request fails or a row cannot be mapped.
     pub async fn instruments(&self, exchange: &str) -> anyhow::Result<Vec<InstrumentAny>> {
-        let rows = self.client.exchange_symbols(exchange).await?;
-        let mut instruments = Vec::with_capacity(rows.len());
-
-        for row in rows.iter().filter(|row| is_equity(row)) {
-            let exchange = row.exchange.as_deref().unwrap_or(exchange);
-            let ticker = format!("{}.{}", row.code, exchange);
-            let currency = row
-                .currency
-                .as_deref()
-                .map_or(self.currency, Currency::from);
-
-            instruments.push(equity_from_ticker(
-                &ticker,
-                currency,
-                self.price_precision,
-                None,
-            )?);
-        }
-
-        Ok(instruments)
+        fetch_exchange_equities(&self.client, exchange, self.currency, self.price_precision).await
     }
 
     /// Returns the historical bars for `instrument_id` between `start` and `end` inclusive.

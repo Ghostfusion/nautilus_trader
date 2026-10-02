@@ -52,7 +52,7 @@ use nautilus_model::{
     enums::AggregationSource,
     identifiers::{ClientId, InstrumentId, Venue},
     instruments::{Instrument, InstrumentAny},
-    types::{Currency, Price, Quantity},
+    types::{Price, Quantity},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -60,7 +60,7 @@ use crate::{
     bars::{EodhdInterval, build_eod_bars, build_intraday_bars, resolve_interval},
     config::EodhdDataClientConfig,
     http::{EodhdDelayedQuote, EodhdHttpClient},
-    providers::equity_from_ticker,
+    providers::EodhdInstrumentProvider,
 };
 
 /// Seconds in a day.
@@ -85,7 +85,7 @@ pub struct EodhdDataClient {
     client_id: ClientId,
     config: EodhdDataClientConfig,
     http_client: EodhdHttpClient,
-    currency: Currency,
+    provider: EodhdInstrumentProvider,
     is_connected: Arc<AtomicBool>,
     cancellation_token: CancellationToken,
     tasks: TaskGroup,
@@ -116,7 +116,11 @@ impl EodhdDataClient {
                 .map(|url| url.expose_secret().to_string()),
         )?;
 
-        let currency = config.resolved_currency();
+        let provider = EodhdInstrumentProvider::new(
+            http_client.clone(),
+            config.resolved_currency(),
+            config.price_precision,
+        );
         let data_sender = get_data_event_sender();
         let tasks = TaskGroup::new();
         let cancellation_token = tasks.cancellation_token();
@@ -125,7 +129,7 @@ impl EodhdDataClient {
             client_id,
             config,
             http_client,
-            currency,
+            provider,
             is_connected: Arc::new(AtomicBool::new(false)),
             cancellation_token,
             tasks,
@@ -146,34 +150,6 @@ impl EodhdDataClient {
     #[must_use]
     pub fn instruments(&self) -> Vec<InstrumentAny> {
         self.instruments.borrow().values().cloned().collect()
-    }
-
-    /// Fetches the equity instruments listed on `exchange` and caches them.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the request fails or a row cannot be mapped.
-    async fn fetch_instruments(&self, exchange: &str) -> anyhow::Result<Vec<InstrumentAny>> {
-        let rows = self.http_client.exchange_symbols(exchange).await?;
-        let mut instruments = Vec::with_capacity(rows.len());
-
-        for row in rows.iter().filter(|row| crate::providers::is_equity(row)) {
-            let exchange = row.exchange.as_deref().unwrap_or(exchange);
-            let ticker = format!("{}.{}", row.code, exchange);
-            let currency = row
-                .currency
-                .as_deref()
-                .map_or(self.currency, Currency::from);
-
-            instruments.push(equity_from_ticker(
-                &ticker,
-                currency,
-                self.config.price_precision,
-                None,
-            )?);
-        }
-
-        Ok(instruments)
     }
 
     fn store_instruments(&self, instruments: Vec<InstrumentAny>) {
@@ -511,7 +487,7 @@ impl DataClient for EodhdDataClient {
 
         if self.config.load_instruments {
             let exchange = self.config.exchange.clone();
-            let instruments = self.fetch_instruments(&exchange).await?;
+            let instruments = self.provider.fetch_instruments(&exchange).await?;
 
             log::debug!("Loaded {} instruments for {exchange}", instruments.len());
 

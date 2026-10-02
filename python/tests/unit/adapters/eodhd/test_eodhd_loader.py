@@ -81,6 +81,16 @@ SYMBOL_ROWS = [
         "Type": "Mutual Fund",
         "Isin": "US0000000001",
     },
+    {
+        # A United States list names the listing venue, which is not a valid ticker suffix.
+        "Code": "AACG",
+        "Name": "ATA Creativity Global",
+        "Country": "USA",
+        "Exchange": "NASDAQ",
+        "Currency": "USD",
+        "Type": "Common Stock",
+        "Isin": "US00211V1061",
+    },
 ]
 
 # 2024-01-02T00:00:00Z in nanoseconds
@@ -236,4 +246,8 @@ async def test_instruments_keeps_only_equity_types(loader: EodhdDataLoader) -> N
     """Test that the symbol list is filtered to equity instrument types."""
     instruments = await loader.instruments("US")
 
-    assert [instrument.id.value for instrument in instruments] == ["AAPL.US", "SPY.US"]
+    assert [instrument.id.value for instrument in instruments] == [
+        "AAPL.US",
+        "SPY.US",
+        "AACG.US",
+    ]

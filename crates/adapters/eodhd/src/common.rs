@@ -45,6 +45,12 @@ pub const EODHD_HTTP_BASE_URL: &str = "https://eodhd.com/api";
 /// Default request timeout in seconds.
 pub const EODHD_HTTP_TIMEOUT_SECS: u64 = 30;
 
+/// The default EODHD exchange code used for instrument discovery.
+///
+/// EODHD addresses every United States listing with the `US` code, so the listing venue a symbol
+/// list reports for a row (`NYSE`, `NASDAQ`, `PINK`, `NMFQS`) is not a valid ticker suffix.
+pub const EODHD_DEFAULT_EXCHANGE: &str = "US";
+
 /// The default price precision applied to instruments and bars.
 pub const EODHD_DEFAULT_PRICE_PRECISION: u8 = 2;
 

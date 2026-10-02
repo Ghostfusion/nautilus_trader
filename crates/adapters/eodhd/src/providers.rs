@@ -28,7 +28,7 @@ use nautilus_model::{
 use ustr::Ustr;
 
 use crate::{
-    common::EODHD,
+    common::EODHD_DEFAULT_EXCHANGE,
     http::{EodhdHttpClient, EodhdSymbol},
 };
 
@@ -86,10 +86,65 @@ pub fn is_equity(row: &EodhdSymbol) -> bool {
     })
 }
 
+/// Builds an equity from a symbol list `row` fetched under the `exchange` code.
+///
+/// The venue is the `exchange` code the list was requested with, not the row's own `Exchange`
+/// field. A United States list names the listing venue in that field (`NYSE`, `NASDAQ`, `PINK`),
+/// and EODHD rejects such a suffix on every data endpoint, so the field cannot build a ticker.
+///
+/// # Errors
+///
+/// Returns an error if `exchange` is empty, or if the resulting instrument fails validation.
+pub fn equity_from_row(
+    row: &EodhdSymbol,
+    exchange: &str,
+    default_currency: Currency,
+    price_precision: u8,
+) -> anyhow::Result<InstrumentAny> {
+    if exchange.is_empty() {
+        anyhow::bail!(
+            "Cannot build an instrument for '{}' without an exchange",
+            row.code
+        );
+    }
+
+    let ticker = format!("{}.{}", row.code, exchange);
+    let currency = row
+        .currency
+        .as_deref()
+        .map_or(default_currency, Currency::from);
+    let isin = row.isin.as_deref().map(Ustr::from);
+
+    equity_from_ticker(&ticker, currency, price_precision, isin)
+}
+
+/// Fetches and maps the equities listed on `exchange`.
+///
+/// Rows whose type is not an equity are skipped.
+///
+/// # Errors
+///
+/// Returns an error if the request fails or a row cannot be mapped.
+pub async fn fetch_exchange_equities(
+    client: &EodhdHttpClient,
+    exchange: &str,
+    currency: Currency,
+    price_precision: u8,
+) -> anyhow::Result<Vec<InstrumentAny>> {
+    let rows = client.exchange_symbols(exchange).await?;
+    let mut instruments = Vec::with_capacity(rows.len());
+
+    for row in rows.iter().filter(|row| is_equity(row)) {
+        instruments.push(equity_from_row(row, exchange, currency, price_precision)?);
+    }
+
+    Ok(instruments)
+}
+
 /// An instrument provider for EODHD equities.
 ///
-/// This adapter has no live data client, so the provider is not driven by a client lifecycle.
 /// Instrument definitions are fetched on demand and cached in the provider's [`InstrumentStore`].
+/// The live data client uses this provider to load the universe for its configured exchange.
 #[derive(Debug)]
 pub struct EodhdInstrumentProvider {
     store: InstrumentStore,
@@ -137,40 +192,15 @@ impl EodhdInstrumentProvider {
         equity_from_ticker(ticker, self.currency, self.price_precision, None)
     }
 
-    /// Builds an equity from a symbol list `row`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the row has no exchange and no default can be applied, or if the
-    /// resulting instrument fails validation.
-    pub fn instrument_from_row(&self, row: &EodhdSymbol) -> anyhow::Result<InstrumentAny> {
-        let exchange = row.exchange.as_deref().unwrap_or(EODHD);
-        let ticker = format!("{}.{}", row.code, exchange);
-        let currency = row
-            .currency
-            .as_deref()
-            .map_or(self.currency, Currency::from);
-        let isin = row.isin.as_deref().map(Ustr::from);
-
-        equity_from_ticker(&ticker, currency, self.price_precision, isin)
-    }
-
     /// Fetches and maps the equity instruments listed on `exchange`.
     ///
     /// Rows whose type is not an equity are skipped.
     ///
     /// # Errors
     ///
-    /// Returns an error if the request fails or the response cannot be parsed.
+    /// Returns an error if the request fails or a row cannot be mapped.
     pub async fn fetch_instruments(&self, exchange: &str) -> anyhow::Result<Vec<InstrumentAny>> {
-        let rows = self.client.exchange_symbols(exchange).await?;
-        let mut instruments = Vec::with_capacity(rows.len());
-
-        for row in rows.iter().filter(|row| is_equity(row)) {
-            instruments.push(self.instrument_from_row(row)?);
-        }
-
-        Ok(instruments)
+        fetch_exchange_equities(&self.client, exchange, self.currency, self.price_precision).await
     }
 
     /// Fetches the equity instruments listed on `exchange` and caches them.
@@ -202,7 +232,7 @@ impl InstrumentProvider for EodhdInstrumentProvider {
     async fn load_all(&mut self, filters: Option<&HashMap<String, String>>) -> anyhow::Result<()> {
         let exchange = filters
             .and_then(|filters| filters.get("exchange"))
-            .map_or_else(|| EODHD.to_string(), ToString::to_string);
+            .map_or_else(|| EODHD_DEFAULT_EXCHANGE.to_string(), ToString::to_string);
 
         self.initialize(&exchange).await?;
 
@@ -256,6 +286,56 @@ mod tests {
         let result = equity_from_ticker("AAPL", Currency::USD(), 2, None);
 
         assert!(result.is_err());
+    }
+
+    fn symbol_row(code: &str, exchange: Option<&str>) -> EodhdSymbol {
+        EodhdSymbol {
+            code: code.to_string(),
+            name: None,
+            country: None,
+            exchange: exchange.map(ToString::to_string),
+            currency: None,
+            symbol_type: Some("Common Stock".to_string()),
+            isin: None,
+        }
+    }
+
+    #[rstest]
+    fn test_equity_from_row_uses_the_queried_exchange_not_the_listing_venue() {
+        // EODHD addresses a United States listing as `<code>.US` and rejects the listing-venue
+        // suffix, so a row's own Exchange field must never become the venue.
+        let row = symbol_row("AACG", Some("NASDAQ"));
+
+        let instrument = equity_from_row(&row, "US", Currency::USD(), 2).unwrap();
+
+        assert_eq!(instrument.id().to_string(), "AACG.US");
+        assert_eq!(instrument.raw_symbol().to_string(), "AACG.US");
+    }
+
+    #[rstest]
+    fn test_equity_from_row_keeps_the_venue_of_a_non_us_listing() {
+        let row = symbol_row("VOD", Some("LSE"));
+
+        let instrument = equity_from_row(&row, "LSE", Currency::USD(), 2).unwrap();
+
+        assert_eq!(instrument.id().to_string(), "VOD.LSE");
+    }
+
+    #[rstest]
+    fn test_equity_from_row_uses_the_row_currency() {
+        let mut row = symbol_row("VOD", Some("LSE"));
+        row.currency = Some("GBP".to_string());
+
+        let instrument = equity_from_row(&row, "LSE", Currency::USD(), 2).unwrap();
+
+        assert_eq!(instrument.quote_currency(), Currency::GBP());
+    }
+
+    #[rstest]
+    fn test_equity_from_row_rejects_an_empty_exchange() {
+        let row = symbol_row("AAPL", None);
+
+        assert!(equity_from_row(&row, "", Currency::USD(), 2).is_err());
     }
 
     #[rstest]
