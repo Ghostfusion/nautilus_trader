@@ -263,6 +263,8 @@ Mapping rules:
 - Precision is derived, from the price spread when present and from a per-market default otherwise,
   and the derivation is a single function so that a venue change is one edit.
 - Security types the adapter does not model are filtered out rather than approximated into an equity.
+- The client ID is `MOOMOO` while the instrument venue is the market, so provider identity rides at
+  the client boundary and instrument identity stays the security (design 12.1).
 
 ## 11. Bars
 
@@ -274,8 +276,8 @@ Implementation requirements:
 - **Pagination**: loop until the continuation key is absent, and spend one unit of the historical
   allowance per request, refusing when the allowance is exhausted rather than looping until the
   venue errors.
-- **Adjustment**: an explicit, configured choice, defaulting to the value documented in the
-  integration guide, and never silently following the venue default.
+- **Adjustment**: an explicit, configured choice defaulting to raw and never silently following the
+  venue default, which is adjusted (design 12.2).
 - **Session**: an explicit choice for intraday intervals, because extended-hours rows are not
   returned otherwise.
 - **Ordering and dedup**: rows arrive oldest first within a page, and the adapter must assemble
@@ -356,7 +358,7 @@ Configuration fields, following the existing adapter shape:
 | `host`             | Gateway address, defaulting to localhost     |
 | `port`             | Gateway port, defaulting to the standard one |
 | `markets`          | Which markets to load instruments for        |
-| `adjustment`       | Bar adjustment mode                          |
+| `adjustment`       | Bar adjustment mode, defaulting to raw       |
 | `session`          | Intraday session mode                        |
 | `book_depth`       | Requested depth, capped by entitlement       |
 | `subscribe_trades` | Whether to hold trade subscriptions          |
@@ -457,9 +459,10 @@ actual output recorded.
   own reconciliation requirements, and it is out of scope here.
 - **US options and US futures.** Refused by the current entitlement, so they cannot be verified at
   all. They are gated and documented rather than implemented blind.
-- **Capital flow, macro, Fed watch, rankings, calendars, news, search, ownership, entering and
-  exiting positions in plates.** Data is available for most of these; none has a home in the domain
-  model, and the design document declines to invent one.
+- **Capital flow, macro, Fed watch, rankings, calendars, news, search, ownership, and plates.**
+  Data is available for most of these and none has a core domain type. They are out of the first
+  release but not discarded: design section 6.8 keeps a third-level extension boundary for them, and
+  the first release neither implements nor forecloses them.
 - **Remote gateway encryption.** Documented as a boundary, not implemented.
 - **HK market specifics beyond instrument loading and bars**, until a US path is proven end to end.
 

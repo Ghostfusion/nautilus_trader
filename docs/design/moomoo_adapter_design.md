@@ -15,9 +15,10 @@ Every technical statement in this document was checked against a running daemon 
 gateway client shipped with it, on the machine used for the probe. Section 2 records the method and
 section 10 lists what remains unverified.
 
-| Revision | Change                                                                                                                            |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | Initial record from a live probe of OpenD with `moomoo-api` 10.10.7008, a plan-and-entitlement read, and a 39-case endpoint sweep |
+| Revision | Change                                                                                                                                                                                         |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Initial record from a live probe of OpenD with `moomoo-api` 10.10.7008, a plan-and-entitlement read, and a 39-case endpoint sweep                                                              |
+| 2        | Resolved the six open questions from a design review; the venue decision was checked against the repository's provider adapters and was not changed, with the reasoning recorded in section 12 |
 
 ## 1. Purpose and scope
 
@@ -316,6 +317,13 @@ came from, matching the rule already established for the EODHD adapter.
 The same relocation applies to plates, which are venue objects with their own identifiers and must
 not be mistaken for instruments.
 
+Provider identity and instrument identity are separate in this repository, and this adapter keeps
+them separate. The client ID is `MOOMOO`; the instrument venue is the market the data came from.
+Databento and Tardis, the repository's other data providers, do the same: Databento exposes exchange
+venues such as `XNAS` rather than its own name, and Tardis takes the exchange from the payload,
+keeping `TARDIS` for the client identity. The alternative, a provider-scoped venue such as
+`AAPL.MOOMOO`, was considered and rejected; section 12.1 records the evidence.
+
 ### 6.2 Instruments
 
 Two endpoints carry instrument data. The static-info endpoint returns the definition fields and the
@@ -336,10 +344,14 @@ ratio, turnover rate, volume, turnover, change rate, and previous close.
 
 Three semantics must be explicit:
 
-- **Adjustment.** The request takes an adjustment mode, and the default is forward-adjusted, so
-  prices do not match a raw print series. The adapter must choose and document, because this is
-  exactly the class of error that silently corrupts a backtest. The repository's existing rule for
-  the EODHD adapter, that the series served is the series described, applies unchanged.
+- **Adjustment.** The request takes an adjustment mode and the venue defaults to forward-adjusted,
+  which is exactly the class of error that silently corrupts a backtest. The adapter therefore
+  serves **raw bars by default** and requires an explicit opt-in for an adjusted series, so the
+  venue's default never becomes this adapter's default. Raw is the canonical series here because it
+  is what executed, what a trade and a quote carry, and what a corporate action can be applied to
+  deliberately; an adjusted series is a transformation of that, not a property of it. The
+  repository's existing rule for the EODHD adapter, that the series served is the series described,
+  applies unchanged.
 - **Session.** Intraday requests take a session mode, and extended-hours data must be requested
   rather than assumed.
 - **Pagination.** A request returns at most a page, with a continuation key. A full history is a
@@ -410,17 +422,35 @@ The mapping to `CorporateAction` follows the same rule established for EODHD: th
 the price series the bars describe, so the dividend amount must be the one consistent with the
 chosen adjustment mode.
 
-### 6.8 Product families left out
+### 6.8 Product families and the boundary around the core domain
 
-Returned data but no domain home, so out of the first release: capital flow and distribution,
-macro indicator lists and history, Fed watch target rate and dot plot, pre-market, after-hours and
-overnight rankings, top movers, period change, dividend and earnings-beat rankings, short interest
-and daily short volume, valuation detail, company profile, ownership and holder changes, plate and
-sector membership, IPO lists, search. Several of these are genuinely interesting and none of them
-is a tick, a bar, an instrument, or an action, so they would each need a decision about where their
-data belongs before they need an implementation.
+The probe found more data than the domain model has types for. Rather than declare the excess
+permanently out of scope, the design draws three levels, and only the first is in the first release.
 
-Refused by entitlement, so out of the first release for a second reason: US options and US futures.
+**Level 1, core market data, implemented now:** instruments, bars, trades, quotes, order book,
+corporate actions, and instrument status. These have NautilusTrader domain types and are the subject
+of this document.
+
+**Level 2, standard domain types that already exist:** if a product maps onto a type the platform
+already models, such as option greeks or a funding rate, it becomes a later capability slice with
+its own conversion rather than a new invention. On this entitlement the two candidates, US options
+and US futures, are refused by the venue, so level 2 is empty today.
+
+**Level 3, venue-specific research data, kept outside the core model but not discarded:** capital
+flow and distribution, macro indicator lists and history, Fed watch target rate and dot plot,
+pre-market, after-hours and overnight rankings, top movers, period change, dividend and
+earnings-beat rankings, short interest and daily short volume, valuation detail, company profile,
+ownership and holder changes, plate and sector membership, IPO lists, and search. None of these is a
+tick, a bar, an instrument, or a corporate action, so forcing one into a core type would be
+invention rather than mapping.
+
+Level 3 gets an explicit extension boundary instead of a permanent exclusion: the data client may
+later expose it beside its standard data, in its own types, without entering the core market-data
+path. That keeps the option open for research uses such as flow, crowding, or event scoring while
+keeping the core model honest. Decision D14 records this.
+
+Refused by entitlement, so unusable in the first release for a second reason: US options and US
+futures.
 
 ## 7. Architectural invariants
 
@@ -439,7 +469,12 @@ Refused by entitlement, so out of the first release for a second reason: US opti
    UTC event times in exactly one place.
 7. **The book is the price source for quotes.** No field is invented to satisfy a domain type.
 8. **Local only, in the first release.** The encrypted remote-gateway path is unimplemented and
-   documented as such rather than half-built.
+   documented as such rather than half-built. A remote gateway is reserved for a later release and
+   not ruled out, so the crate must not assume its peer is on the loopback interface.
+9. **Provider identity is preserved at the client boundary.** The adapter's client ID is `MOOMOO`
+   and its instruments carry the market venue. A node may run this adapter beside another United
+   States source without either impersonating the other, and the two are addressed by client ID
+   rather than by renaming the instrument.
 
 ## 8. Limits and failure modes
 
@@ -504,35 +539,109 @@ rather than as tested.
 
 ## 11. Decisions
 
-| Id  | Decision                                                         | Rationale                                                                |
-| --- | ---------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| D1  | Rust crate speaking the frame protocol directly                  | The vendor client is unusable here, and the protocol is specified        |
-| D2  | Generate message types from the gateway's shipped Protobuf files | The schema is available; reverse engineering is unnecessary              |
-| D3  | Push-driven, not polling                                         | The venue offers push, and polling spends a subscription allowance       |
-| D4  | Venue is the market code, symbols relocate their market segment  | Consistent with the existing adapter rule and with the real instruments  |
-| D5  | `QuoteTick` is built from book level one                         | The quote snapshot has no bid and no ask                                 |
-| D6  | `TradeTick` carries the venue direction and sequence             | Both are real venue values, unlike the synthesised EODHD equivalents     |
-| D7  | Capabilities resolved once at start and recorded                 | Keeps "not purchased" distinct from "broken"                             |
-| D8  | Historical requests are quota-accounted                          | The allowance is small and shared and the failure is late                |
-| D9  | Subscription intent and venue state are separate                 | Absorbs the one-minute release rule without leaking it into the strategy |
-| D10 | Adjustment mode and session mode are explicit and documented     | The two silent corruption paths                                          |
-| D11 | First release is US and HK equities, market data only            | Options and futures are unentitled; the rest has no domain home          |
-| D12 | Local gateway only, remote encryption unimplemented              | Half-built cryptography is worse than a documented boundary              |
+| Id  | Decision                                                                                | Rationale                                                                                                                 |
+| --- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Rust crate speaking the frame protocol directly                                         | The vendor client is unusable here, and the protocol is specified                                                         |
+| D2  | Generate message types from the gateway's shipped Protobuf files                        | The schema is available; reverse engineering is unnecessary                                                               |
+| D3  | Push-driven, not polling                                                                | The venue offers push, and polling spends a subscription allowance                                                        |
+| D4  | Venue is the market code, symbols relocate their market segment                         | Matches every provider adapter here: the provider is the client ID, the venue is the traded market                        |
+| D5  | `QuoteTick` is built from book level one                                                | The quote snapshot has no bid and no ask                                                                                  |
+| D6  | `TradeTick` carries the venue direction and sequence                                    | Both are real venue values, unlike the synthesised EODHD equivalents                                                      |
+| D7  | Capabilities resolved once at start and recorded                                        | Keeps "not purchased" distinct from "broken"                                                                              |
+| D8  | Historical requests are quota-accounted                                                 | The allowance is small and shared; the operator owns it and the adapter enforces admission                                |
+| D9  | Subscription intent and venue state are separate                                        | Absorbs the one-minute release rule without leaking it into the strategy                                                  |
+| D10 | Bars default to raw, and adjustment and session are explicit                            | The two silent corruption paths, and the venue default is adjusted                                                        |
+| D11 | First release is US and HK equities, market data only                                   | Options and futures are unentitled; the rest is a preserved extension, not a discard                                      |
+| D12 | Local gateway for the first release, a remote gateway reserved for a later one          | Half-built cryptography is worse than a documented boundary; a local-only invariant would needlessly constrain deployment |
+| D13 | Provider identity is the client ID, not the instrument venue                            | Keeps instrument identity comparable across providers and matches the existing adapters                                   |
+| D14 | Venue-specific research data stays outside the core model, behind an extension boundary | It has no core type, and discarding it permanently would foreclose research use                                           |
 
-## 12. Open questions
+## 12. Resolved decisions
 
-These need a decision from the maintainer before the corresponding code is written.
+The six questions raised in revision 1 are decided. Each records the recommendation received, the
+outcome, and the evidence. Five were adopted as recommended; the venue question was not, because the
+repository's own adapters answer it, and the invariant it motivated was kept in an adapted form.
 
-1. **Venue identity.** Should a moomoo US instrument be `AAPL.US`, sharing the venue with other US
-   sources, or vendor-scoped to keep the entitlement differences visible in the identifier? The
-   design above assumes the former.
-2. **Adjustment default.** Should the adapter serve raw or adjusted bars by default, given that the
-   venue defaults to adjusted and this repository's rules prefer explicit series semantics?
-3. **Quota ownership.** Should the historical allowance be counted per client process, or reported
-   to the operator as an external resource the adapter cannot own?
-4. **Push confirmation.** If push delivery cannot be confirmed on the current entitlement, should
-   the first release fall back to query polling behind the subscription manager, or wait?
-5. **Deployment assumption.** Is a remote OpenD gateway ever in scope? If yes, the encryption path
-   becomes a first-class slice rather than a documented boundary.
-6. **Outside-domain data.** Is there an intended home in this repository for capital flow, macro,
-   and ranking data, or are they permanently out of scope?
+| #   | Question            | Decision                                                                              |
+| --- | ------------------- | ------------------------------------------------------------------------------------- |
+| 1   | Venue identity      | The market code remains the venue; `MOOMOO` is the client ID (D4, D13)                |
+| 2   | Adjustment default  | Raw bars by default, adjusted only on request (D10)                                   |
+| 3   | Quota ownership     | Owned by the operator, accounted and enforced by the adapter (D8)                     |
+| 4   | Push confirmation   | Push is confirmed before the first release; no polling fallback (D3)                  |
+| 5   | Deployment          | Local gateway in the first release; a remote gateway is reserved, not ruled out (D12) |
+| 6   | Outside-domain data | Outside the core model, behind a preserved extension boundary (D14)                   |
+
+### 12.1 Venue identity: the market code remains the venue
+
+**Recommendation received:** use `MOOMOO` as a provider-scoped venue, so the identifier shows which
+feed the data came from, on the grounds that two feeds for the same market are not interchangeable.
+
+**Outcome: not adopted.** The repository already separates the two concepts the recommendation would
+merge. The instrument identifier names the security; the client identifier names the feed. Every
+provider and broker adapter here follows that split:
+
+- **EODHD**, a data provider, carries the EODHD exchange code as the venue (`AAPL.US`) and returns
+  `None` from `DataClient::venue` as a multi-venue client, keeping `EODHD` for the client identity.
+- **Databento**, a data provider, exposes real exchange venues such as `XNAS` and `XLON`, mapping
+  each dataset onto them; `DATABENTO` is the client identity.
+- **Tardis**, a data provider, takes the exchange from the payload as the venue (`BITMEX`,
+  `BINANCE`) and keeps `TARDIS` for the client identity.
+- **Interactive Brokers**, a broker, routes data instruments to `SMART` and exchange venues while
+  `IB` is the client identity and the broker venue used for execution.
+
+A provider-scoped venue would make `AAPL.MOOMOO` and `AAPL.US` two instruments where the repository
+treats them as one security reached by two feeds, and it would make this adapter the only one that
+reasons that way. The recommendation's real concern, that the feeds are not interchangeable, is met
+where the repository already meets it: the two clients are told apart by client identity and by the
+subscriptions addressed to each, and this design states plainly that its data is the moomoo feed and
+not a substitute for another.
+
+The decision is recorded rather than merely executed, so a future change of platform convention can
+be applied deliberately. If feed-scoped identity were ever required, the change is confined to
+symbol and instrument construction; nothing in the transport or the mappings depends on it.
+
+### 12.2 Adjustment default: raw
+
+Adopted as recommended. The venue defaults to forward-adjusted bars, and this adapter does not
+inherit that default. Raw is the canonical series: it is what executed, it is what trades and quotes
+carry, and a corporate action can be applied to it deliberately. Adjustment becomes an explicit
+transformation the caller asks for, so the two silent-corruption paths named in section 6.3 stay
+visible instead of hidden behind a vendor default.
+
+### 12.3 Quota ownership: operator-owned, adapter-enforced
+
+Adopted as recommended, with the nuance that neither extreme is correct. The allowance is not the
+adapter's to own: it is shared with the operator's other tools, and the probe showed 27 of 100
+historical requests already spent before this adapter existed. It is also not something merely to
+report: an adapter that spends the allowance and then announces it has failed the user.
+
+The model is therefore external ownership with local admission control. The adapter tracks what it
+has spent, refreshes the venue's authoritative count, treats its own tally as an estimate rather
+than the truth, and refuses a request it cannot afford instead of discovering the exhaustion
+mid-pagination. Historical requests are explicit, deduplicated, and cached, and the adapter never
+backfills automatically as a side effect of a subscription.
+
+### 12.4 Push confirmation: a gate, not a fallback
+
+Adopted as recommended. Push is the adapter's primary data path and the reason it is not a polling
+client. No push frame was observed during the probe, so the first implementation task is to confirm
+push delivery on a live session across the four channels, and the first release does not ship until
+it is confirmed. A polling fallback would not be a safety net: it would spend the subscription
+allowance, add latency and load, and, worst of all, leave the event path unproven while appearing to
+work.
+
+### 12.5 Deployment: local first, remote reserved
+
+Adopted as recommended, in the wording that keeps the door open. A local gateway is the first
+release. A remote gateway is a later release with its own transport and encryption slice, not an
+invariant that the peer must always be on the loopback interface. The practical consequence for the
+first release is small: the crate must not hard-code the assumption that the address is local, and
+the remote path stays documented and unimplemented rather than half-built.
+
+### 12.6 Outside-domain data: a preserved boundary
+
+Adopted as recommended. The probe found capital flow, macro, rankings, short interest, valuation,
+ownership, plates, and more, and none has a core domain type. Section 6.8 replaces the earlier "no
+domain home" framing with three levels, and the design keeps the third level addressable from the
+data client rather than discarding it. Nothing from level 3 is implemented in the first release, and
+nothing in the core model is invented to hold it.
