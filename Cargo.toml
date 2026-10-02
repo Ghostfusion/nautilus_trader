@@ -13,6 +13,7 @@ members = [
   "crates/adapters/derive",
   "crates/adapters/dydx",
   "crates/adapters/eodhd",
+  "crates/adapters/failover",
   "crates/adapters/hyperliquid",
   "crates/adapters/interactive_brokers",
   "crates/adapters/kraken",

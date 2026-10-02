@@ -396,3 +396,30 @@ Adopted, with the retry policy split out from the hop policy.
 On a two-leg chain this bounds a demand at one retry per provider and one hop: at most three
 attempts in the worst case. The rule is unchanged as legs are added, and it bounds latency and
 request volume by the number of configured providers rather than by an unbounded retry count.
+
+## 15. As implemented: the classification and the chain
+
+Step 1 of the sequencing is built as the `nautilus-failover` crate, which holds the part of the
+arrangement that is not a provider. Three things were decided while writing it.
+
+- **The class is decided once, in one place.** A failure is classified as transient, a provider gap,
+  or a defect, and the two decisions follow from the class rather than from the failure: a transient
+  failure costs one retry and then hops, a gap hops at once, and a defect stops the chain. The
+  status reading lives with the classification, so no call site decides for itself whether a 403 is
+  worth another attempt.
+- **Two rows of the table are one variant each.** A request that timed out and a request whose
+  outcome is unknown because the transport ended are the same condition for a read-only client,
+  where a repeated request is idempotent, so they are one `Unanswered` failure rather than two. A 5xx
+  is one `ServerUnavailable` carrying its status.
+- **An unconfigured chain is not a failed one.** A chain with no providers returns its own outcome
+  rather than a provider failure, because there is no provider to blame and a caller that registered
+  none has a configuration defect rather than an outage.
+
+The retry budget is an argument to the decision rather than a counter inside it, which is what keeps
+the budget per demand: the caller that knows where a demand begins is the caller that knows how much
+of it has been spent.
+
+The crate ships a provider that answers from a script, so that what a chain does is provable without
+a network, and a trace that names every provider that was asked and why each could not answer. The
+trace is what makes a hop explainable rather than merely visible in the data, and it is the input a
+later step needs to export hop counts.
