@@ -22,6 +22,7 @@
    hyperliquid.md
    interactive_brokers.md
    kraken.md
+   moomoo.md
    okx.md
    polymarket.md
    sandbox.md
