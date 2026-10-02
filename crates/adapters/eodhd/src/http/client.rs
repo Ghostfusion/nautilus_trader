@@ -113,6 +113,15 @@ impl EodhdHttpClient {
         self.credential.api_key_masked()
     }
 
+    /// Returns the API token, for building a streaming connection URL.
+    ///
+    /// The value is secret. It travels as a query parameter on both transports and must not be
+    /// logged or stored in a type that does not redact it.
+    #[must_use]
+    pub fn api_key(&self) -> &str {
+        self.credential.api_key()
+    }
+
     /// Returns the end-of-day bars for `ticker` between `from` and `to` inclusive.
     ///
     /// `period` selects the aggregation: `d` for daily, `w` for weekly, `m` for monthly. The

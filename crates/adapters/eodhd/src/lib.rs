@@ -64,5 +64,8 @@ pub mod data;
 #[cfg(feature = "live")]
 pub mod factories;
 
+#[cfg(feature = "live")]
+pub mod websocket;
+
 #[cfg(feature = "python")]
 pub mod python;

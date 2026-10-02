@@ -26,7 +26,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -41,16 +41,17 @@ use nautilus_common::{
         DataEvent,
         data::{
             RequestBars, RequestInstrument, RequestInstruments, SubscribeBars, SubscribeInstrument,
-            SubscribeInstruments, SubscribeQuotes, UnsubscribeBars, UnsubscribeQuotes,
+            SubscribeInstruments, SubscribeQuotes, SubscribeTrades, UnsubscribeBars,
+            UnsubscribeQuotes, UnsubscribeTrades,
         },
     },
 };
 use nautilus_core::{UnixNanos, string::secret::SecretString, time::get_atomic_clock_realtime};
 use nautilus_live::task::TaskGroup;
 use nautilus_model::{
-    data::{Bar, BarType, CorporateAction, Data, QuoteTick},
-    enums::AggregationSource,
-    identifiers::{ClientId, InstrumentId, Venue},
+    data::{Bar, BarType, CorporateAction, Data, QuoteTick, TradeTick},
+    enums::{AggregationSource, AggressorSide},
+    identifiers::{ClientId, InstrumentId, Symbol, TradeId, Venue},
     instruments::{Instrument, InstrumentAny},
     types::{Price, Quantity},
 };
@@ -58,10 +59,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     bars::{EodhdInterval, build_bulk_bar, build_eod_bars, build_intraday_bars, resolve_interval},
+    common::{EODHD_WS_QUOTES_CHANNEL, EODHD_WS_TRADES_CHANNEL, EODHD_WS_VENUE},
     config::EodhdDataClientConfig,
     corporate_actions::{action_from_dividend, action_from_split},
     http::{EodhdDelayedQuote, EodhdHttpClient},
     providers::EodhdInstrumentProvider,
+    websocket::{
+        EodhdQuoteMessage, EodhdTradeMessage, EodhdWebSocketClient, EodhdWsMessage, StreamCommand,
+    },
 };
 
 /// Seconds in a day.
@@ -94,6 +99,10 @@ pub struct EodhdDataClient {
     bar_subscriptions: Rc<RefCell<HashMap<BarType, CancellationToken>>>,
     quote_subscriptions: Rc<RefCell<HashMap<InstrumentId, CancellationToken>>>,
     bulk_polls: Rc<RefCell<HashMap<String, tokio::sync::mpsc::UnboundedSender<BulkWatch>>>>,
+    trades_stream: Option<EodhdWebSocketClient>,
+    quotes_stream: Option<EodhdWebSocketClient>,
+    trade_subscriptions: Rc<RefCell<HashSet<InstrumentId>>>,
+    stream_sequence: Arc<AtomicU64>,
     instruments: Rc<RefCell<IndexMap<InstrumentId, InstrumentAny>>>,
 }
 
@@ -139,6 +148,10 @@ impl EodhdDataClient {
             bar_subscriptions: Rc::new(RefCell::new(HashMap::new())),
             quote_subscriptions: Rc::new(RefCell::new(HashMap::new())),
             bulk_polls: Rc::new(RefCell::new(HashMap::new())),
+            trades_stream: None,
+            quotes_stream: None,
+            trade_subscriptions: Rc::new(RefCell::new(HashSet::new())),
+            stream_sequence: Arc::new(AtomicU64::new(0)),
             instruments: Rc::new(RefCell::new(IndexMap::new())),
         })
     }
@@ -295,6 +308,77 @@ impl EodhdDataClient {
                     Err(e) => log::error!("Failed to poll quote for {instrument_id}: {e}"),
                 }
             }
+        })?;
+
+        Ok(())
+    }
+
+    /// Connects the streaming channels and starts emitting their frames.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a channel cannot be connected or a consumer cannot be started.
+    async fn connect_streams(&mut self) -> anyhow::Result<()> {
+        let base_url = self.config.resolved_ws_base_url();
+        let api_key = self.http_client.api_key().to_string();
+        let proxy_url = self
+            .config
+            .proxy_url
+            .as_ref()
+            .map(|url| url.expose_secret().to_string());
+
+        let (trades, trades_rx) = EodhdWebSocketClient::connect(
+            &base_url,
+            EODHD_WS_TRADES_CHANNEL,
+            &api_key,
+            proxy_url.clone(),
+        )
+        .await?;
+        let (quotes, quotes_rx) =
+            EodhdWebSocketClient::connect(&base_url, EODHD_WS_QUOTES_CHANNEL, &api_key, proxy_url)
+                .await?;
+
+        let price_precision = self.config.price_precision;
+        let token = self.cancellation_token.child_token();
+
+        self.spawn_stream_consumer("trades", trades_rx, price_precision, token.clone())?;
+        self.spawn_stream_consumer("quotes", quotes_rx, price_precision, token)?;
+
+        self.trades_stream = Some(trades);
+        self.quotes_stream = Some(quotes);
+
+        log::info!("Subscribed to the EODHD trades and quotes channels");
+
+        Ok(())
+    }
+
+    /// Spawns the task that emits the frames of a streaming channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task generation is no longer accepting tasks.
+    fn spawn_stream_consumer(
+        &self,
+        channel: &'static str,
+        mut receiver: tokio::sync::mpsc::UnboundedReceiver<EodhdWsMessage>,
+        price_precision: u8,
+        token: CancellationToken,
+    ) -> anyhow::Result<()> {
+        let sender = self.data_sender.clone();
+        let sequence = Arc::clone(&self.stream_sequence);
+
+        self.tasks.spawn(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    () = token.cancelled() => break,
+                    Some(message) = receiver.recv() => {
+                        emit_stream_message(&sender, channel, message, price_precision, &sequence);
+                    }
+                }
+            }
+
+            log::debug!("The EODHD {channel} consumer has stopped");
         })?;
 
         Ok(())
@@ -539,6 +623,131 @@ fn send_quote(sender: &EventSender<DataEvent>, quote: QuoteTick) {
     }
 }
 
+/// Sends a trade to the data engine, logging a failure instead of aborting a stream.
+fn send_trade(sender: &EventSender<DataEvent>, trade: TradeTick) {
+    if let Err(e) = sender.send(DataEvent::Data(Data::Trade(trade))) {
+        log::error!("Failed to send trade event: {e}");
+    }
+}
+
+/// Returns the symbol a streaming channel addresses `instrument_id` with.
+///
+/// A streaming frame carries the symbol without an exchange suffix, and the United States channels
+/// serve one venue, so the venue is checked rather than dropped silently.
+///
+/// # Errors
+///
+/// Returns an error if the instrument is not on the venue the channels serve.
+fn streaming_symbol(instrument_id: InstrumentId) -> anyhow::Result<String> {
+    if instrument_id.venue.as_str() != EODHD_WS_VENUE {
+        anyhow::bail!(
+            "The EODHD streaming channels serve the {EODHD_WS_VENUE} venue, so {instrument_id} cannot be streamed"
+        );
+    }
+
+    Ok(instrument_id.symbol.to_string())
+}
+
+/// Returns the instrument ID a streaming frame refers to.
+///
+/// # Errors
+///
+/// Returns an error if the channel's venue is not a valid venue.
+fn stream_instrument_id(symbol: &str) -> anyhow::Result<InstrumentId> {
+    Ok(InstrumentId::new(
+        Symbol::from(symbol),
+        Venue::new_checked(EODHD_WS_VENUE)?,
+    ))
+}
+
+/// Builds a [`TradeTick`] from a streaming trade print.
+///
+/// EODHD publishes neither a trade identifier nor an aggressor, so the tick carries
+/// [`AggressorSide::NoAggressor`] and an identifier built from the symbol and a monotonic sequence,
+/// rather than quoting an identifier the vendor never sent.
+///
+/// # Errors
+///
+/// Returns an error if the price or size cannot be represented at the configured precisions.
+fn build_trade_tick(
+    trade: &EodhdTradeMessage,
+    price_precision: u8,
+    sequence: &AtomicU64,
+) -> anyhow::Result<TradeTick> {
+    let instrument_id = stream_instrument_id(&trade.symbol)?;
+    let price = Price::new_checked(trade.price, price_precision)?;
+    let size = Quantity::new_checked(trade.size, SIZE_PRECISION)?;
+    let ts_event = UnixNanos::from_millis(trade.timestamp.unsigned_abs());
+    let sequence = sequence.fetch_add(1, Ordering::Relaxed);
+    let trade_id = TradeId::new(format!("{}-{sequence}", trade.symbol));
+
+    TradeTick::new_checked(
+        instrument_id,
+        price,
+        size,
+        AggressorSide::NoAggressor,
+        trade_id,
+        ts_event,
+        ts_event,
+    )
+}
+
+/// Builds a [`QuoteTick`] from a streaming best bid and offer update.
+///
+/// # Errors
+///
+/// Returns an error if a price or size cannot be represented at the configured precisions.
+fn build_stream_quote(quote: &EodhdQuoteMessage, price_precision: u8) -> anyhow::Result<QuoteTick> {
+    let instrument_id = stream_instrument_id(&quote.symbol)?;
+    let bid_price = Price::new_checked(quote.bid_price, price_precision)?;
+    let ask_price = Price::new_checked(quote.ask_price, price_precision)?;
+    let bid_size = Quantity::new_checked(quote.bid_size, SIZE_PRECISION)?;
+    let ask_size = Quantity::new_checked(quote.ask_size, SIZE_PRECISION)?;
+    let ts_event = UnixNanos::from_millis(quote.timestamp.unsigned_abs());
+
+    QuoteTick::new_checked(
+        instrument_id,
+        bid_price,
+        ask_price,
+        bid_size,
+        ask_size,
+        ts_event,
+        ts_event,
+    )
+}
+
+/// Emits the data a streaming frame carries, and reports what it does not carry.
+fn emit_stream_message(
+    sender: &EventSender<DataEvent>,
+    channel: &str,
+    message: EodhdWsMessage,
+    price_precision: u8,
+    sequence: &AtomicU64,
+) {
+    match message {
+        EodhdWsMessage::Trade(trade) => match build_trade_tick(&trade, price_precision, sequence) {
+            Ok(tick) => send_trade(sender, tick),
+            Err(e) => log::error!("Failed to build a trade from the EODHD {channel} stream: {e}"),
+        },
+        EodhdWsMessage::Quote(quote) => match build_stream_quote(&quote, price_precision) {
+            Ok(tick) => send_quote(sender, tick),
+            Err(e) => log::error!("Failed to build a quote from the EODHD {channel} stream: {e}"),
+        },
+        EodhdWsMessage::Authorized => log::debug!("The EODHD {channel} stream is authorized"),
+        EodhdWsMessage::Status { code, message } => {
+            // A refused subscription arrives here rather than as a transport error.
+            if code == 200 {
+                log::debug!("The EODHD {channel} stream reported {message}");
+            } else {
+                log::warn!("The EODHD {channel} stream reported {code}: {message}");
+            }
+        }
+        EodhdWsMessage::Unknown(value) => {
+            log::debug!("Ignoring an EODHD {channel} frame: {value}");
+        }
+    }
+}
+
 /// Sends a corporate action to the data engine, logging a failure instead of aborting a request.
 fn send_corporate_action(sender: &EventSender<DataEvent>, action: CorporateAction) {
     if let Err(e) = sender.send(DataEvent::Data(Data::CorporateAction(action))) {
@@ -749,6 +958,9 @@ impl DataClient for EodhdDataClient {
         self.bar_subscriptions.borrow_mut().clear();
         self.quote_subscriptions.borrow_mut().clear();
         self.bulk_polls.borrow_mut().clear();
+        self.trades_stream = None;
+        self.quotes_stream = None;
+        self.trade_subscriptions.borrow_mut().clear();
         self.is_connected.store(false, Ordering::Release);
 
         Ok(())
@@ -799,6 +1011,10 @@ impl DataClient for EodhdDataClient {
             self.emit_instruments(&instruments);
         }
 
+        if self.config.streaming {
+            self.connect_streams().await?;
+        }
+
         self.is_connected.store(true, Ordering::Release);
         log::info!("Connected: {}", self.client_id);
 
@@ -812,6 +1028,9 @@ impl DataClient for EodhdDataClient {
         self.bar_subscriptions.borrow_mut().clear();
         self.quote_subscriptions.borrow_mut().clear();
         self.bulk_polls.borrow_mut().clear();
+        self.trades_stream = None;
+        self.quotes_stream = None;
+        self.trade_subscriptions.borrow_mut().clear();
 
         let result = self
             .tasks
@@ -1026,6 +1245,52 @@ impl DataClient for EodhdDataClient {
         Ok(())
     }
 
+    fn subscribe_trades(&mut self, cmd: SubscribeTrades) -> anyhow::Result<()> {
+        let instrument_id = cmd.instrument_id;
+
+        if self.trade_subscriptions.borrow().contains(&instrument_id) {
+            log::debug!("Already subscribed to trades for {instrument_id}");
+
+            return Ok(());
+        }
+
+        // The delayed endpoint publishes no trades, so a trade subscription has one source.
+        let stream = self.trades_stream.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "EODHD trades require 'streaming' to be enabled, because the delayed quote endpoint publishes no trades"
+            )
+        })?;
+
+        let symbol = streaming_symbol(instrument_id)?;
+        stream.send(StreamCommand::Subscribe(vec![symbol]))?;
+        self.trade_subscriptions.borrow_mut().insert(instrument_id);
+
+        log::debug!(
+            "Subscribed to trades for {instrument_id} from the EODHD {} channel",
+            stream.channel()
+        );
+
+        Ok(())
+    }
+
+    fn unsubscribe_trades(&mut self, cmd: &UnsubscribeTrades) -> anyhow::Result<()> {
+        let instrument_id = cmd.instrument_id;
+
+        if !self.trade_subscriptions.borrow_mut().remove(&instrument_id) {
+            return Ok(());
+        }
+
+        if let Some(stream) = self.trades_stream.as_ref()
+            && let Ok(symbol) = streaming_symbol(instrument_id)
+        {
+            stream.send(StreamCommand::Unsubscribe(vec![symbol]))?;
+        }
+
+        log::debug!("Unsubscribed from trades for {instrument_id}");
+
+        Ok(())
+    }
+
     fn subscribe_quotes(&mut self, cmd: SubscribeQuotes) -> anyhow::Result<()> {
         let instrument_id = cmd.instrument_id;
 
@@ -1041,6 +1306,23 @@ impl DataClient for EodhdDataClient {
 
         let token = self.cancellation_token.child_token();
 
+        // With streaming enabled the undelayed channel serves every quote subscription, so the
+        // delayed polling path is not used at all.
+        if let Some(stream) = self.quotes_stream.as_ref() {
+            let symbol = streaming_symbol(instrument_id)?;
+            stream.send(StreamCommand::Subscribe(vec![symbol]))?;
+            self.quote_subscriptions
+                .borrow_mut()
+                .insert(instrument_id, token);
+
+            log::debug!(
+                "Subscribed to quotes for {instrument_id} from the EODHD {} channel",
+                stream.channel()
+            );
+
+            return Ok(());
+        }
+
         self.spawn_quote_poll(instrument_id, token.clone())?;
         self.quote_subscriptions
             .borrow_mut()
@@ -1052,14 +1334,21 @@ impl DataClient for EodhdDataClient {
     }
 
     fn unsubscribe_quotes(&mut self, cmd: &UnsubscribeQuotes) -> anyhow::Result<()> {
-        if let Some(token) = self
-            .quote_subscriptions
-            .borrow_mut()
-            .remove(&cmd.instrument_id)
+        let instrument_id = cmd.instrument_id;
+
+        let Some(token) = self.quote_subscriptions.borrow_mut().remove(&instrument_id) else {
+            return Ok(());
+        };
+
+        token.cancel();
+
+        if let Some(stream) = self.quotes_stream.as_ref()
+            && let Ok(symbol) = streaming_symbol(instrument_id)
         {
-            token.cancel();
-            log::debug!("Unsubscribed from quotes for {}", cmd.instrument_id);
+            stream.send(StreamCommand::Unsubscribe(vec![symbol]))?;
         }
+
+        log::debug!("Unsubscribed from quotes for {instrument_id}");
 
         Ok(())
     }
@@ -1178,6 +1467,92 @@ mod tests {
         quote.ask_time = Some(1_790_886_570_000);
 
         assert_eq!(quote.ts_event().as_u64(), 1_790_886_570_000_000_000);
+    }
+
+    fn trade_message() -> EodhdTradeMessage {
+        EodhdTradeMessage {
+            symbol: "AAPL".to_string(),
+            price: 330.78,
+            size: 5.0,
+            timestamp: 1_790_899_194_028,
+            dark_pool: Some(false),
+            session: Some("extended-hours".to_string()),
+        }
+    }
+
+    fn quote_message() -> EodhdQuoteMessage {
+        EodhdQuoteMessage {
+            symbol: "AAPL".to_string(),
+            ask_price: 330.8,
+            ask_size: 15.0,
+            bid_price: 330.0,
+            bid_size: 67.0,
+            timestamp: 1_790_899_198_000,
+        }
+    }
+
+    #[rstest]
+    fn test_build_trade_tick_maps_a_streaming_print() {
+        let sequence = AtomicU64::new(0);
+
+        let tick = build_trade_tick(&trade_message(), 2, &sequence).unwrap();
+
+        assert_eq!(tick.instrument_id, InstrumentId::from("AAPL.US"));
+        assert_eq!(tick.price, Price::new(330.78, 2));
+        assert_eq!(tick.size, Quantity::new(5.0, 0));
+        // The feed carries neither an aggressor nor a trade identifier.
+        assert_eq!(tick.aggressor_side, AggressorSide::NoAggressor);
+        assert_eq!(tick.ts_event, UnixNanos::from_millis(1_790_899_194_028));
+        assert_eq!(tick.trade_id.to_string(), "AAPL-0");
+    }
+
+    #[rstest]
+    fn test_build_trade_tick_advances_the_identifier() {
+        let sequence = AtomicU64::new(0);
+
+        let first = build_trade_tick(&trade_message(), 2, &sequence).unwrap();
+        let second = build_trade_tick(&trade_message(), 2, &sequence).unwrap();
+
+        assert_ne!(first.trade_id, second.trade_id);
+    }
+
+    #[rstest]
+    fn test_build_trade_tick_rejects_a_price_the_precision_cannot_hold() {
+        let sequence = AtomicU64::new(0);
+        let mut trade = trade_message();
+        trade.price = f64::NAN;
+
+        assert!(build_trade_tick(&trade, 2, &sequence).is_err());
+    }
+
+    #[rstest]
+    fn test_build_stream_quote_maps_both_sides() {
+        let tick = build_stream_quote(&quote_message(), 2).unwrap();
+
+        assert_eq!(tick.instrument_id, InstrumentId::from("AAPL.US"));
+        assert_eq!(tick.bid_price, Price::new(330.0, 2));
+        assert_eq!(tick.ask_price, Price::new(330.8, 2));
+        assert_eq!(tick.bid_size, Quantity::new(67.0, 0));
+        assert_eq!(tick.ask_size, Quantity::new(15.0, 0));
+        assert_eq!(tick.ts_event, UnixNanos::from_millis(1_790_899_198_000));
+    }
+
+    #[rstest]
+    fn test_streaming_symbol_checks_the_venue_the_channels_serve() {
+        assert_eq!(
+            streaming_symbol(InstrumentId::from("AAPL.US")).unwrap(),
+            "AAPL"
+        );
+        // The channels carry a bare symbol, so a venue they do not serve has no symbol to send.
+        assert!(streaming_symbol(InstrumentId::from("VOD.LSE")).is_err());
+    }
+
+    #[rstest]
+    fn test_stream_instrument_id_restores_the_channel_venue() {
+        assert_eq!(
+            stream_instrument_id("AAPL").unwrap(),
+            InstrumentId::from("AAPL.US")
+        );
     }
 
     #[rstest]

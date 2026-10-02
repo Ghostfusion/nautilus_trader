@@ -41,6 +41,8 @@ impl EodhdDataClientConfig {
         load_instruments = None,
         bulk_exchanges = None,
         load_corporate_actions = None,
+        ws_base_url = None,
+        streaming = None,
     ))]
     #[expect(clippy::too_many_arguments)]
     fn py_new(
@@ -56,6 +58,8 @@ impl EodhdDataClientConfig {
         load_instruments: Option<bool>,
         bulk_exchanges: Option<Vec<String>>,
         load_corporate_actions: Option<bool>,
+        ws_base_url: Option<String>,
+        streaming: Option<bool>,
     ) -> Self {
         let defaults = Self::default();
 
@@ -68,6 +72,8 @@ impl EodhdDataClientConfig {
             backfill_days: backfill_days.unwrap_or(defaults.backfill_days),
             price_precision: price_precision.unwrap_or(defaults.price_precision),
             currency,
+            ws_base_url: ws_base_url.map(SecretString::from),
+            streaming: streaming.unwrap_or(defaults.streaming),
             timeout_secs,
             load_instruments: load_instruments.unwrap_or(defaults.load_instruments),
             bulk_exchanges: bulk_exchanges.unwrap_or(defaults.bulk_exchanges),
@@ -130,6 +136,13 @@ impl EodhdDataClientConfig {
     #[must_use]
     const fn load_corporate_actions(&self) -> bool {
         self.load_corporate_actions
+    }
+
+    /// Returns whether trades and quotes stream from the WebSocket API.
+    #[getter]
+    #[must_use]
+    const fn streaming(&self) -> bool {
+        self.streaming
     }
 
     #[pyo3(name = "__repr__")]

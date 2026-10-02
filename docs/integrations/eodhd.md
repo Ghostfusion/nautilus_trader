@@ -38,6 +38,8 @@ NautilusTrader, so it does not require a separate EODHD client library installat
 | `/eod-bulk-last-day/{exchange}`    | `Bar`              | The latest day for every symbol, when bulk mode is enabled. |
 | `/div/{ticker}`                    | `CorporateAction`  | Dividends, when corporate action loading is enabled.        |
 | `/splits/{ticker}`                 | `CorporateAction`  | Splits, when corporate action loading is enabled.           |
+| `wss://.../ws/us`                  | `TradeTick`        | Undelayed prints, when streaming is enabled.                |
+| `wss://.../ws/us-quote`            | `QuoteTick`        | Undelayed quotes, when streaming is enabled.                |
 
 **Notes:**
 
@@ -134,6 +136,8 @@ long-running subscription does not re-transfer its history on every poll.
 | `timeout_secs`           | `int`       | `None`  | HTTP request timeout; defaults to 30 seconds.                     |
 | `load_instruments`       | `bool`      | `True`  | Whether to load the `exchange` instruments on connect.            |
 | `load_corporate_actions` | `bool`      | `False` | Whether to publish the corporate actions in a bar window.         |
+| `streaming`              | `bool`      | `False` | Whether trades and quotes stream from the WebSocket API.          |
+| `ws_base_url`            | `str`       | `None`  | Overrides the streaming base URL.                                 |
 
 ### Usage
 
@@ -275,17 +279,49 @@ The token travels as the `api_token` query parameter, as it does on the REST API
 subscription is requested with `{"action":"subscribe","symbols":"AAPL,MSFT"}`, where `symbols` is a
 comma separated string rather than an array.
 
-A WebSocket client is **not implemented**. It requires a streaming entitlement, and the channels
-cannot be verified without one: against a token from a plan without streaming, a connection
-completes the WebSocket handshake and then receives `{"status":403,"message":"Server error"}` and
-closes, before any subscribe message is sent. The polling client above covers bars and delayed
-quotes on the tiers that do not carry streaming.
+Set `streaming` and the client connects the trades and quotes channels, and serves every trade and
+quote subscription from them instead of from the delayed REST endpoint.
 
-This section records what an implementation starts from. The payload field names published
-upstream are deliberately not reproduced here, because nothing in this adapter has verified them
-against a live feed, and a price parsed from a guessed field name is worse than no price at all.
-See the [provider's documentation](https://eodhd.com/financial-apis/new-real-time-data-api-websockets)
-for the frames.
+```python
+EodhdDataClientConfig(api_key="...", streaming=True)
+
+# The channels carry the symbol, not the ticker, so a subscription is addressed by instrument ID
+# and the venue must be the one the channels serve.
+self.subscribe_trades(InstrumentId.from_str("AAPL.US"))
+self.subscribe_quotes(InstrumentId.from_str("AAPL.US"))
+```
+
+The frames below were captured from the live channels, and are what the adapter parses:
+
+| Frame                                                                                     | Meaning                                                       |
+| :---------------------------------------------------------------------------------------- | :------------------------------------------------------------ |
+| `{"s":"AAPL","p":330.78,"c":[],"v":5,"dp":false,"ms":"extended-hours","t":1790899194028}` | A trade: price, size, epoch millisecond.                      |
+| `{"s":"AAPL","ap":330.8,"as":15,"bp":330,"bs":67,"t":1790899198000}`                      | A quote: ask, then bid, with sizes, and an epoch millisecond. |
+| `{"status_code":200,"message":"Authorized"}`                                              | The connection is authorized.                                 |
+| `{"status_code":422,"message":"Only limited symbols allowed for demo"}`                   | A subscription was refused.                                   |
+| `{"status":403,"message":"Server error"}`                                                 | The connection was refused, and the server closes it.         |
+
+- A frame is identified by its shape, not by a message type: `p` and `v` make it a trade, `bp` or
+  `ap` a quote, and `status_code` or `status` a control message. Fields the adapter does not use,
+  such as the exchange conditions `c`, are ignored rather than typed, so a vendor addition cannot
+  stop a frame from being read.
+- A refused subscription arrives as a control frame, not as a transport error, and is logged with
+  its code and message. A token that carries no streaming entitlement is refused at connection
+  time, which is the frame above carrying `403`.
+- EODHD publishes neither an aggressor nor a trade identifier on the trade channel, so a
+  `TradeTick` carries `NO_AGGRESSOR` and an identifier built from the symbol and a monotonic
+  sequence. It is stable within a session and is not a venue identifier, because there is none.
+- `t` is an epoch millisecond on both channels.
+- The client answers the protocol pings the server sends, and replays its subscriptions when the
+  underlying connection is replaced.
+
+:::info
+The streaming entitlement does not follow the REST tiers. Measured against this account, the public
+`demo` token is authorized on the channels and streams extended-hours prints, while the paid
+end-of-day token is refused with the `403` frame above. The REST API is the reverse: the paid token
+serves the bulk, dividend and symbol-list endpoints that the demo token refuses. The polling client
+above covers bars and delayed quotes on the tiers that do not carry streaming.
+:::
 
 ## Loading EODHD historical data
 
@@ -379,6 +415,12 @@ suffix, rather than a listing venue such as `NASDAQ`.
   error instead of an empty result.
 - Requests are rate limited to 10 per second, which is well below EODHD's documented plan limits.
 - The adapter does not retry a failed poll. A transient failure is logged and the next tick retries.
+- A streamed trade carries no aggressor and no venue trade identifier, so both are synthesised as
+  described in [WebSocket channels](#websocket-channels). A strategy that needs either must not
+  treat them as venue values.
+- A streamed frame carries the symbol alone and the channels serve one venue, so a trade or quote
+  subscription for an instrument on another venue is rejected rather than sent with a guessed
+  symbol.
 - EODHD is a third-party data vendor with its own licence terms. Ensure your use of the data
   complies with them.
 

@@ -19,7 +19,7 @@ use nautilus_core::string::secret::SecretString;
 use nautilus_model::types::Currency;
 use serde::{Deserialize, Serialize};
 
-use crate::common::{EODHD_DEFAULT_EXCHANGE, EODHD_DEFAULT_PRICE_PRECISION};
+use crate::common::{EODHD_DEFAULT_EXCHANGE, EODHD_DEFAULT_PRICE_PRECISION, EODHD_WS_BASE_URL};
 
 /// The default poll interval, in seconds, for a live bar subscription.
 pub const EODHD_DEFAULT_POLL_INTERVAL_SECS: u64 = 60;
@@ -76,6 +76,16 @@ pub struct EodhdDataClientConfig {
     pub price_precision: u8,
     /// The instrument currency code, for example `USD`.
     pub currency: Option<String>,
+    /// The EODHD streaming API base URL override.
+    pub ws_base_url: Option<SecretString>,
+    /// Whether trades and quotes stream from the WebSocket API instead of the REST API.
+    ///
+    /// The streaming channels carry undelayed data and require a streaming entitlement, which the
+    /// public `demo` token carries and some paid plans do not. When enabled, a trade or quote
+    /// subscription is served by the channel for the instrument's venue; when disabled, quotes
+    /// come from the delayed REST endpoint and trades cannot be subscribed at all.
+    #[builder(default = false)]
+    pub streaming: bool,
     /// The HTTP request timeout in seconds.
     pub timeout_secs: Option<u64>,
     /// Whether to load the `exchange` instruments on connect.
@@ -107,6 +117,15 @@ impl EodhdDataClientConfig {
         self.currency
             .as_deref()
             .map_or_else(Currency::USD, Currency::from)
+    }
+
+    /// Returns the resolved streaming API base URL.
+    #[must_use]
+    pub fn resolved_ws_base_url(&self) -> String {
+        self.ws_base_url.as_ref().map_or_else(
+            || EODHD_WS_BASE_URL.to_string(),
+            |url| url.expose_secret().to_string(),
+        )
     }
 
     /// Returns the resolved poll interval, with a floor of one second.

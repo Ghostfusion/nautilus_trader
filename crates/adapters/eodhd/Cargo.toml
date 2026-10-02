@@ -29,7 +29,12 @@ extension-module = [
   "pyo3/extension-module",
   "python",
 ]
-live = ["dep:nautilus-live", "dep:tokio", "dep:tokio-util"]
+live = [
+  "dep:nautilus-live",
+  "dep:tokio",
+  "dep:tokio-tungstenite",
+  "dep:tokio-util",
+]
 
 python = [
   "live",
@@ -71,6 +76,7 @@ zeroize = { workspace = true }
 nautilus-live = { workspace = true, optional = true }
 nautilus-system = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }
 
 pyo3 = { workspace = true, optional = true }

@@ -27,6 +27,8 @@ class EodhdDataClientConfig:
         load_instruments: bool | None = None,
         bulk_exchanges: typing.Sequence[str] | None = None,
         load_corporate_actions: bool | None = None,
+        ws_base_url: str | None = None,
+        streaming: bool | None = None,
     ) -> None: ...
     @property
     def has_api_key(self) -> bool: ...
@@ -44,6 +46,8 @@ class EodhdDataClientConfig:
     def bulk_exchanges(self) -> list[str]: ...
     @property
     def load_corporate_actions(self) -> bool: ...
+    @property
+    def streaming(self) -> bool: ...
 
 @typing.final
 class EodhdDataClientFactory:

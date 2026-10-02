@@ -45,6 +45,23 @@ pub const EODHD_HTTP_BASE_URL: &str = "https://eodhd.com/api";
 /// Default request timeout in seconds.
 pub const EODHD_HTTP_TIMEOUT_SECS: u64 = 30;
 
+/// Base URL for the EODHD streaming API.
+///
+/// A channel is appended, for example `wss://ws.eodhistoricaldata.com/ws/us`.
+pub const EODHD_WS_BASE_URL: &str = "wss://ws.eodhistoricaldata.com/ws";
+
+/// The streaming channel serving United States trade prints.
+pub const EODHD_WS_TRADES_CHANNEL: &str = "us";
+
+/// The streaming channel serving United States best bid and offer updates.
+pub const EODHD_WS_QUOTES_CHANNEL: &str = "us-quote";
+
+/// The venue the United States streaming channels address instruments with.
+///
+/// A streaming frame carries the symbol alone (`AAPL`), not the ticker EODHD keys its REST data
+/// by (`AAPL.US`), so the venue is fixed by the channel rather than carried by the message.
+pub const EODHD_WS_VENUE: &str = "US";
+
 /// The default EODHD exchange code used for instrument discovery.
 ///
 /// EODHD addresses every United States listing with the `US` code, so the listing venue a symbol
