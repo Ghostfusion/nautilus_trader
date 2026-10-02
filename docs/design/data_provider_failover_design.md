@@ -15,6 +15,7 @@ dangerous.
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1        | Initial design from the platform routing and adapter sources, with the EODHD and moomoo limits read from code and from the live probe                                                              |
 | 2        | Closed the open decisions: composite client, hop on entitlement refusal, checkpoint fail-back, EODHD authoritative for definitions, no hopping in research builds, one try per provider per demand |
+| 3        | Split retry from failover: transient failures are retried at most once on the same provider, and no 4xx response is ever retried                                                                   |
 
 ## 1. Summary of the finding
 
@@ -176,30 +177,51 @@ So failover here **degrades rather than scales**. The chain needs three behaviou
 3. **An escalation signal**, so that a primary outage is visible to the operator instead of being
    absorbed invisibly for weeks.
 
-## 8. Failure classification: which events cause a hop
+## 8. Failure classification: when to retry and when to hop
 
 "Fails for any reason" is not implementable as written. The repository already has the right shape
 for this problem in the execution path, where a command outcome is classified as a definite local
 failure, a definite venue rejection, or an ambiguous outcome, rather than collapsed into one error.
 The chain needs the same discipline for data.
 
-| Event                                                   | Hop?                                   | Reason                                                                                            |
-| ------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Connection refused (OpenD down, DNS failure)            | Yes                                    | The provider cannot serve anything                                                                |
-| Request timeout                                         | Yes, after one retry                   | The provider did not answer                                                                       |
-| HTTP 5xx, transport reset                               | Yes                                    | Provider-side failure                                                                             |
-| HTTP 429 / documented rate limit                        | Yes                                    | The provider is refusing load, not answering                                                      |
-| Entitlement refusal (a purchased capability is missing) | Yes, and recorded                      | A capability gap is a data-availability gap, but it must be reported, not hidden                  |
-| Response parse failure                                  | Yes, and recorded                      | The provider's payload changed; this is a defect to surface                                       |
-| Empty result                                            | **No**                                 | The provider answered; the data does not exist. Hopping would silently substitute another dataset |
-| Instrument not found                                    | **No**                                 | Same as above                                                                                     |
-| Invalid input from the caller                           | **No**                                 | Not the provider's fault; hopping hides a caller bug                                              |
-| Ambiguous (request sent, no answer)                     | Retry the same provider once, then hop | Mirrors the execution ambiguity policy                                                            |
+| Event                                                | Retry the same provider | Hop to the next provider                                     |
+| ---------------------------------------------------- | ----------------------- | ------------------------------------------------------------ |
+| Connection refused (OpenD down, DNS failure)         | No                      | Yes                                                          |
+| Request timeout                                      | Once                    | Yes, if the retry also fails                                 |
+| HTTP 5xx, transport reset                            | Once                    | Yes, if the retry also fails                                 |
+| Ambiguous (request sent, no answer)                  | Once                    | Yes, if the retry also fails                                 |
+| HTTP 429, rate limited                               | **No**                  | Yes, recorded as a rate-limit event                          |
+| HTTP 403, forbidden (credential or plan)             | **No**                  | Yes, recorded as a credential or capability gap              |
+| HTTP 404, resource or symbol unknown to the provider | **No**                  | Yes: the provider does not have it                           |
+| Any other 4xx (400, 401, 422)                        | **No**                  | **No**: a caller or configuration defect, not a provider gap |
+| Entitlement refusal carried in the payload           | No                      | Yes, and recorded                                            |
+| Response parse failure                               | No                      | Yes, and recorded: the provider's payload changed            |
+| HTTP 200 with an empty result                        | No                      | **No**: the provider answered, and the data does not exist   |
+| Instrument absent from a 200 response                | No                      | **No**: same as above                                        |
+| Invalid input from the caller                        | No                      | **No**: hopping would hide a caller bug                      |
 
 Two of these lines carry most of the risk. **Empty results must never trigger a hop**, or a symbol
 that legitimately has no data on the primary would quietly be served from a different source with
 different semantics. And **entitlement refusals must be recorded**, or a plan downgrade turns into
 an unexplained change of data quality.
+
+The retry and the hop are separate decisions, and keeping them separate is the point. **A retry is
+for a transient condition on a provider that is otherwise the right one; a hop is a deliberate move
+to a different dataset.** Two rules follow, and they govern every line above.
+
+- **No 4xx response is ever retried.** A 4xx is the provider stating that the request, the
+  credential, or the caller's entitlement is wrong, or that the caller is being throttled. A second
+  identical request cannot change the answer, and for a rate limit it makes the condition worse.
+  Stating it as "no 4xx is retried" covers 429, 403, and 404 and every related client error with one
+  rule rather than an enumeration that would drift.
+- **The retry budget is one attempt, and only for a transient failure**: a timeout, a 5xx, a
+  transport reset, or a request that was sent but never answered. The retry is safe here because
+  this is a read-only data client, so a repeated request is idempotent; the same budget would not be
+  safe on an order path, where a retry can duplicate a state change.
+
+A 4xx still hops where it means the provider cannot help at all, so the hop policy is unchanged:
+a rate limit, a credential or plan refusal, and a resource the provider does not carry each move to
+the next provider once, and are never retried on the provider that refused.
 
 ## 9. What failover means per data class
 
@@ -357,8 +379,20 @@ Adopted: no by default. A dataset assembled across a hop is neither provider's d
 so a research build is served by one provider unless hopping is deliberately enabled and the
 resulting provenance is recorded alongside the result.
 
-### 14.6 Maximum hops per demand
+### 14.6 Retry and hop budget
 
-Each provider in the chain is tried at most once per demand, with only the single ambiguity retry of
-section 8. On a two-leg chain that is one hop. The rule is unchanged as legs are added, and it bounds
-worst-case latency by the number of configured providers rather than by a retry count.
+Adopted, with the retry policy split out from the hop policy.
+
+- **Each provider is retried at most once per demand**, and only for a transient failure: a timeout,
+  a 5xx, a transport reset, or an unanswered request (section 8).
+- **No 4xx response is retried.** A rate limit, a credential or plan refusal, or a resource the
+  provider does not carry moves straight on, because a second identical request cannot change the
+  answer and a rate limit would only be aggravated.
+- **Each provider is entered at most once per demand**, so the chain never returns to a provider it
+  has already left, and a hop always moves to the next provider in the priority order.
+- **The chain stops** when the providers are exhausted, and reports the last failure rather than
+  looping.
+
+On a two-leg chain this bounds a demand at one retry per provider and one hop: at most three
+attempts in the worst case. The rule is unchanged as legs are added, and it bounds latency and
+request volume by the number of configured providers rather than by an unbounded retry count.
