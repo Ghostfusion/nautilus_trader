@@ -16,7 +16,7 @@ alongside, and the crate's build script is inert unless asked to regenerate.
 
 ## What is vendored
 
-Only the transitive import closure of the protocols the adapter uses, which is 21 files:
+Only the transitive import closure of the protocols the adapter uses, which is 23 files:
 
 ```
 Common.proto
@@ -27,6 +27,8 @@ KeepAlive.proto
 Notify.proto
 Qot_Common.proto
 Qot_GetBasicQot.proto
+Qot_GetCorporateActionsDividends.proto
+Qot_GetCorporateActionsStockSplits.proto
 Qot_GetKL.proto
 Qot_GetOrderBook.proto
 Qot_GetSecuritySnapshot.proto
@@ -47,7 +49,12 @@ adapter needs, and every import resolves inside them, so no `google/protobuf` we
 be vendored or compiled.
 
 The set grows by endpoint, not by accident: `Qot_RequestHistoryKLQuota` was added when the adapter
-needed to read the historical allowance, and its own two imports were already present.
+needed to read the historical allowance, and its own two imports were already present. The same
+holds for `Qot_GetCorporateActionsDividends` and `Qot_GetCorporateActionsStockSplits`, which the
+adapter sends for corporate actions and which import only `Qot_Common`.
+
+Regeneration is additive and deterministic: adding these two definitions rewrote `mod.rs` and wrote
+their two files, and left the other twenty-two generated files byte-identical.
 
 ## Regenerating
 

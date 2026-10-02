@@ -34,6 +34,7 @@ use crate::{
     connection::{Connection, RET_OK},
     generated::{
         qot_common::{self, KLine},
+        qot_get_corporate_actions_dividends, qot_get_corporate_actions_stock_splits,
         qot_get_order_book, qot_get_security_snapshot, qot_get_static_info, qot_get_sub_info,
         qot_request_history_kl, qot_request_history_kl_quota, qot_sub,
     },
@@ -545,4 +546,104 @@ pub async fn set_subscriptions(
     }
 
     Ok(())
+}
+
+/// The protocol identifier of the dividend request.
+pub const PROTO_ID_GET_DIVIDENDS: u32 = 3234;
+
+/// The protocol identifier of the stock split request.
+pub const PROTO_ID_GET_STOCK_SPLITS: u32 = 3236;
+
+/// The page key the venue returns once it has no more splits to send.
+pub const NO_MORE_SPLITS: &str = "-1";
+
+/// The page size the split request asks for, which is the largest the venue accepts.
+const SPLIT_PAGE_SIZE: i32 = 50;
+
+/// The most pages the adapter will read before refusing to go on.
+///
+/// The venue signals the end of a series with a page key rather than by returning an empty page, so
+/// a venue that kept returning a key would otherwise be followed forever.
+const MAX_SPLIT_PAGES: usize = 20;
+
+/// Requests every dividend the gateway holds for one security.
+///
+/// The request takes no page arguments and the answer carries no page key, so the whole series
+/// arrives at once.
+///
+/// # Errors
+///
+/// Returns an error if the request fails, the gateway refuses it, or the answer cannot be decoded.
+pub async fn request_dividends(
+    connection: &Connection,
+    security: qot_common::Security,
+) -> anyhow::Result<Vec<qot_get_corporate_actions_dividends::DividendItem>> {
+    let request = qot_get_corporate_actions_dividends::Request {
+        c2s: qot_get_corporate_actions_dividends::C2s {
+            security: security.clone(),
+        },
+    };
+
+    let message = connection
+        .request(PROTO_ID_GET_DIVIDENDS, &request.encode_to_vec())
+        .await?;
+
+    let response = qot_get_corporate_actions_dividends::Response::decode(message.body.as_slice())
+        .context("cannot decode a dividend response")?;
+    check_outcome(response.ret_type, response.ret_msg, "dividend")?;
+
+    Ok(response
+        .s2c
+        .with_context(|| format!("no dividends returned for {}", describe(&security)))?
+        .dividend_list)
+}
+
+/// Requests every stock split the gateway holds for one security, following its pages.
+///
+/// # Errors
+///
+/// Returns an error if a request fails, the gateway refuses one, an answer cannot be decoded, or the
+/// venue does not stop paging within [`MAX_SPLIT_PAGES`] pages.
+pub async fn request_stock_splits(
+    connection: &Connection,
+    security: qot_common::Security,
+) -> anyhow::Result<Vec<qot_get_corporate_actions_stock_splits::StockSplitItem>> {
+    let mut items = Vec::new();
+    let mut next_key: Option<String> = None;
+
+    for _ in 0..MAX_SPLIT_PAGES {
+        let request = qot_get_corporate_actions_stock_splits::Request {
+            c2s: qot_get_corporate_actions_stock_splits::C2s {
+                security: security.clone(),
+                next_key: next_key.clone(),
+                num: Some(SPLIT_PAGE_SIZE),
+            },
+        };
+
+        let message = connection
+            .request(PROTO_ID_GET_STOCK_SPLITS, &request.encode_to_vec())
+            .await?;
+
+        let response =
+            qot_get_corporate_actions_stock_splits::Response::decode(message.body.as_slice())
+                .context("cannot decode a stock split response")?;
+        check_outcome(response.ret_type, response.ret_msg, "stock split")?;
+
+        let s2c = response
+            .s2c
+            .with_context(|| format!("no stock splits returned for {}", describe(&security)))?;
+        items.extend(s2c.split_item_list);
+
+        match s2c.next_key.as_deref() {
+            Some(key) if key != NO_MORE_SPLITS && !key.is_empty() => {
+                next_key = Some(key.to_string());
+            }
+            _ => return Ok(items),
+        }
+    }
+
+    bail!(
+        "the gateway did not stop paging the stock splits for {} within {MAX_SPLIT_PAGES} pages",
+        describe(&security)
+    )
 }

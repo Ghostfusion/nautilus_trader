@@ -316,11 +316,14 @@ pub fn intraday_ts_event(value: &str, market: Market) -> anyhow::Result<UnixNano
 /// The reason it is UTC midnight and not local midnight is in the module documentation: it is what
 /// makes this adapter agree with the other provider about the instant of the same daily bar.
 ///
+/// A corporate action describes the same price series the bars describe, so a date on an action is
+/// placed here rather than by a second implementation of the same decision.
+///
 /// # Errors
 ///
 /// Returns an error if the value cannot be read as a date, if it carries a time of day, or if it is
 /// before the Unix epoch.
-fn date_ts_event(value: &str) -> anyhow::Result<UnixNanos> {
+pub(crate) fn date_ts_event(value: &str) -> anyhow::Result<UnixNanos> {
     let (seconds, fraction) = split_fraction(value);
 
     if !fraction.is_empty() {

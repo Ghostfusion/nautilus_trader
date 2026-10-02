@@ -23,6 +23,12 @@ pub mod qot_common {
 pub mod qot_get_basic_qot {
     include!("qot_get_basic_qot.rs");
 }
+pub mod qot_get_corporate_actions_dividends {
+    include!("qot_get_corporate_actions_dividends.rs");
+}
+pub mod qot_get_corporate_actions_stock_splits {
+    include!("qot_get_corporate_actions_stock_splits.rs");
+}
 pub mod qot_get_kl {
     include!("qot_get_kl.rs");
 }

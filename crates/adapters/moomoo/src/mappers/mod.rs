@@ -22,5 +22,6 @@
 
 pub mod bars;
 pub mod book;
+pub mod corporate_actions;
 pub mod instrument;
 pub mod trades;

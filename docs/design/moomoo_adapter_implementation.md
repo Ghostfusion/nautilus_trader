@@ -610,10 +610,12 @@ they include `07/31/2026` and `11/16/2022`, neither of which has a month in its 
 Reading them as the comment describes would fail loudly rather than silently, but it would fail.
 
 **The split feed states the ratio as a string**, the old share count, then a right arrow (U+2192),
-then the new share count, which together are the new shares per old share: the records for one
-United States equity include the four-for-one split dated 2020-08-31 and the seven-for-one dated
-2014-06-09. This is the same quantity the domain type holds for a split, and a consolidation is the
-same quantity below one.
+then the new share count, which together are the new shares per old share. The separator is a single
+U+2192 in every recorded ratio, read off the bytes rather than inferred from the way it renders, and
+the mapping does not depend on it: the two counts are read by splitting on anything that is not a
+digit. The records for one United States equity include the four-for-one split dated 2020-08-31 and
+the seven-for-one dated 2014-06-09. This is the same quantity the domain type holds for a split, and
+a consolidation is the same quantity below one.
 
 **The ex-date is a Hong Kong field.** The Hong Kong record carried `exDate` and the United States
 ones did not, so the effective date is the ex-date when the venue states one and the announcement
@@ -623,9 +625,21 @@ date when it does not. Both agree with the known dates of the splits they descri
 `nextKey` that is `-1` once exhausted; the dividend request takes no page arguments and returns
 everything it holds. Neither request needs a subscription, unlike the order book.
 
-The effective date will be the calendar date at midnight UTC, the same instant the daily bars carry,
-for the reason the bar decision gives: an action describes the same price series the bars describe,
-and placing the two on different instants would put them on different days across a market offset.
+**The split date is stated twice and the two are different instants.** Every split record carries a
+calendar date and the epoch seconds of that date, and the seconds are the market's own midnight
+rather than UTC: the seconds recorded for 2020-08-31 are `04:00` UTC, which is midnight in New York,
+and the seconds recorded for a Hong Kong ex-date of 2014-05-15 are `16:00` UTC of the day before,
+which is midnight in Hong Kong. Using the seconds would place every action four or five hours from
+the daily bar of its own date, and across the offset it would place the two on different dates. The
+calendar date is therefore read from the text field and placed at UTC midnight by the same helper the
+bars use, so the action and the bar it adjusts sit on one instant.
+
+Read against the gateway, the mapping covered whole series rather than samples: fifty-seven of
+fifty-seven dividends for one United States equity and ninety-three of ninety-three for another,
+with every record valued. For a Hong Kong equity, twenty-one of twenty-six were valued and the five
+refusals were all distributions in specie, which is the rule above doing exactly what it exists
+for: five records in one series that state a share count rather than cash, none of which may be fed
+to an adjustment stage as an amount.
 
 ## 15. Configuration and environment
 
