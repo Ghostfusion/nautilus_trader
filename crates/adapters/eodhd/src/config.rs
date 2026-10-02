@@ -81,6 +81,17 @@ pub struct EodhdDataClientConfig {
     /// Whether to load the `exchange` instruments on connect.
     #[builder(default = true)]
     pub load_instruments: bool,
+    /// Whether to emit the corporate actions that fall in the window of a bar request.
+    ///
+    /// A corporate action is not carried by a data client command: the engine publishes it on the
+    /// instrument's corporate action topic, where a strategy receives it after
+    /// `subscribe_corporate_actions`. Enabling this fetches the dividends and splits reported for
+    /// an instrument, and emits the ones effective within the bars it was asked for, so an action
+    /// arrives alongside the bars it adjusts.
+    ///
+    /// Each bar request and each bar subscription costs two further requests when this is on.
+    #[builder(default = false)]
+    pub load_corporate_actions: bool,
 }
 
 impl Default for EodhdDataClientConfig {

@@ -188,6 +188,46 @@ impl EodhdDelayedQuote {
     }
 }
 
+/// A single dividend row from the `/div/{ticker}` endpoint.
+///
+/// The amounts are read as JSON values rather than as floating point numbers, so the decimal is
+/// parsed from its written form and keeps exact arithmetic.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct EodhdDividend {
+    /// The ex-date, formatted `YYYY-MM-DD`.
+    pub date: String,
+    /// The declaration date, when supplied.
+    #[serde(rename = "declarationDate", default)]
+    pub declaration_date: Option<String>,
+    /// The record date, when supplied.
+    #[serde(rename = "recordDate", default)]
+    pub record_date: Option<String>,
+    /// The payment date, when supplied.
+    #[serde(rename = "paymentDate", default)]
+    pub payment_date: Option<String>,
+    /// The dividend period label, when supplied.
+    #[serde(default)]
+    pub period: Option<String>,
+    /// The split adjusted amount per share, when supplied.
+    #[serde(default)]
+    pub value: Option<serde_json::Value>,
+    /// The amount per share as reported at the time, when supplied.
+    #[serde(rename = "unadjustedValue", default)]
+    pub unadjusted_value: Option<serde_json::Value>,
+    /// The payment currency, when supplied.
+    #[serde(default)]
+    pub currency: Option<String>,
+}
+
+/// A single split row from the `/splits/{ticker}` endpoint.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct EodhdSplit {
+    /// The split date, formatted `YYYY-MM-DD`.
+    pub date: String,
+    /// The ratio, formatted `<new>/<old>`, for example `4.000000/1.000000`.
+    pub split: String,
+}
+
 /// The `/us-quote-delayed` response envelope.
 #[derive(Clone, Debug, Deserialize)]
 pub struct EodhdDelayedQuoteResponse {

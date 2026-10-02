@@ -6,7 +6,8 @@ REST API.
 
 NautilusTrader integrates with the EODHD REST API. The capabilities of this adapter include:
 
-- An `EodhdDataClient` that streams bars and delayed quotes into a running node by polling.
+- An `EodhdDataClient` that streams bars and delayed quotes into a running node by polling, and
+  publishes corporate actions for the bars it serves.
 - An `EodhdDataLoader` that converts EODHD rows into Nautilus `Bar` objects, and EODHD tickers
   into `Equity` instrument definitions.
 - An `EodhdInstrumentProvider` that implements the Rust `InstrumentProvider` trait for
@@ -35,12 +36,19 @@ NautilusTrader, so it does not require a separate EODHD client library installat
 | `/us-quote-delayed`                | `QuoteTick`        | Delayed best bid and offer for US symbols.                  |
 | `/exchange-symbol-list/{exchange}` | `Equity`           | Instrument discovery for one exchange.                      |
 | `/eod-bulk-last-day/{exchange}`    | `Bar`              | The latest day for every symbol, when bulk mode is enabled. |
+| `/div/{ticker}`                    | `CorporateAction`  | Dividends, when corporate action loading is enabled.        |
+| `/splits/{ticker}`                 | `CorporateAction`  | Splits, when corporate action loading is enabled.           |
 
 **Notes:**
 
 - The adapter loads the raw `close` price. EODHD also returns `adjusted_close`, which the adapter
   does not use: NautilusTrader applies corporate actions through instrument and adjustment models
   rather than silently substituting one price series for another.
+- For the same reason, a dividend carries the as-reported `unadjustedValue` rather than the split
+  adjusted `value`. The action describes the same price series the bars describe.
+- Both corporate action endpoints return the full history, from 1987 for `AAPL.US`. The adapter
+  bounds every request by the window it was asked for: a 2024 dividend window returns four rows
+  where the unbounded request returns ninety-two.
 - Share volume and quote sizes are loaded with a size precision of 0.
 - Bar timestamps come from the row date for `/eod`, and from the row `timestamp` for `/intraday`,
   which is the authoritative epoch second. The intraday `datetime` field is rendered in the
@@ -112,19 +120,20 @@ long-running subscription does not re-transfer its history on every poll.
 
 ### Configuration
 
-| Field                | Type        | Default | Description                                                       |
-| :------------------- | :---------- | :------ | :---------------------------------------------------------------- |
-| `api_key`            | `str`       | `None`  | The EODHD API token; falls back to `EODHD_API_KEY`.               |
-| `http_base_url`      | `str`       | `None`  | Overrides the REST base URL.                                      |
-| `proxy_url`          | `str`       | `None`  | Optional proxy URL for HTTP requests.                             |
-| `exchange`           | `str`       | `"US"`  | The EODHD exchange whose instruments are loaded on connect.       |
-| `bulk_exchanges`     | `list[str]` | `[]`    | Exchanges whose daily bars poll through `/eod-bulk-last-day`.     |
-| `poll_interval_secs` | `int`       | `60`    | How often each subscription polls, in seconds.                    |
-| `backfill_days`      | `int`       | `5`     | How many days of history a bar subscription emits when it starts. |
-| `price_precision`    | `int`       | `2`     | Price precision for instruments, bars, and quotes.                |
-| `currency`           | `str`       | `None`  | Instrument currency code; defaults to `USD`.                      |
-| `timeout_secs`       | `int`       | `None`  | HTTP request timeout; defaults to 30 seconds.                     |
-| `load_instruments`   | `bool`      | `True`  | Whether to load the `exchange` instruments on connect.            |
+| Field                    | Type        | Default | Description                                                       |
+| :----------------------- | :---------- | :------ | :---------------------------------------------------------------- |
+| `api_key`                | `str`       | `None`  | The EODHD API token; falls back to `EODHD_API_KEY`.               |
+| `http_base_url`          | `str`       | `None`  | Overrides the REST base URL.                                      |
+| `proxy_url`              | `str`       | `None`  | Optional proxy URL for HTTP requests.                             |
+| `exchange`               | `str`       | `"US"`  | The EODHD exchange whose instruments are loaded on connect.       |
+| `bulk_exchanges`         | `list[str]` | `[]`    | Exchanges whose daily bars poll through `/eod-bulk-last-day`.     |
+| `poll_interval_secs`     | `int`       | `60`    | How often each subscription polls, in seconds.                    |
+| `backfill_days`          | `int`       | `5`     | How many days of history a bar subscription emits when it starts. |
+| `price_precision`        | `int`       | `2`     | Price precision for instruments, bars, and quotes.                |
+| `currency`               | `str`       | `None`  | Instrument currency code; defaults to `USD`.                      |
+| `timeout_secs`           | `int`       | `None`  | HTTP request timeout; defaults to 30 seconds.                     |
+| `load_instruments`       | `bool`      | `True`  | Whether to load the `exchange` instruments on connect.            |
+| `load_corporate_actions` | `bool`      | `False` | Whether to publish the corporate actions in a bar window.         |
 
 ### Usage
 
@@ -169,6 +178,38 @@ Delayed quotes are emitted only when the quoted prices, sizes, or times change.
 backfill. `subscribe_bars` emits the configured history on its first tick and then polls, which
 warms a running node without a separate request.
 
+### Corporate actions
+
+A corporate action is auxiliary data rather than a market event: it reports a change to the
+economic meaning or identity of an instrument. No data client command carries one. The engine
+publishes a `CorporateAction` on the instrument's corporate action topic, and a strategy receives
+it through `subscribe_corporate_actions` and `on_corporate_action`.
+
+Set `load_corporate_actions` and the client publishes the actions that fall in the window of bars
+it was asked for, which puts an action next to the bars it adjusts:
+
+```python
+class MyStrategy(Strategy):
+    def on_start(self):
+        # Subscribe before the bars, so the topic is open before the first poll publishes.
+        self.subscribe_corporate_actions(InstrumentId.from_str("AAPL.US"))
+        self.subscribe_bars(BarType.from_str("AAPL.US-1-DAY-LAST-EXTERNAL"))
+
+    def on_corporate_action(self, action):
+        self.log.info(f"{action.instrument_id} {action.action} {action.value}")
+```
+
+- A dividend arrives with the as-reported cash amount per share, and a split with the new shares
+  per old share, both as an exact decimal rather than a rounded float.
+- `effective_ns` is the ex-date for a dividend and the split date for a split, while `ts_event` is
+  when the engine observed the record. A `CorporateAction` keeps the two separate because an
+  announced action takes effect at a date that is not when it is observed.
+- The window is the subscription's own window: `backfill_days` at subscribe time, or the requested
+  range for `request_bars`. A short window therefore reports only a recent action, and a decade-long
+  window reports the decade. The actions are published once per request rather than on every poll.
+- Each bar request and each bar subscription costs two further requests while this is enabled,
+  which is why it is off by default.
+
 ### Bulk last-day mode
 
 Polling one request per symbol does not scale to a daily universe. `bulk_exchanges` names the
@@ -211,7 +252,7 @@ marketing list.
 | `/us-quote-delayed`                          | Mapped: `QuoteTick`.                                                                                                                                             |
 | `/exchange-symbol-list/{EXCHANGE}`           | Mapped: `Equity`.                                                                                                                                                |
 | `/eod-bulk-last-day/{EXCHANGE}`              | Mapped: `Bar`. Serves every daily subscription on that exchange from one request per poll, when the exchange is named in `bulk_exchanges`.                       |
-| `/div/{SYMBOL}`, `/splits/{SYMBOL}`          | Not mapped. Corporate actions reach the engine through instrument and adjustment models, not through the data client command surface.                            |
+| `/div/{SYMBOL}`, `/splits/{SYMBOL}`          | Mapped: `CorporateAction`, published on the instrument's corporate action topic when `load_corporate_actions` is set.                                            |
 | `/exchanges-list/`                           | Not used. Exchange metadata is descriptive here.                                                                                                                 |
 | `/search/{QUERY}`                            | Not used. Symbol discovery goes through the exchange list.                                                                                                       |
 | `/real-time/{SYMBOL}`                        | Not mapped. The snapshot carries a last price and a cumulative daily volume, not a per-trade size or an aggressor, so a `TradeTick` would be fabricated from it. |
@@ -250,10 +291,19 @@ intraday = await loader.bars(
     period="5m",
 )
 
+actions = await loader.corporate_actions(
+    instrument_id=InstrumentId.from_str("AAPL.US"),
+    start="2020-01-01",
+    end="2024-12-31",
+)
+
 catalog = ParquetDataCatalog("./catalog")
 catalog.write_instruments([instrument])
 catalog.write_bars(daily)
 ```
+
+`corporate_actions` returns the dividends and splits for the range together, ordered by the time
+they take effect, with the same exact values the data client publishes.
 
 `bars` and `instruments` are coroutines: each performs a network request. `instrument` is
 synchronous because the ticker carries everything needed.
@@ -270,6 +320,9 @@ let instrument = loader.instrument("AAPL.US")?;
 let bars = loader
     .bars(InstrumentId::from("AAPL.US"), "2024-01-02", "2024-01-10", "d")
     .await?;
+let actions = loader
+    .corporate_actions(InstrumentId::from("AAPL.US"), "2020-01-01", "2024-12-31")
+    .await?;
 
 let client = loader.client().clone();
 let mut provider = EodhdInstrumentProvider::new(client, Currency::USD(), 2);
@@ -283,7 +336,8 @@ provider.load_all(None).await?;  // Fetches and caches the exchange universe
 with no type are kept, because the endpoint omits it for some exchanges.
 
 An `exchange` filter on `InstrumentProvider::load_all` selects the exchange; without one the
-provider defaults to `US`.
+provider defaults to `US`. The filter takes an `/exchanges-list` code, which is also the ticker
+suffix, rather than a listing venue such as `NASDAQ`.
 
 ## Limitations and considerations
 

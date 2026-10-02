@@ -139,4 +139,36 @@ impl EodhdDataLoader {
             Python::attach(|py| bars.into_py_any(py))
         })
     }
+
+    /// Returns the corporate actions for `instrument_id` between `start` and `end` inclusive.
+    ///
+    /// `start` and `end` are `YYYY-MM-DD` dates bounding the action date. The dividends and splits
+    /// are returned together, ordered by the time they take effect. A dividend carries the
+    /// as-reported cash amount per share, and a split carries the new shares per old share.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a request fails or a row cannot be converted.
+    #[pyo3(name = "corporate_actions")]
+    #[pyo3(signature = (instrument_id, start, end))]
+    fn py_corporate_actions<'py>(
+        &self,
+        py: Python<'py>,
+        instrument_id: InstrumentId,
+        start: &str,
+        end: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let this = self.clone();
+        let start = start.to_string();
+        let end = end.to_string();
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let actions = this
+                .corporate_actions(instrument_id, &start, &end)
+                .await
+                .map_err(to_pyruntime_err)?;
+
+            Python::attach(|py| actions.into_py_any(py))
+        })
+    }
 }

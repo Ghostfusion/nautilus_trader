@@ -17,8 +17,12 @@
 
 use std::fmt::Debug;
 
+use nautilus_core::time::get_atomic_clock_realtime;
 use nautilus_model::{
-    data::Bar, identifiers::InstrumentId, instruments::InstrumentAny, types::Currency,
+    data::{Bar, CorporateAction},
+    identifiers::InstrumentId,
+    instruments::InstrumentAny,
+    types::Currency,
 };
 
 use crate::{
@@ -27,6 +31,7 @@ use crate::{
         parse_interval,
     },
     common::EODHD_DEFAULT_PRICE_PRECISION,
+    corporate_actions::{action_from_dividend, action_from_split},
     http::EodhdHttpClient,
     providers::{equity_from_ticker, fetch_exchange_equities},
 };
@@ -147,6 +152,44 @@ impl EodhdDataLoader {
             .await?;
 
         build_eod_bars(&rows, bar_type, self.price_precision)
+    }
+
+    /// Returns the corporate actions EODHD reports for `instrument_id`.
+    ///
+    /// `start` and `end` are `YYYY-MM-DD` dates bounding the action date, and both are inclusive.
+    /// The dividends and splits are returned together, ordered by the time they take effect.
+    ///
+    /// A dividend carries the as-reported cash amount per share, and a split carries the new shares
+    /// per old share, both as an exact decimal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a request fails or a row cannot be converted.
+    pub async fn corporate_actions(
+        &self,
+        instrument_id: InstrumentId,
+        start: &str,
+        end: &str,
+    ) -> anyhow::Result<Vec<CorporateAction>> {
+        let ticker = instrument_id.to_string();
+        let ts_event = get_atomic_clock_realtime().get_time_ns();
+        let mut actions = Vec::new();
+
+        for row in self
+            .client
+            .dividends(&ticker, Some(start), Some(end))
+            .await?
+        {
+            actions.push(action_from_dividend(instrument_id, &row, ts_event)?);
+        }
+
+        for row in self.client.splits(&ticker, Some(start), Some(end)).await? {
+            actions.push(action_from_split(instrument_id, &row, ts_event)?);
+        }
+
+        actions.sort_by_key(|action| action.effective_ns);
+
+        Ok(actions)
     }
 }
 

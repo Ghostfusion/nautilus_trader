@@ -26,8 +26,8 @@ use serde::de::DeserializeOwned;
 use super::{
     error::{Error, Result},
     models::{
-        EodhdBar, EodhdBulkBar, EodhdDelayedQuote, EodhdDelayedQuoteResponse, EodhdErrorResponse,
-        EodhdIntradayBar, EodhdSymbol,
+        EodhdBar, EodhdBulkBar, EodhdDelayedQuote, EodhdDelayedQuoteResponse, EodhdDividend,
+        EodhdErrorResponse, EodhdIntradayBar, EodhdSplit, EodhdSymbol,
     },
 };
 use crate::common::{
@@ -170,6 +170,49 @@ impl EodhdHttpClient {
         parse_json_list::<EodhdIntradayBar>(&body, &url)
     }
 
+    /// Returns the dividends EODHD reports for `ticker`.
+    ///
+    /// The endpoint returns the full history in ascending date order. `from` and `to` bound the
+    /// ex-date in `YYYY-MM-DD` format, which is what keeps a window request from transferring
+    /// decades of records.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails, the token is rejected, or the body does not parse.
+    pub async fn dividends(
+        &self,
+        ticker: &str,
+        from: Option<&str>,
+        to: Option<&str>,
+    ) -> Result<Vec<EodhdDividend>> {
+        let params = dated_params(self.base_params(), from, to);
+        let url = format!("{}/div/{ticker}", self.base_url);
+        let body = self.request(&url, &params).await?;
+
+        parse_json_list::<EodhdDividend>(&body, &url)
+    }
+
+    /// Returns the splits EODHD reports for `ticker`.
+    ///
+    /// The endpoint returns the full history in ascending date order. `from` and `to` bound the
+    /// split date in `YYYY-MM-DD` format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails, the token is rejected, or the body does not parse.
+    pub async fn splits(
+        &self,
+        ticker: &str,
+        from: Option<&str>,
+        to: Option<&str>,
+    ) -> Result<Vec<EodhdSplit>> {
+        let params = dated_params(self.base_params(), from, to);
+        let url = format!("{}/splits/{ticker}", self.base_url);
+        let body = self.request(&url, &params).await?;
+
+        parse_json_list::<EodhdSplit>(&body, &url)
+    }
+
     /// Returns the last day of bars for every symbol listed on `exchange`.
     ///
     /// One request covers a whole exchange, which is what keeps a large daily universe current
@@ -300,6 +343,23 @@ fn decompress_gzip(body: &[u8]) -> Result<Vec<u8>> {
     }
 
     Ok(decompressed)
+}
+
+/// Adds the `from` and `to` date bounds to `params` when they are supplied.
+fn dated_params(
+    mut params: HashMap<String, Vec<String>>,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> HashMap<String, Vec<String>> {
+    if let Some(from) = from {
+        params.insert("from".to_string(), vec![from.to_string()]);
+    }
+
+    if let Some(to) = to {
+        params.insert("to".to_string(), vec![to.to_string()]);
+    }
+
+    params
 }
 
 /// Returns a lossy preview of `body`, for diagnosing an unexpected payload.

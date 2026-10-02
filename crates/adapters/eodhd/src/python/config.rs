@@ -40,6 +40,7 @@ impl EodhdDataClientConfig {
         timeout_secs = None,
         load_instruments = None,
         bulk_exchanges = None,
+        load_corporate_actions = None,
     ))]
     #[expect(clippy::too_many_arguments)]
     fn py_new(
@@ -54,6 +55,7 @@ impl EodhdDataClientConfig {
         timeout_secs: Option<u64>,
         load_instruments: Option<bool>,
         bulk_exchanges: Option<Vec<String>>,
+        load_corporate_actions: Option<bool>,
     ) -> Self {
         let defaults = Self::default();
 
@@ -69,6 +71,8 @@ impl EodhdDataClientConfig {
             timeout_secs,
             load_instruments: load_instruments.unwrap_or(defaults.load_instruments),
             bulk_exchanges: bulk_exchanges.unwrap_or(defaults.bulk_exchanges),
+            load_corporate_actions: load_corporate_actions
+                .unwrap_or(defaults.load_corporate_actions),
         }
     }
 
@@ -119,6 +123,13 @@ impl EodhdDataClientConfig {
     #[must_use]
     fn bulk_exchanges(&self) -> Vec<String> {
         self.bulk_exchanges.clone()
+    }
+
+    /// Returns whether the corporate actions in a bar window are emitted.
+    #[getter]
+    #[must_use]
+    const fn load_corporate_actions(&self) -> bool {
+        self.load_corporate_actions
     }
 
     #[pyo3(name = "__repr__")]

@@ -6095,6 +6095,7 @@ dependencies = [
  "pyo3-async-runtimes",
  "pyo3-stub-gen",
  "rstest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

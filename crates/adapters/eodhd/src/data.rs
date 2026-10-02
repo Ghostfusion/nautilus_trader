@@ -48,7 +48,7 @@ use nautilus_common::{
 use nautilus_core::{UnixNanos, string::secret::SecretString, time::get_atomic_clock_realtime};
 use nautilus_live::task::TaskGroup;
 use nautilus_model::{
-    data::{Bar, BarType, Data, QuoteTick},
+    data::{Bar, BarType, CorporateAction, Data, QuoteTick},
     enums::AggregationSource,
     identifiers::{ClientId, InstrumentId, Venue},
     instruments::{Instrument, InstrumentAny},
@@ -59,6 +59,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     bars::{EodhdInterval, build_bulk_bar, build_eod_bars, build_intraday_bars, resolve_interval},
     config::EodhdDataClientConfig,
+    corporate_actions::{action_from_dividend, action_from_split},
     http::{EodhdDelayedQuote, EodhdHttpClient},
     providers::EodhdInstrumentProvider,
 };
@@ -185,9 +186,11 @@ impl EodhdDataClient {
         let poll_interval_secs = self.config.resolved_poll_interval_secs();
         let backfill_days = i64::from(self.config.backfill_days);
         let window_secs = (backfill_days * SECONDS_PER_DAY).max(MIN_WINDOW_SECS);
+        let load_corporate_actions = self.config.load_corporate_actions;
 
         self.tasks.spawn(async move {
             let mut emitter = BarEmitter::new();
+            let mut seeded = false;
             let mut poll_ticks = tokio::time::interval(Duration::from_secs(poll_interval_secs));
             let mut from = now_seconds() - window_secs;
 
@@ -213,6 +216,23 @@ impl EodhdDataClient {
                         }
                     }
                     Err(e) => log::error!("Failed to poll bars for {bar_type}: {e}"),
+                }
+
+                // The window of the first poll is the subscription's window, so its actions are
+                // emitted once rather than on every tick.
+                if !seeded {
+                    seeded = true;
+
+                    if load_corporate_actions {
+                        emit_corporate_actions(
+                            &http_client,
+                            &sender,
+                            bar_type.instrument_id(),
+                            from,
+                            now,
+                        )
+                        .await;
+                    }
                 }
 
                 // Re-request from just before the newest bar so a revision is still observed.
@@ -323,6 +343,7 @@ impl EodhdDataClient {
         let poll_interval_secs = self.config.resolved_poll_interval_secs();
         let backfill_days = i64::from(self.config.backfill_days);
         let window_secs = (backfill_days * SECONDS_PER_DAY).max(MIN_WINDOW_SECS);
+        let load_corporate_actions = self.config.load_corporate_actions;
 
         self.tasks.spawn(async move {
             let mut watches: HashMap<String, BulkWatchState> = HashMap::new();
@@ -344,6 +365,7 @@ impl EodhdDataClient {
                             backfill_days,
                             window_secs,
                             price_precision,
+                            load_corporate_actions,
                         )
                         .await;
 
@@ -412,12 +434,23 @@ async fn register_bulk_watch(
     backfill_days: i64,
     window_secs: i64,
     price_precision: u8,
+    load_corporate_actions: bool,
 ) -> BulkWatchState {
     let mut emitter = BarEmitter::new();
+    let now = now_seconds();
+
+    if load_corporate_actions {
+        emit_corporate_actions(
+            http_client,
+            sender,
+            watch.bar_type.instrument_id(),
+            now - window_secs,
+            now,
+        )
+        .await;
+    }
 
     if backfill_days > 0 {
-        let now = now_seconds();
-
         match fetch_bars(
             http_client,
             watch.bar_type,
@@ -503,6 +536,63 @@ fn send_bar(sender: &EventSender<DataEvent>, bar: Bar) {
 fn send_quote(sender: &EventSender<DataEvent>, quote: QuoteTick) {
     if let Err(e) = sender.send(DataEvent::Data(Data::Quote(quote))) {
         log::error!("Failed to send quote event: {e}");
+    }
+}
+
+/// Sends a corporate action to the data engine, logging a failure instead of aborting a request.
+fn send_corporate_action(sender: &EventSender<DataEvent>, action: CorporateAction) {
+    if let Err(e) = sender.send(DataEvent::Data(Data::CorporateAction(action))) {
+        log::error!("Failed to send corporate action event: {e}");
+    }
+}
+
+/// Emits the corporate actions effective in `[from, to]` for an instrument.
+///
+/// No data client command carries a corporate action: the engine publishes it on the instrument's
+/// corporate action topic, where a strategy that called `subscribe_corporate_actions` receives it.
+/// The client therefore publishes the actions that fall in the window of bars it was asked for,
+/// which puts an action next to the bars it adjusts.
+async fn emit_corporate_actions(
+    http_client: &EodhdHttpClient,
+    sender: &EventSender<DataEvent>,
+    instrument_id: InstrumentId,
+    from: i64,
+    to: i64,
+) {
+    let ticker = instrument_id.to_string();
+    let start = timestamp_to_date(from);
+    let end = timestamp_to_date(to);
+    let ts_event = get_atomic_clock_realtime().get_time_ns();
+
+    match http_client
+        .dividends(&ticker, Some(&start), Some(&end))
+        .await
+    {
+        Ok(rows) => {
+            log::debug!("Loaded {} dividends for {ticker}", rows.len());
+
+            for row in &rows {
+                match action_from_dividend(instrument_id, row, ts_event) {
+                    Ok(action) => send_corporate_action(sender, action),
+                    Err(e) => log::error!("Failed to convert a dividend for {ticker}: {e}"),
+                }
+            }
+        }
+        Err(e) => log::error!("Failed to load dividends for {ticker}: {e}"),
+    }
+
+    match http_client.splits(&ticker, Some(&start), Some(&end)).await {
+        Ok(rows) => {
+            log::debug!("Loaded {} splits for {ticker}", rows.len());
+
+            for row in &rows {
+                match action_from_split(instrument_id, row, ts_event) {
+                    Ok(action) => send_corporate_action(sender, action),
+                    Err(e) => log::error!("Failed to convert a split for {ticker}: {e}"),
+                }
+            }
+        }
+        Err(e) => log::error!("Failed to load splits for {ticker}: {e}"),
     }
 }
 
@@ -896,6 +986,7 @@ impl DataClient for EodhdDataClient {
         let start = request.start;
         let end = request.end;
         let price_precision = self.config.price_precision;
+        let load_corporate_actions = self.config.load_corporate_actions;
 
         self.tasks.spawn(async move {
             let now = now_seconds();
@@ -915,6 +1006,17 @@ impl DataClient for EodhdDataClient {
 
                     for bar in bars {
                         send_bar(&sender, bar);
+                    }
+
+                    if load_corporate_actions {
+                        emit_corporate_actions(
+                            &http_client,
+                            &sender,
+                            bar_type.instrument_id(),
+                            from,
+                            to,
+                        )
+                        .await;
                     }
                 }
                 Err(e) => log::error!("Failed to request bars for {bar_type}: {e}"),

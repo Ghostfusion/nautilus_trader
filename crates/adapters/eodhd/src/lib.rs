@@ -50,6 +50,7 @@
 
 pub mod bars;
 pub mod common;
+pub mod corporate_actions;
 pub mod http;
 pub mod loader;
 pub mod providers;

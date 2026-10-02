@@ -16,17 +16,10 @@
 Test EODHD loader behavior against a local server.
 """
 
-import json
-from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler
-from http.server import ThreadingHTTPServer
-from threading import Thread
-from typing import ClassVar
-from urllib.parse import urlparse
-
 import pytest
 
 from nautilus_trader.adapters.eodhd import EodhdDataLoader
+from nautilus_trader.model import CorporateActionType
 from nautilus_trader.model import InstrumentId
 from nautilus_trader.model import Price
 from nautilus_trader.model import Quantity
@@ -93,53 +86,46 @@ SYMBOL_ROWS = [
     },
 ]
 
+DIVIDEND_ROWS = [
+    {
+        "date": "2024-02-09",
+        "declarationDate": "2024-02-01",
+        "recordDate": "2024-02-12",
+        "paymentDate": "2024-02-15",
+        "period": None,
+        "value": 0.06,
+        "unadjustedValue": 0.24,
+        "currency": "USD",
+    },
+]
+
+SPLIT_ROWS = [
+    {"date": "2020-08-31", "split": "4.000000/1.000000"},
+]
+
 # 2024-01-02T00:00:00Z in nanoseconds
 JAN_2_2024_NS = 1_704_153_600_000_000_000
 
-
-class _CannedHandler(BaseHTTPRequestHandler):
-    """Serve canned EODHD responses over loopback."""
-
-    routes: ClassVar[dict] = {}
-
-    def do_GET(self) -> None:  # noqa: N802
-        """Serve a canned response for the request path."""
-        body = self.routes.get(urlparse(self.path).path)
-
-        if body is None:
-            self.send_response(404)
-            self.end_headers()
-            return
-
-        payload = body if isinstance(body, bytes) else json.dumps(body).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def log_message(self, _format: str, *_args: object) -> None:
-        """Silence the request log."""
+# 2024-02-09T00:00:00Z and 2020-08-31T00:00:00Z in nanoseconds
+FEB_9_2024_NS = 1_707_436_800_000_000_000
+AUG_31_2020_NS = 1_598_832_000_000_000_000
 
 
-@pytest.fixture(scope="module")
-def base_url() -> Iterator[str]:
-    """Provide the base URL of a local server serving canned EODHD responses."""
-    _CannedHandler.routes = {
-        "/eod/AAPL.US": EOD_ROWS,
-        "/eod/AAPL.NOPE": {"code": 404, "message": "Not found"},
-        "/eod/AAPL.EMPTY": [],
-        "/exchange-symbol-list/US": SYMBOL_ROWS,
-    }
+@pytest.fixture()
+def base_url(canned_server: str, canned_routes: dict) -> str:
+    """Provide the base URL of a local server serving the loader's canned responses."""
+    canned_routes.update(
+        {
+            "/eod/AAPL.US": EOD_ROWS,
+            "/eod/AAPL.NOPE": {"code": 404, "message": "Not found"},
+            "/eod/AAPL.EMPTY": [],
+            "/exchange-symbol-list/US": SYMBOL_ROWS,
+            "/div/AAPL.US": DIVIDEND_ROWS,
+            "/splits/AAPL.US": SPLIT_ROWS,
+        },
+    )
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _CannedHandler)
-    thread = Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-
-    yield f"http://127.0.0.1:{server.server_address[1]}"
-
-    server.shutdown()
-    thread.join(timeout=5)
+    return canned_server
 
 
 @pytest.fixture()
@@ -239,6 +225,29 @@ async def test_bars_returns_empty_for_an_empty_payload(loader: EodhdDataLoader) 
     )
 
     assert bars == []
+
+
+@pytest.mark.asyncio()
+async def test_corporate_actions_orders_dividends_and_splits_by_effective_time(
+    loader: EodhdDataLoader,
+) -> None:
+    """Test that corporate actions carry exact values and the venue effective time."""
+    actions = await loader.corporate_actions(
+        instrument_id=InstrumentId.from_str("AAPL.US"),
+        start="2020-01-01",
+        end="2024-12-31",
+    )
+
+    assert [action.action for action in actions] == [
+        CorporateActionType.SPLIT,
+        CorporateActionType.DIVIDEND,
+    ]
+
+    split, dividend = actions
+    assert str(split.value) == "4"
+    assert split.effective_ns == AUG_31_2020_NS
+    assert str(dividend.value) == "0.24"
+    assert dividend.effective_ns == FEB_9_2024_NS
 
 
 @pytest.mark.asyncio()
