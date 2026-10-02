@@ -55,4 +55,5 @@
 
 pub mod chain;
 pub mod failure;
+pub mod tap;
 pub mod testing;

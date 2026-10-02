@@ -464,6 +464,12 @@ unchanged, the identity rewrite happens once, at the boundary, and the engine is
 client's worth of events. It also means the composite is the only thing that can decide a request
 has failed, which is what the second finding requires.
 
+**The boundary is a value, not a task.** It is built as a tap that reads one event from a provider
+and writes one event for the engine, with the rewrite as a pure function. That is deliberate: the
+property the engine depends on is that the correlation identifier is the caller's and comes back
+untouched, and a pure function makes that a test rather than an argument. Only a response carries an
+identity at all, so only a response is rewritten, and market data passes through unchanged.
+
 **A leg is a factory and a configuration, and neither is serializable.** The engine's own
 configuration path is serde, and a `ClientConfig` is a trait object, so a chain's configuration
 cannot be a serialized struct of legs the way a single provider's configuration is. The chain is
