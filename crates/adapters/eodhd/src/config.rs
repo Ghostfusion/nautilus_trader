@@ -54,6 +54,17 @@ pub struct EodhdDataClientConfig {
     /// The EODHD exchange code whose instruments are loaded on connect.
     #[builder(default = EODHD_DEFAULT_EXCHANGE.to_string())]
     pub exchange: String,
+    /// The exchanges whose daily bars are served from the bulk last-day endpoint.
+    ///
+    /// A daily bar for an instrument on one of these exchanges is polled with one request per
+    /// exchange rather than one request per symbol, which is what keeps a large daily universe
+    /// current. Subscribing still seeds `backfill_days` of history for the symbol itself, so
+    /// only the ongoing polls are shared.
+    ///
+    /// Other intervals, and exchanges not listed here, are polled per symbol. An exchange code
+    /// is one of those `/exchanges-list` returns, for example `US` or `LSE`.
+    #[builder(default)]
+    pub bulk_exchanges: Vec<String>,
     /// How often to poll for new bars, in seconds.
     #[builder(default = EODHD_DEFAULT_POLL_INTERVAL_SECS)]
     pub poll_interval_secs: u64,

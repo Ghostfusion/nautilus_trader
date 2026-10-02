@@ -25,6 +25,7 @@ class EodhdDataClientConfig:
         currency: str | None = None,
         timeout_secs: int | None = None,
         load_instruments: bool | None = None,
+        bulk_exchanges: typing.Sequence[str] | None = None,
     ) -> None: ...
     @property
     def has_api_key(self) -> bool: ...
@@ -38,6 +39,8 @@ class EodhdDataClientConfig:
     def price_precision(self) -> int: ...
     @property
     def load_instruments(self) -> bool: ...
+    @property
+    def bulk_exchanges(self) -> list[str]: ...
 
 @typing.final
 class EodhdDataClientFactory:

@@ -39,6 +39,7 @@ impl EodhdDataClientConfig {
         currency = None,
         timeout_secs = None,
         load_instruments = None,
+        bulk_exchanges = None,
     ))]
     #[expect(clippy::too_many_arguments)]
     fn py_new(
@@ -52,6 +53,7 @@ impl EodhdDataClientConfig {
         currency: Option<String>,
         timeout_secs: Option<u64>,
         load_instruments: Option<bool>,
+        bulk_exchanges: Option<Vec<String>>,
     ) -> Self {
         let defaults = Self::default();
 
@@ -66,6 +68,7 @@ impl EodhdDataClientConfig {
             currency,
             timeout_secs,
             load_instruments: load_instruments.unwrap_or(defaults.load_instruments),
+            bulk_exchanges: bulk_exchanges.unwrap_or(defaults.bulk_exchanges),
         }
     }
 
@@ -109,6 +112,13 @@ impl EodhdDataClientConfig {
     #[must_use]
     const fn load_instruments(&self) -> bool {
         self.load_instruments
+    }
+
+    /// Returns the exchanges whose daily bars are served from the bulk last-day endpoint.
+    #[getter]
+    #[must_use]
+    fn bulk_exchanges(&self) -> Vec<String> {
+        self.bulk_exchanges.clone()
     }
 
     #[pyo3(name = "__repr__")]

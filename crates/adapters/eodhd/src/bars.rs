@@ -29,7 +29,7 @@ use nautilus_model::{
     types::{Price, Quantity},
 };
 
-use crate::http::{EodhdBar, EodhdIntradayBar};
+use crate::http::{EodhdBar, EodhdBulkBar, EodhdIntradayBar};
 
 /// The size precision applied to EODHD share volumes.
 const VOLUME_PRECISION: u8 = 0;
@@ -225,6 +225,36 @@ pub fn build_eod_bars(
     Ok(bars)
 }
 
+/// Converts one bulk last-day row into a Nautilus bar.
+///
+/// The bulk endpoint publishes one day for every symbol on an exchange, so the row carries an
+/// exchange-local code rather than a ticker. The caller supplies the bar type, which already
+/// fixes the instrument, the daily specification, and the external aggregation source.
+///
+/// # Errors
+///
+/// Returns an error if the row date is unparseable, or if the row violates an OHLC relationship,
+/// in which case the offending field is reported rather than a bar being filled with values the
+/// provider never published.
+pub fn build_bulk_bar(
+    row: &EodhdBulkBar,
+    bar_type: BarType,
+    price_precision: u8,
+) -> anyhow::Result<Bar> {
+    let millis = date_to_millis(&row.date)?;
+
+    build_bar(
+        bar_type,
+        row.open,
+        row.high,
+        row.low,
+        row.close,
+        row.volume,
+        UnixNanos::from_millis(millis.unsigned_abs()),
+        price_precision,
+    )
+}
+
 /// Converts EODHD intraday rows into Nautilus bars.
 ///
 /// The row `timestamp` field is used as the bar timestamp: it is the authoritative epoch second,
@@ -316,6 +346,57 @@ mod tests {
             close,
             volume: Some(100.0),
         }
+    }
+
+    fn bulk_row(code: &str, date: &str, close: f64) -> EodhdBulkBar {
+        EodhdBulkBar {
+            code: code.to_string(),
+            exchange: Some("US".to_string()),
+            date: date.to_string(),
+            open: close - 1.0,
+            high: close + 1.0,
+            low: close - 2.0,
+            close,
+            adjusted_close: None,
+            volume: Some(2_802.0),
+        }
+    }
+
+    #[rstest]
+    fn test_bulk_row_ticker_prefers_the_rows_own_exchange() {
+        // A sub-exchange query reports the parent code, which is the suffix EODHD addresses the
+        // symbol with, so the row wins over the code the list was requested with.
+        let mut row = bulk_row("AACG", "2024-01-02", 10.0);
+
+        assert_eq!(row.ticker("NASDAQ"), "AACG.US");
+
+        row.exchange = None;
+
+        assert_eq!(row.ticker("US"), "AACG.US");
+    }
+
+    #[rstest]
+    fn test_build_bulk_bar_maps_the_row_onto_a_daily_bar() {
+        let row = bulk_row("AAPL", "2024-01-02", 185.64);
+        let bar_type = bar_type_for(instrument_id(), EodhdInterval::Day);
+
+        let bar = build_bulk_bar(&row, bar_type, 2).unwrap();
+
+        assert_eq!(bar.bar_type, bar_type);
+        assert_eq!(bar.open, Price::new(184.64, 2));
+        assert_eq!(bar.close, Price::new(185.64, 2));
+        assert_eq!(bar.volume, Quantity::new(2_802.0, 0));
+        assert_eq!(bar.ts_event, UnixNanos::from_millis(1_704_153_600_000));
+    }
+
+    #[rstest]
+    fn test_build_bulk_bar_rejects_an_impossible_row() {
+        let mut row = bulk_row("AAPL", "2024-01-02", 185.64);
+        row.high = 100.0;
+
+        let bar_type = bar_type_for(instrument_id(), EodhdInterval::Day);
+
+        assert!(build_bulk_bar(&row, bar_type, 2).is_err());
     }
 
     #[rstest]

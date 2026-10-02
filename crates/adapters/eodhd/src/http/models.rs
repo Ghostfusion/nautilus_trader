@@ -41,6 +41,51 @@ pub struct EodhdBar {
     pub volume: Option<f64>,
 }
 
+/// A single row from the `/eod-bulk-last-day/{exchange}` endpoint.
+///
+/// One request returns the last day for every symbol on an exchange. The row carries the
+/// exchange-local code rather than a full ticker, so the ticker is built from the code and the
+/// exchange the row reports.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct EodhdBulkBar {
+    /// The exchange-local ticker code, without the exchange suffix.
+    pub code: String,
+    /// The exchange code the endpoint addresses rows of this list with, when supplied.
+    #[serde(rename = "exchange_short_name", default)]
+    pub exchange: Option<String>,
+    /// The row date, formatted `YYYY-MM-DD`.
+    pub date: String,
+    /// The open price.
+    pub open: f64,
+    /// The high price.
+    pub high: f64,
+    /// The low price.
+    pub low: f64,
+    /// The close price.
+    pub close: f64,
+    /// The split and dividend adjusted close price, when supplied.
+    #[serde(default)]
+    pub adjusted_close: Option<f64>,
+    /// The traded volume, when supplied.
+    #[serde(default)]
+    pub volume: Option<f64>,
+}
+
+impl EodhdBulkBar {
+    /// Returns the EODHD ticker for this row, falling back to the requested `exchange`.
+    ///
+    /// The row's own exchange code wins because the endpoint reports the code it addresses the
+    /// symbol with: a sub-exchange query returns the parent code rather than the sub-exchange.
+    #[must_use]
+    pub fn ticker(&self, exchange: &str) -> String {
+        format!(
+            "{}.{}",
+            self.code,
+            self.exchange.as_deref().unwrap_or(exchange)
+        )
+    }
+}
+
 /// A single symbol row from the `/exchange-symbol-list/{exchange}` endpoint.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct EodhdSymbol {

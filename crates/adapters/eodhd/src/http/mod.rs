@@ -21,4 +21,4 @@ pub mod models;
 
 pub use client::EodhdHttpClient;
 pub use error::{Error, Result};
-pub use models::{EodhdBar, EodhdDelayedQuote, EodhdIntradayBar, EodhdSymbol};
+pub use models::{EodhdBar, EodhdBulkBar, EodhdDelayedQuote, EodhdIntradayBar, EodhdSymbol};

@@ -26,7 +26,7 @@ use serde::de::DeserializeOwned;
 use super::{
     error::{Error, Result},
     models::{
-        EodhdBar, EodhdDelayedQuote, EodhdDelayedQuoteResponse, EodhdErrorResponse,
+        EodhdBar, EodhdBulkBar, EodhdDelayedQuote, EodhdDelayedQuoteResponse, EodhdErrorResponse,
         EodhdIntradayBar, EodhdSymbol,
     },
 };
@@ -168,6 +168,36 @@ impl EodhdHttpClient {
         let body = self.request(&url, &params).await?;
 
         parse_json_list::<EodhdIntradayBar>(&body, &url)
+    }
+
+    /// Returns the last day of bars for every symbol listed on `exchange`.
+    ///
+    /// One request covers a whole exchange, which is what keeps a large daily universe current
+    /// on one request per poll. The endpoint offers no filter for a subset of symbols, so the
+    /// full list is always returned and the caller selects the rows it wants.
+    ///
+    /// `date` selects a trading day in `YYYY-MM-DD` format; without it the endpoint returns its
+    /// most recent day, which during a session is the forming bar for the current day.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails, the token is not entitled to the endpoint, or the
+    /// body does not parse.
+    pub async fn bulk_last_day(
+        &self,
+        exchange: &str,
+        date: Option<&str>,
+    ) -> Result<Vec<EodhdBulkBar>> {
+        let mut params = self.base_params();
+
+        if let Some(date) = date {
+            params.insert("date".to_string(), vec![date.to_string()]);
+        }
+
+        let url = format!("{}/eod-bulk-last-day/{exchange}", self.base_url);
+        let body = self.request(&url, &params).await?;
+
+        parse_json_list::<EodhdBulkBar>(&body, &url)
     }
 
     /// Returns the delayed quote snapshot for `ticker`.

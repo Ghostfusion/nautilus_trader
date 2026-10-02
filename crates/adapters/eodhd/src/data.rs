@@ -22,7 +22,7 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::Rc,
     sync::{
         Arc,
@@ -57,7 +57,7 @@ use nautilus_model::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    bars::{EodhdInterval, build_eod_bars, build_intraday_bars, resolve_interval},
+    bars::{EodhdInterval, build_bulk_bar, build_eod_bars, build_intraday_bars, resolve_interval},
     config::EodhdDataClientConfig,
     http::{EodhdDelayedQuote, EodhdHttpClient},
     providers::EodhdInstrumentProvider,
@@ -92,6 +92,7 @@ pub struct EodhdDataClient {
     data_sender: EventSender<DataEvent>,
     bar_subscriptions: Rc<RefCell<HashMap<BarType, CancellationToken>>>,
     quote_subscriptions: Rc<RefCell<HashMap<InstrumentId, CancellationToken>>>,
+    bulk_polls: Rc<RefCell<HashMap<String, tokio::sync::mpsc::UnboundedSender<BulkWatch>>>>,
     instruments: Rc<RefCell<IndexMap<InstrumentId, InstrumentAny>>>,
 }
 
@@ -136,6 +137,7 @@ impl EodhdDataClient {
             data_sender,
             bar_subscriptions: Rc::new(RefCell::new(HashMap::new())),
             quote_subscriptions: Rc::new(RefCell::new(HashMap::new())),
+            bulk_polls: Rc::new(RefCell::new(HashMap::new())),
             instruments: Rc::new(RefCell::new(IndexMap::new())),
         })
     }
@@ -276,6 +278,217 @@ impl EodhdDataClient {
         })?;
 
         Ok(())
+    }
+
+    /// Returns the command sender for `exchange`, starting its poll when it is not running.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task generation is no longer accepting tasks.
+    fn ensure_bulk_poll(
+        &self,
+        exchange: &str,
+    ) -> anyhow::Result<tokio::sync::mpsc::UnboundedSender<BulkWatch>> {
+        if let Some(sender) = self.bulk_polls.borrow().get(exchange) {
+            return Ok(sender.clone());
+        }
+
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let token = self.cancellation_token.child_token();
+
+        self.spawn_bulk_poll(exchange.to_string(), receiver, token)?;
+        self.bulk_polls
+            .borrow_mut()
+            .insert(exchange.to_string(), sender.clone());
+
+        log::debug!("Started the EODHD bulk last-day poll for {exchange}");
+
+        Ok(sender)
+    }
+
+    /// Spawns the poll that serves every daily bar subscription on `exchange`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task generation is no longer accepting tasks.
+    fn spawn_bulk_poll(
+        &self,
+        exchange: String,
+        mut receiver: tokio::sync::mpsc::UnboundedReceiver<BulkWatch>,
+        token: CancellationToken,
+    ) -> anyhow::Result<()> {
+        let http_client = self.http_client.clone();
+        let sender = self.data_sender.clone();
+        let price_precision = self.config.price_precision;
+        let poll_interval_secs = self.config.resolved_poll_interval_secs();
+        let backfill_days = i64::from(self.config.backfill_days);
+        let window_secs = (backfill_days * SECONDS_PER_DAY).max(MIN_WINDOW_SECS);
+
+        self.tasks.spawn(async move {
+            let mut watches: HashMap<String, BulkWatchState> = HashMap::new();
+            let mut poll_ticks = tokio::time::interval(Duration::from_secs(poll_interval_secs));
+
+            loop {
+                tokio::select! {
+                    biased;
+                    () = token.cancelled() => {
+                        log::debug!("Bulk polling cancelled for {exchange}");
+                        break;
+                    }
+                    Some(watch) = receiver.recv() => {
+                        let ticker = watch.bar_type.instrument_id().to_string();
+                        let state = register_bulk_watch(
+                            &http_client,
+                            &sender,
+                            watch,
+                            backfill_days,
+                            window_secs,
+                            price_precision,
+                        )
+                        .await;
+
+                        watches.insert(ticker, state);
+                    }
+                    _ = poll_ticks.tick() => {}
+                }
+
+                // A cancelled watch is an unsubscribed bar type, and an exchange nobody watches
+                // costs no request at all.
+                watches.retain(|_, state| !state.token.is_cancelled());
+
+                if watches.is_empty() {
+                    continue;
+                }
+
+                poll_bulk(
+                    &http_client,
+                    &sender,
+                    &exchange,
+                    &mut watches,
+                    price_precision,
+                )
+                .await;
+            }
+        })?;
+
+        Ok(())
+    }
+}
+
+/// Returns whether `exchange` is among the configured `bulk_exchanges` codes.
+///
+/// The comparison ignores case because an EODHD exchange code reaches the client as the venue of
+/// an instrument ID, which is upper-cased in practice but not by contract.
+fn matches_bulk_exchange(bulk_exchanges: &[String], exchange: &str) -> bool {
+    bulk_exchanges
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(exchange))
+}
+
+/// A daily bar subscription served by a bulk poll task.
+#[derive(Debug)]
+struct BulkWatch {
+    bar_type: BarType,
+    token: CancellationToken,
+}
+
+/// The state a bulk poll task keeps for one watched instrument.
+#[derive(Debug)]
+struct BulkWatchState {
+    bar_type: BarType,
+    token: CancellationToken,
+    emitter: BarEmitter,
+}
+
+/// Registers a bulk watch, seeding its history before the first bulk poll.
+///
+/// The symbol's own window is fetched once from the end-of-day endpoint, so a bulk subscription
+/// starts with the history a per-symbol subscription would have and only its ongoing polls are
+/// shared with the rest of the exchange.
+async fn register_bulk_watch(
+    http_client: &EodhdHttpClient,
+    sender: &EventSender<DataEvent>,
+    watch: BulkWatch,
+    backfill_days: i64,
+    window_secs: i64,
+    price_precision: u8,
+) -> BulkWatchState {
+    let mut emitter = BarEmitter::new();
+
+    if backfill_days > 0 {
+        let now = now_seconds();
+
+        match fetch_bars(
+            http_client,
+            watch.bar_type,
+            EodhdInterval::Day,
+            now - window_secs,
+            now,
+            price_precision,
+        )
+        .await
+        {
+            Ok(bars) => {
+                for bar in bars {
+                    if let Some(bar) = emitter.consider(bar) {
+                        send_bar(sender, bar);
+                    }
+                }
+            }
+            Err(e) => log::error!("Failed to seed history for {}: {e}", watch.bar_type),
+        }
+    }
+
+    BulkWatchState {
+        bar_type: watch.bar_type,
+        token: watch.token,
+        emitter,
+    }
+}
+
+/// Requests the last day for `exchange` and emits a bar for every watched instrument.
+///
+/// The endpoint offers no filter for a subset of symbols, so the whole exchange is fetched and
+/// the rows a subscription asked for are selected from it.
+async fn poll_bulk(
+    http_client: &EodhdHttpClient,
+    sender: &EventSender<DataEvent>,
+    exchange: &str,
+    watches: &mut HashMap<String, BulkWatchState>,
+    price_precision: u8,
+) {
+    let codes: HashSet<String> = watches
+        .keys()
+        .filter_map(|ticker| ticker.rsplit_once('.').map(|(code, _)| code.to_string()))
+        .collect();
+
+    let rows = match http_client.bulk_last_day(exchange, None).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            log::error!("Failed to poll the {exchange} bulk last day: {e}");
+
+            return;
+        }
+    };
+
+    for row in &rows {
+        if !codes.contains(row.code.as_str()) {
+            continue;
+        }
+
+        let ticker = row.ticker(exchange);
+        let Some(state) = watches.get_mut(&ticker) else {
+            continue;
+        };
+
+        match build_bulk_bar(row, state.bar_type, price_precision) {
+            Ok(bar) => {
+                if let Some(bar) = state.emitter.consider(bar) {
+                    send_bar(sender, bar);
+                }
+            }
+            Err(e) => log::error!("Failed to build the bulk bar for {ticker}: {e}"),
+        }
     }
 }
 
@@ -445,6 +658,7 @@ impl DataClient for EodhdDataClient {
         self.tasks.begin_shutdown();
         self.bar_subscriptions.borrow_mut().clear();
         self.quote_subscriptions.borrow_mut().clear();
+        self.bulk_polls.borrow_mut().clear();
         self.is_connected.store(false, Ordering::Release);
 
         Ok(())
@@ -507,6 +721,7 @@ impl DataClient for EodhdDataClient {
         self.tasks.begin_shutdown();
         self.bar_subscriptions.borrow_mut().clear();
         self.quote_subscriptions.borrow_mut().clear();
+        self.bulk_polls.borrow_mut().clear();
 
         let result = self
             .tasks
@@ -609,6 +824,31 @@ impl DataClient for EodhdDataClient {
         }
 
         let token = self.cancellation_token.child_token();
+        let venue = bar_type.instrument_id().venue;
+
+        // A daily bar on a bulk exchange is served by the exchange's shared poll rather than by
+        // a request of its own, so a universe of any size costs one request per exchange.
+        if interval == EodhdInterval::Day
+            && matches_bulk_exchange(&self.config.bulk_exchanges, venue.as_str())
+        {
+            let sender = self.ensure_bulk_poll(venue.as_str())?;
+
+            if sender
+                .send(BulkWatch {
+                    bar_type,
+                    token: token.clone(),
+                })
+                .is_err()
+            {
+                anyhow::bail!("The EODHD bulk poll for {venue} is no longer running");
+            }
+
+            self.bar_subscriptions.borrow_mut().insert(bar_type, token);
+
+            log::debug!("Subscribed to {bar_type} from the EODHD bulk last-day endpoint");
+
+            return Ok(());
+        }
 
         self.spawn_bar_poll(bar_type, interval, token.clone())?;
         self.bar_subscriptions.borrow_mut().insert(bar_type, token);
@@ -836,6 +1076,17 @@ mod tests {
         quote.ask_time = Some(1_790_886_570_000);
 
         assert_eq!(quote.ts_event().as_u64(), 1_790_886_570_000_000_000);
+    }
+
+    #[rstest]
+    fn test_matches_bulk_exchange_ignores_case_and_absent_codes() {
+        let codes = vec!["US".to_string(), "LSE".to_string()];
+
+        assert!(matches_bulk_exchange(&codes, "US"));
+        assert!(matches_bulk_exchange(&codes, "us"));
+        assert!(matches_bulk_exchange(&codes, "LSE"));
+        assert!(!matches_bulk_exchange(&codes, "TO"));
+        assert!(!matches_bulk_exchange(&[], "US"));
     }
 
     #[rstest]

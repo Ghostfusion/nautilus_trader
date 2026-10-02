@@ -28,12 +28,13 @@ NautilusTrader, so it does not require a separate EODHD client library installat
 
 ## Supported endpoints
 
-| EODHD endpoint                     | Nautilus data type | Notes                                            |
-| :--------------------------------- | :----------------- | :----------------------------------------------- |
-| `/eod/{ticker}`                    | `Bar`              | Daily, weekly, and monthly periods.              |
-| `/intraday/{ticker}`               | `Bar`              | One minute, five minute, and one hour intervals. |
-| `/us-quote-delayed`                | `QuoteTick`        | Delayed best bid and offer for US symbols.       |
-| `/exchange-symbol-list/{exchange}` | `Equity`           | Instrument discovery for one exchange.           |
+| EODHD endpoint                     | Nautilus data type | Notes                                                       |
+| :--------------------------------- | :----------------- | :---------------------------------------------------------- |
+| `/eod/{ticker}`                    | `Bar`              | Daily, weekly, and monthly periods.                         |
+| `/intraday/{ticker}`               | `Bar`              | One minute, five minute, and one hour intervals.            |
+| `/us-quote-delayed`                | `QuoteTick`        | Delayed best bid and offer for US symbols.                  |
+| `/exchange-symbol-list/{exchange}` | `Equity`           | Instrument discovery for one exchange.                      |
+| `/eod-bulk-last-day/{exchange}`    | `Bar`              | The latest day for every symbol, when bulk mode is enabled. |
 
 **Notes:**
 
@@ -46,6 +47,9 @@ NautilusTrader, so it does not require a separate EODHD client library installat
   exchange offset and is not used.
 - News, fundamentals, sentiment, macro, and commodities carry no engine semantics in
   NautilusTrader. See the [capability map](#capability-map).
+- `/intraday` is served only on plans that carry the intraday entitlement, and `/eod-bulk-last-day`
+  only on plans that carry the bulk entitlement. Both are absent from some paid end-of-day tiers,
+  where the endpoint returns HTTP 403.
 
 ## Bar intervals
 
@@ -77,6 +81,12 @@ EODHD publishes it. The adapter does not map EODHD exchange codes onto MIC venue
 data client is therefore multi-venue: `DataClient::venue` returns `None`, and each instrument
 carries its own exchange as its venue.
 
+That suffix is the exchange code the symbol list was requested with, which for the 70 entries of
+`/exchanges-list` is also the code EODHD addresses data requests with. It is not the listing venue
+a symbol row reports: a `US` list returns rows whose `Exchange` field names `NYSE`, `NASDAQ`,
+`PINK`, `NMFQS` and a dozen other venues, and EODHD rejects every one of them as a suffix. Request
+`AAPL.US`, not `AAPL.NASDAQ`.
+
 :::warning
 Because the venue is the EODHD exchange code, an instrument loaded here does not share an
 `InstrumentId` with the same listing loaded from an exchange adapter. Keep one source per
@@ -102,18 +112,19 @@ long-running subscription does not re-transfer its history on every poll.
 
 ### Configuration
 
-| Field                | Type   | Default | Description                                                       |
-| :------------------- | :----- | :------ | :---------------------------------------------------------------- |
-| `api_key`            | `str`  | `None`  | The EODHD API token; falls back to `EODHD_API_KEY`.               |
-| `http_base_url`      | `str`  | `None`  | Overrides the REST base URL.                                      |
-| `proxy_url`          | `str`  | `None`  | Optional proxy URL for HTTP requests.                             |
-| `exchange`           | `str`  | `"US"`  | The EODHD exchange whose instruments are loaded on connect.       |
-| `poll_interval_secs` | `int`  | `60`    | How often each subscription polls, in seconds.                    |
-| `backfill_days`      | `int`  | `5`     | How many days of history a bar subscription emits when it starts. |
-| `price_precision`    | `int`  | `2`     | Price precision for instruments, bars, and quotes.                |
-| `currency`           | `str`  | `None`  | Instrument currency code; defaults to `USD`.                      |
-| `timeout_secs`       | `int`  | `None`  | HTTP request timeout; defaults to 30 seconds.                     |
-| `load_instruments`   | `bool` | `True`  | Whether to load the `exchange` instruments on connect.            |
+| Field                | Type        | Default | Description                                                       |
+| :------------------- | :---------- | :------ | :---------------------------------------------------------------- |
+| `api_key`            | `str`       | `None`  | The EODHD API token; falls back to `EODHD_API_KEY`.               |
+| `http_base_url`      | `str`       | `None`  | Overrides the REST base URL.                                      |
+| `proxy_url`          | `str`       | `None`  | Optional proxy URL for HTTP requests.                             |
+| `exchange`           | `str`       | `"US"`  | The EODHD exchange whose instruments are loaded on connect.       |
+| `bulk_exchanges`     | `list[str]` | `[]`    | Exchanges whose daily bars poll through `/eod-bulk-last-day`.     |
+| `poll_interval_secs` | `int`       | `60`    | How often each subscription polls, in seconds.                    |
+| `backfill_days`      | `int`       | `5`     | How many days of history a bar subscription emits when it starts. |
+| `price_precision`    | `int`       | `2`     | Price precision for instruments, bars, and quotes.                |
+| `currency`           | `str`       | `None`  | Instrument currency code; defaults to `USD`.                      |
+| `timeout_secs`       | `int`       | `None`  | HTTP request timeout; defaults to 30 seconds.                     |
+| `load_instruments`   | `bool`      | `True`  | Whether to load the `exchange` instruments on connect.            |
 
 ### Usage
 
@@ -158,6 +169,35 @@ Delayed quotes are emitted only when the quoted prices, sizes, or times change.
 backfill. `subscribe_bars` emits the configured history on its first tick and then polls, which
 warms a running node without a separate request.
 
+### Bulk last-day mode
+
+Polling one request per symbol does not scale to a daily universe. `bulk_exchanges` names the
+exchanges whose daily bars are instead served from `/eod-bulk-last-day`, where a single request
+returns the latest bar for every symbol the exchange lists. A daily subscription on one of those
+exchanges is served by that shared request, so a universe of two hundred symbols costs one request
+per poll rather than two hundred.
+
+```python
+EodhdDataClientConfig(
+    api_key="...",
+    bulk_exchanges=["US"],
+    poll_interval_secs=60,
+)
+```
+
+Subscribing still seeds `backfill_days` of history for the instrument itself, from `/eod`, so a
+strategy sees the same history in either mode. Only the ongoing polls are shared.
+
+- The endpoint has no filter for a subset of symbols, so the whole exchange is transferred and the
+  rows a subscription asked for are selected from it. The `US` list carries about 51,000 rows at
+  roughly 5 MB compressed per poll; enable bulk for an exchange when the universe is large enough
+  to pay for that, and set `poll_interval_secs` with the transfer in mind.
+- Bars for other intervals, and for exchanges not listed, are still polled per symbol.
+- The endpoint also accepts a `date` query for a historical day. The adapter does not use it: for a
+  single instrument, history is cheaper from `/eod`.
+- A cancelled subscription stops contributing, and an exchange with no subscriptions left costs no
+  request at all.
+
 ## Capability map
 
 The endpoints below are part of EODHD's entitlement tiers. The table states what the adapter does
@@ -170,7 +210,7 @@ marketing list.
 | `/intraday/{SYMBOL}`                         | Mapped: `Bar`. Requires the intraday entitlement.                                                                                                                |
 | `/us-quote-delayed`                          | Mapped: `QuoteTick`.                                                                                                                                             |
 | `/exchange-symbol-list/{EXCHANGE}`           | Mapped: `Equity`.                                                                                                                                                |
-| `/eod-bulk-last-day/{EXCHANGE}`              | Not used. One request returns the latest bar per symbol, which is the right shape for a large daily universe; per-symbol polling is used instead.                |
+| `/eod-bulk-last-day/{EXCHANGE}`              | Mapped: `Bar`. Serves every daily subscription on that exchange from one request per poll, when the exchange is named in `bulk_exchanges`.                       |
 | `/div/{SYMBOL}`, `/splits/{SYMBOL}`          | Not mapped. Corporate actions reach the engine through instrument and adjustment models, not through the data client command surface.                            |
 | `/exchanges-list/`                           | Not used. Exchange metadata is descriptive here.                                                                                                                 |
 | `/search/{QUERY}`                            | Not used. Symbol discovery goes through the exchange list.                                                                                                       |
@@ -250,9 +290,14 @@ provider defaults to `US`.
 - Polling is not a push feed. A forming bar is observed at the poll interval, and the newest bar
   may be revised after it has been emitted, which is normal for a vendor that publishes a partially
   complete period.
-- The `/exchange-symbol-list` and `/us-quote-delayed` endpoints require an entitlement beyond the
-  public demo token, which returns HTTP 403 for them. Bar loading works with the demo token for its
-  documented symbol set.
+- Endpoint availability depends on the plan, and the tiers are not nested. The public `demo` token
+  serves `/eod`, `/intraday`, `/div`, `/splits` and `/fundamentals`, while returning HTTP 403 for
+  `/exchange-symbol-list`, `/us-quote-delayed`, `/eod-bulk-last-day`, `/exchanges-list`, `/search`
+  and the `/ust` series. A paid end-of-day plan can be the inverse: measured against one, `/eod`,
+  `/eod-bulk-last-day`, `/exchange-symbol-list`, `/exchanges-list`, `/search`, `/us-quote-delayed`,
+  `/real-time`, `/div`, `/splits`, `/news` and `/sentiments` returned data, while `/intraday`,
+  `/technical`, `/fundamentals` and `/screener` returned HTTP 403 and the WebSocket channels closed
+  with `{"status":403}`. Confirm an endpoint against your own token rather than assuming the tier.
 - EODHD reports most failures as an HTTP 200 with a JSON error body rather than an error status.
   The client checks for that envelope before deserializing, so a rejected request surfaces as an
   error instead of an empty result.
