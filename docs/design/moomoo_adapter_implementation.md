@@ -351,6 +351,22 @@ Behaviour it must implement:
 The release delay is the reason intent and venue state are separate fields rather than one map: the
 venue state can outlive the last release of intent for up to a minute by design.
 
+As implemented, four points needed decisions the outline did not settle.
+
+- **Who performs the release.** The manager owns a task that releases what is due and then waits on
+  the earliest deadline, waking early if the state changes. Nothing else has to be called for a
+  release to happen, so a caller cannot forget one.
+- **A refused release is retried, not forgotten.** The venue can refuse a release for reasons of its
+  own. Dropping the subscription at that point would leave it held at the venue with nothing
+  tracking it, spending an allowance that is scarce, so it is kept and retried after the delay.
+- **Admission only refuses on a known allowance.** Before the first read the manager refuses nothing
+  and lets the venue answer, because a refusal guessed from nothing is worse than an answer. Once
+  the quota is known, a subscription that would exceed it is refused before it is sent.
+- **Batches are split by data type.** The venue's request takes a list of securities and a list of
+  types and applies the product of the two, so a batch carrying different types for different
+  securities is sent as one request per type. Sending the product would subscribe securities to
+  types nobody asked for, and each of those spends allowance.
+
 ## 9. Entitlement gate
 
 Resolved once at start from the entitlement read and stored as a capability record. Read through the
@@ -475,6 +491,14 @@ correctness rule:
 - **The order book is the densest of the three feeds**, and the quote push carries the same 62
   columns as the snapshot, which is a second confirmation that a quote tick cannot be built from it
   (section 13.1).
+
+As implemented, the cached-record rule is applied before mapping rather than after, so a replay can
+never become a tick. It was also confirmed in the field: a live subscription taken outside market
+hours received exactly one ticker push, the cached replay at the previous session's close, and
+produced no trade from it.
+
+The venue states the volume twice, as a whole number and as a value that can carry a fraction, and
+the fraction-bearing one is preferred when it is sent because it loses nothing the first one has.
 
 ## 13. Quotes and the order book
 

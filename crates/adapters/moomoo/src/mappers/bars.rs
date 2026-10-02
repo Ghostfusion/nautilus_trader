@@ -259,44 +259,96 @@ fn nanos(timestamp: Timestamp) -> anyhow::Result<u64> {
     u64::try_from(timestamp.as_nanosecond()).context("the bar timestamp is before the Unix epoch")
 }
 
-/// Converts a K-line's own timestamp into an event time.
+/// Splits a venue timestamp into its whole-second part and its fractional part.
+fn split_fraction(value: &str) -> (&str, &str) {
+    value
+        .split_once('.')
+        .map_or((value, ""), |(seconds, fraction)| (seconds, fraction))
+}
+
+/// Converts a fractional part into nanoseconds.
+fn fraction_nanos(value: &str, fraction: &str) -> anyhow::Result<u64> {
+    if fraction.is_empty() {
+        return Ok(0);
+    }
+
+    if fraction.len() > 9 {
+        bail!("the timestamp {value} is finer than a nanosecond");
+    }
+
+    let digits: u64 = fraction
+        .parse()
+        .with_context(|| format!("cannot read the fractional part of {value}"))?;
+    let scale = 10_u64.pow(9 - u32::try_from(fraction.len()).unwrap_or(9));
+
+    Ok(digits * scale)
+}
+
+/// Converts an exchange wall clock reading into an event time.
+///
+/// The reading is resolved through the market's IANA time zone rather than a fixed offset, because
+/// a fixed offset is wrong for half the year. A fractional part, which the venue adds to a tick but
+/// not to a bar, is placed exactly.
 ///
 /// # Errors
 ///
-/// Returns an error if the value cannot be read as a date or a wall clock time, if it carries a
-/// sub-second part this adapter does not place, if the market's time zone cannot be resolved, or if
-/// the wall clock reading does not exist in that zone.
-pub fn bar_ts_event(value: &str, interval: Interval, market: Market) -> anyhow::Result<UnixNanos> {
-    let (seconds, fraction) = value
-        .split_once('.')
-        .map_or((value, ""), |(seconds, fraction)| (seconds, fraction));
+/// Returns an error if the value cannot be read as a wall clock time, if it is finer than a
+/// nanosecond, if the market's time zone cannot be resolved, or if the reading does not exist in
+/// that zone.
+pub fn intraday_ts_event(value: &str, market: Market) -> anyhow::Result<UnixNanos> {
+    let (seconds, fraction) = split_fraction(value);
 
-    // A bar is aligned to its own interval, so a fractional second would mean the venue changed the
-    // format. Failing is better than placing the bar a fraction early and calling it a duplicate.
-    if fraction.bytes().any(|byte| byte != b'0') {
-        bail!("the bar timestamp {value} carries a sub-second part that cannot be placed");
-    }
+    let datetime = civil::DateTime::strptime("%Y-%m-%d %H:%M:%S", seconds)
+        .with_context(|| format!("cannot read the wall clock time {value}"))?;
+    let zone = TimeZone::get(market.time_zone())
+        .with_context(|| format!("cannot resolve the {market} time zone"))?;
+    let timestamp = zone
+        .to_timestamp(datetime)
+        .with_context(|| format!("{value} is not a valid local time in {market}"))?;
 
-    if interval.is_intraday() {
-        let datetime = civil::DateTime::strptime("%Y-%m-%d %H:%M:%S", seconds)
-            .with_context(|| format!("cannot read the bar timestamp {value}"))?;
-        let zone = TimeZone::get(market.time_zone())
-            .with_context(|| format!("cannot resolve the {market} time zone"))?;
-        let timestamp = zone
-            .to_timestamp(datetime)
-            .with_context(|| format!("{value} is not a valid local time in {market}"))?;
+    let nanos = nanos(timestamp)? + fraction_nanos(value, fraction)?;
 
-        return Ok(UnixNanos::from(nanos(timestamp)?));
+    Ok(UnixNanos::from(nanos))
+}
+
+/// Converts a session date into an event time at UTC midnight.
+///
+/// The reason it is UTC midnight and not local midnight is in the module documentation: it is what
+/// makes this adapter agree with the other provider about the instant of the same daily bar.
+///
+/// # Errors
+///
+/// Returns an error if the value cannot be read as a date, if it carries a time of day, or if it is
+/// before the Unix epoch.
+fn date_ts_event(value: &str) -> anyhow::Result<UnixNanos> {
+    let (seconds, fraction) = split_fraction(value);
+
+    if !fraction.is_empty() {
+        bail!("the session date {value} carries a time of day");
     }
 
     let date = &seconds[..seconds.len().min(10)];
     let date = civil::Date::strptime("%Y-%m-%d", date)
-        .with_context(|| format!("cannot read the bar date {value}"))?;
+        .with_context(|| format!("cannot read the session date {value}"))?;
     let timestamp = Offset::UTC
         .to_timestamp(date.at(0, 0, 0, 0))
-        .with_context(|| format!("cannot place the bar date {value}"))?;
+        .with_context(|| format!("cannot place the session date {value}"))?;
 
     Ok(UnixNanos::from(nanos(timestamp)?))
+}
+
+/// Converts a bar's own timestamp into an event time.
+///
+/// # Errors
+///
+/// Returns an error if the value cannot be read as a date or a wall clock time, if the market's
+/// time zone cannot be resolved, or if the wall clock reading does not exist in that zone.
+pub fn bar_ts_event(value: &str, interval: Interval, market: Market) -> anyhow::Result<UnixNanos> {
+    if interval.is_intraday() {
+        return intraday_ts_event(value, market);
+    }
+
+    date_ts_event(value)
 }
 
 /// Builds one ordered, deduplicated bar series from the rows of one or more pages.
@@ -378,7 +430,8 @@ mod tests {
 
     /// `09:30` in New York on a winter day is `14:30` UTC, and the same wall clock on a summer day
     /// is `13:30` UTC. A fixed offset gets one of the two wrong.
-    const WINTER_OPEN: UnixNanos = UnixNanos::new(1_768_487_400_000_000_000);
+    const WINTER_OPEN_NS: u64 = 1_768_487_400_000_000_000;
+    const WINTER_OPEN: UnixNanos = UnixNanos::new(WINTER_OPEN_NS);
     const SUMMER_OPEN: UnixNanos = UnixNanos::new(1_773_149_400_000_000_000);
     const MIDSUMMER_OPEN: UnixNanos = UnixNanos::new(1_782_912_600_000_000_000);
     const WINTER_MIDNIGHT: UnixNanos = UnixNanos::new(1_768_435_200_000_000_000);
@@ -437,11 +490,26 @@ mod tests {
         );
     }
 
+    /// A tick carries a fractional second where a bar does not, and the fraction is placed exactly
+    /// rather than truncated, because truncating two ticks in the same second would make them
+    /// indistinguishable.
     #[rstest]
-    #[case::fraction("2026-01-15 09:30:00.500")]
+    #[case::none("2026-01-15 09:30:00", 0)]
+    #[case::millis("2026-01-15 09:30:00.554", 554_000_000)]
+    #[case::micros("2026-01-15 09:30:00.000001", 1_000)]
+    #[case::nanos("2026-01-15 09:30:00.000000001", 1)]
+    fn test_intraday_fractions_are_placed(#[case] value: &str, #[case] offset: u64) {
+        assert_eq!(
+            intraday_ts_event(value, Market::Us).unwrap(),
+            UnixNanos::new(WINTER_OPEN_NS + offset)
+        );
+    }
+
+    #[rstest]
     #[case::nonsense("not a time")]
+    #[case::finer_than_a_nanosecond("2026-01-15 09:30:00.0000000001")]
     fn test_unplaceable_timestamps_are_refused(#[case] value: &str) {
-        assert!(bar_ts_event(value, Interval::Minute1, Market::Us).is_err());
+        assert!(intraday_ts_event(value, Market::Us).is_err());
     }
 
     /// The venue's vocabulary is irregular, and an interval it does not offer must be refused

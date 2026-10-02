@@ -22,3 +22,4 @@
 
 pub mod bars;
 pub mod instrument;
+pub mod trades;

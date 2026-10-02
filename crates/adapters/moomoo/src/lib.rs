@@ -50,6 +50,7 @@ pub mod connection;
 pub mod entitlement;
 pub mod mappers;
 pub mod providers;
+pub mod subscription;
 
 /// The generated types for the vendored gateway schema.
 ///

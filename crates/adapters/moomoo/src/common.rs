@@ -28,7 +28,7 @@ use nautilus_model::types::Currency;
 pub const CLIENT_ID: &str = "MOOMOO";
 
 /// A market this adapter serves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Market {
     /// United States equities.
     Us,

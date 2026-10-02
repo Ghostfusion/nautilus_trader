@@ -6523,6 +6523,7 @@ dependencies = [
  "log",
  "nautilus-core",
  "nautilus-model",
+ "parking_lot",
  "prost 0.13.5",
  "prost-build",
  "rstest",
