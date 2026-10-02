@@ -423,3 +423,49 @@ The crate ships a provider that answers from a script, so that what a chain does
 a network, and a trace that names every provider that was asked and why each could not answer. The
 trace is what makes a hop explainable rather than merely visible in the data, and it is the input a
 later step needs to export hop counts.
+
+## 16. As implemented: the composite boundary
+
+Step 2 needs four things settled before any request work, and reading the engine settled them. They
+are recorded here because two of them change what section 4 promised.
+
+**The rewrite is the client identity, and the correlation needs no rewrite at all.** A provider
+answers a request with a `DataResponse` whose `correlation_id` is the *request's* own identifier. The
+composite therefore forwards a request unchanged, and the identifier the engine matches the answer
+by comes back through it untouched. Had the provider minted an identifier of its own, the composite
+would have had to hold a mapping from it to the caller's for the lifetime of every request, which is
+a table to leak and a correlation to get wrong; it does not, because the response is built from the
+request.
+
+**The client identity is normalised rather than left to the provider.** A provider builds the
+response's `client_id` from the request when the request names one and from its own configuration
+when it does not, so whether a forwarded request comes back with the chain's identity depends on the
+provider honouring a field it has no obligation to honour. The composite therefore sets it rather
+than trusting it: what the engine sees is the chain, whoever answered.
+
+**Two providers of the two legs answer a request with data and no response at all.** Neither the
+EODHD client nor the moomoo one sends a `DataResponse` for a bar request, so neither completes a
+request in the engine's own pipeline; the bars arrive as data events and a caller's request is left
+to time out. This is a defect in both request paths rather than a property of the chain, and it is
+recorded here because the composite's hop depends on the same response: a provider that cannot
+answer is only distinguishable from one that has not answered yet if it says so.
+
+**A provider's failure is not visible from its request API.** `DataClient::request_bars` and its
+siblings return whether the command was *sent*; the outcome arrives later on the event channel, and
+a provider that cannot answer reports it there or only in a log. A hop on a request is therefore not
+possible from the request call alone, and the composite has to see what its providers emit.
+
+**The composite can see what its providers emit, without their cooperation.** A provider reads its
+data event sender from the thread it is constructed on, so a composite that replaces that sender
+while it builds its providers receives everything they emit. That is the tap: the providers are
+unchanged, the identity rewrite happens once, at the boundary, and the engine is given a single
+client's worth of events. It also means the composite is the only thing that can decide a request
+has failed, which is what the second finding requires.
+
+**A leg is a factory and a configuration, and neither is serializable.** The engine's own
+configuration path is serde, and a `ClientConfig` is a trait object, so a chain's configuration
+cannot be a serialized struct of legs the way a single provider's configuration is. The chain is
+therefore assembled rather than deserialized, in the same way a node already assembles its clients,
+which is a public API decision rather than a detail: a chain is built by naming its legs in priority
+order, and each leg is the same pair of factory and configuration that a node would register on its
+own.
