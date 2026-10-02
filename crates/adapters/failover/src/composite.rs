@@ -26,10 +26,25 @@
 //! request method from its own loop and that call has to return rather than wait. A chain therefore
 //! moves on when a provider will not take the demand, and it is the *answers* that say whether a
 //! provider served what it took. A provider that takes a demand and then says nothing leaves that
-//! demand unanswered, and the chain learns it for the next demand rather than for the one already
-//! gone.
+//! demand unanswered, and the chain learns it from the boundary rather than from the call - which is
+//! what the health record is for, and why it is read here rather than reported.
+//!
+//! # Stickiness
+//!
+//! A demand starts where the chain last answered, not at the highest-priority provider that is
+//! available. A provider that has just recovered is not immediately trusted with the next demand, and
+//! a chain that moved to a fallback stays there until the fallback fails in turn or until it is
+//! deliberately brought back: moving back the moment the primary answers again would spend a request
+//! on every oscillation and, for a metered provider, quota with it.
 
-use std::{cell::RefCell, fmt::Debug, rc::Rc, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    fmt::Debug,
+    rc::Rc,
+    sync::Arc,
+    time::Instant,
+};
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -54,7 +69,8 @@ use nautilus_model::identifiers::{ClientId, Venue};
 use crate::{
     chain::{Provider, Served, Trace, run},
     failure::Failure,
-    pump::{Answers, Pump},
+    health::{Health, Policy, Snapshot},
+    pump::{Pending, Pump},
 };
 
 /// One request, as a chain hands it from provider to provider.
@@ -149,8 +165,12 @@ impl Leg {
 
 /// A leg whose client has been built, which is what the chain asks.
 struct Built {
+    /// Where this provider stands in the chain's priority order.
+    priority: usize,
     name: ClientId,
     client: Box<dyn DataClient>,
+    health: Arc<Health>,
+    pending: Arc<Pending>,
 }
 
 impl Provider for Built {
@@ -162,6 +182,8 @@ impl Provider for Built {
     }
 
     fn serve(&mut self, demand: &Request) -> Result<Self::Answer, Failure> {
+        self.health.asked(&self.name);
+
         let taken = match demand {
             Request::Instruments(request) => self.client.request_instruments(request.clone()),
             Request::Instrument(request) => self.client.request_instrument(request.clone()),
@@ -169,11 +191,23 @@ impl Provider for Built {
         };
 
         match taken {
-            Ok(()) => Ok(self.name),
+            Ok(()) => {
+                // A provider that has taken a demand owes an answer for it, and the boundary is the
+                // only thing that can notice that it never arrives.
+                let due = Instant::now() + self.health.policy().answer_deadline;
+                self.pending.expect(demand.request_id(), self.name, due);
+
+                Ok(self.name)
+            }
             // A client whose request call fails has not taken the demand: nothing was handed over, so
             // there is nothing on the other end for this provider. That is a gap rather than a
             // transient condition, and a chain moves on rather than asking the same provider again.
-            Err(e) => Err(Failure::Unreachable(e.to_string())),
+            Err(e) => {
+                let failure = Failure::Unreachable(e.to_string());
+                self.health.failed(&self.name, &failure, Instant::now());
+
+                Err(failure)
+            }
         }
     }
 }
@@ -206,6 +240,9 @@ impl Drop for Boundary {
 pub struct CompositeDataClient {
     client_id: ClientId,
     legs: RefCell<Vec<Built>>,
+    /// The provider the chain is currently being served by, when one has served.
+    current: Cell<Option<ClientId>>,
+    health: Arc<Health>,
     pump: Option<Pump>,
 }
 
@@ -223,19 +260,27 @@ impl CompositeDataClient {
     pub fn new(
         client_id: ClientId,
         legs: Vec<Leg>,
+        policy: Policy,
         cache: &CacheView,
         clock: &Rc<RefCell<dyn Clock>>,
     ) -> anyhow::Result<Self> {
         let engine = try_get_data_event_sender()
             .context("a chain must be built where the engine's data event sender is installed")?;
-        let (pump, boundary) = Pump::new(client_id, engine.clone(), Arc::new(Answers::new()));
+        let health = Arc::new(Health::new(policy));
+        let pending = Arc::new(Pending::new());
+        let (pump, boundary) = Pump::new(
+            client_id,
+            engine.clone(),
+            Arc::clone(&pending),
+            Arc::clone(&health),
+        );
 
         let mut built = Vec::with_capacity(legs.len());
 
         {
             let _boundary = Boundary::install(boundary, engine);
 
-            for leg in legs {
+            for (priority, leg) in legs.into_iter().enumerate() {
                 let client = leg.factory.create(
                     leg.name.as_str(),
                     leg.config.as_ref(),
@@ -244,8 +289,11 @@ impl CompositeDataClient {
                 )?;
 
                 built.push(Built {
+                    priority,
                     name: leg.name,
                     client,
+                    health: Arc::clone(&health),
+                    pending: Arc::clone(&pending),
                 });
             }
         }
@@ -253,21 +301,61 @@ impl CompositeDataClient {
         Ok(Self {
             client_id,
             legs: RefCell::new(built),
+            current: Cell::new(None),
+            health,
             pump: Some(pump),
         })
     }
 
+    /// Returns what the chain knows about every provider it has asked.
+    ///
+    /// This is the chain's account of itself: which providers it asked, how often, why they failed,
+    /// how many hops each one caused, and whether it has been set aside. A chain that keeps this to
+    /// itself keeps its outages to itself.
+    #[must_use]
+    pub fn health(&self) -> Vec<Snapshot> {
+        self.health.snapshots()
+    }
+
     /// Passes one demand to the first provider that will take it.
     fn route(&self, request: &Request) -> anyhow::Result<()> {
+        let now = Instant::now();
+        let current = self.current.get();
         let addressed = request.addressed_to(self.client_id);
-        let mut trace = Trace::default();
+        let mut legs = self.legs.borrow_mut();
 
-        match run(
-            self.legs.borrow_mut().as_mut_slice(),
-            &addressed,
-            &mut trace,
-        ) {
+        // A provider that has been set aside is not asked at all. A chain that asked a provider that
+        // has just failed on every demand would not be failing over, it would be waiting.
+        let admissible: HashMap<ClientId, bool> = legs
+            .iter()
+            .map(|leg| (leg.name, self.health.admit(&leg.name, now)))
+            .collect();
+        let asking = admissible.values().filter(|admitted| **admitted).count();
+
+        // The demand starts where the chain last answered, and the rest keep their priority order, so
+        // that a fallback is not displaced by a provider that has merely stopped failing.
+        legs.sort_by_key(|leg| {
+            (
+                !admissible[&leg.name],
+                Some(leg.name) != current,
+                leg.priority,
+            )
+        });
+
+        let mut trace = Trace::default();
+        let served = run(&mut legs[..asking], &addressed, &mut trace);
+
+        // Moving from one provider to a different one is a hop, and it is counted against the one
+        // that was left. An attempt repeated at the same provider is not a hop.
+        for pair in trace.attempts().windows(2) {
+            if pair[0].provider != pair[1].provider {
+                self.health.hopped_from(&pair[0].provider);
+            }
+        }
+
+        match served {
             Served::Answered(provider) => {
+                self.current.set(Some(provider));
                 log::debug!("{provider} took the demand");
 
                 Ok(())
@@ -297,6 +385,7 @@ impl Debug for CompositeDataClient {
         f.debug_struct(stringify!(CompositeDataClient))
             .field("client_id", &self.client_id)
             .field("providers", &providers)
+            .field("current", &self.current)
             .finish_non_exhaustive()
     }
 }
@@ -414,6 +503,7 @@ impl DataClient for CompositeDataClient {
 pub struct CompositeDataClientFactory {
     name: String,
     legs: RefCell<Vec<Leg>>,
+    policy: Policy,
 }
 
 impl CompositeDataClientFactory {
@@ -423,7 +513,16 @@ impl CompositeDataClientFactory {
         Self {
             name: name.to_string(),
             legs: RefCell::new(legs),
+            policy: Policy::default(),
         }
+    }
+
+    /// Returns this factory building a chain that sets its providers aside by `policy`.
+    #[must_use]
+    pub fn with_policy(mut self, policy: Policy) -> Self {
+        self.policy = policy;
+
+        self
     }
 }
 
@@ -447,7 +546,8 @@ impl DataClientFactory for CompositeDataClientFactory {
 
         anyhow::ensure!(!legs.is_empty(), "the chain has already been built");
 
-        let client = CompositeDataClient::new(ClientId::from(name), legs, &cache, &clock)?;
+        let client =
+            CompositeDataClient::new(ClientId::from(name), legs, self.policy, &cache, &clock)?;
 
         Ok(Box::new(client))
     }
@@ -464,7 +564,7 @@ impl DataClientFactory for CompositeDataClientFactory {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::time::{Duration, Instant as StdInstant};
 
     use nautilus_common::{
         cache::Cache,
@@ -488,6 +588,10 @@ mod tests {
 
     fn chain_id() -> ClientId {
         ClientId::from(CHAIN)
+    }
+
+    fn id(name: &str) -> ClientId {
+        ClientId::from(name)
     }
 
     fn bar_type() -> BarType {
@@ -547,18 +651,29 @@ mod tests {
         FakeDataClientFactory::new(name).marked(Price::from(mark))
     }
 
-    /// Returns the two legs of a chain whose engine events go to `events`.
-    fn chain(legs: Vec<Leg>) -> CompositeDataClient {
+    fn chain_with(policy: Policy, legs: Vec<Leg>) -> CompositeDataClient {
         let cache = CacheView::new(Rc::new(RefCell::new(Cache::default())));
         let clock: Rc<RefCell<dyn Clock>> = Rc::new(RefCell::new(VirtualClock::new()));
 
-        CompositeDataClient::new(chain_id(), legs, &cache, &clock)
+        CompositeDataClient::new(chain_id(), legs, policy, &cache, &clock)
             .expect("the chain should be built where the test installed a data event sender")
+    }
+
+    fn chain(legs: Vec<Leg>) -> CompositeDataClient {
+        chain_with(Policy::default(), legs)
+    }
+
+    /// Returns the engine's data event sender installed on this thread, replaced with a test channel.
+    fn install_engine() -> tokio::sync::mpsc::UnboundedReceiver<DataEvent> {
+        let (sender, events) = tokio::sync::mpsc::unbounded_channel();
+        replace_data_event_sender(EventSender::from(sender));
+
+        events
     }
 
     /// Waits for the engine's next event, or fails the test rather than hanging the suite.
     fn next_event(events: &mut tokio::sync::mpsc::UnboundedReceiver<DataEvent>) -> DataEvent {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = StdInstant::now() + Duration::from_secs(5);
 
         loop {
             if let Ok(event) = events.try_recv() {
@@ -566,7 +681,7 @@ mod tests {
             }
 
             assert!(
-                Instant::now() < deadline,
+                StdInstant::now() < deadline,
                 "the engine was not given an answer"
             );
 
@@ -574,12 +689,33 @@ mod tests {
         }
     }
 
-    /// The engine's data event sender on this thread, replaced with a test's channel.
-    fn install_engine() -> tokio::sync::mpsc::UnboundedReceiver<DataEvent> {
-        let (sender, events) = tokio::sync::mpsc::unbounded_channel();
-        replace_data_event_sender(EventSender::from(sender));
+    /// Returns one provider's account of itself.
+    fn snapshot(client: &CompositeDataClient, name: &str) -> Snapshot {
+        client
+            .health()
+            .into_iter()
+            .find(|snapshot| snapshot.provider == id(name))
+            .expect("the provider should have been asked")
+    }
 
-        events
+    /// Waits for a provider to be set aside, or fails the test rather than hanging the suite.
+    fn await_set_aside(client: &CompositeDataClient, name: &str) -> Snapshot {
+        let deadline = StdInstant::now() + Duration::from_secs(5);
+
+        loop {
+            let snapshot = snapshot(client, name);
+
+            if snapshot.is_open {
+                return snapshot;
+            }
+
+            assert!(
+                StdInstant::now() < deadline,
+                "the provider was not held to account for an answer that never came"
+            );
+
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 
     #[rstest]
@@ -751,5 +887,157 @@ mod tests {
         };
 
         assert_eq!(delivered.client_id, ClientId::from("PRIMARY"));
+    }
+
+    /// The exit of this step: an outage costs one hop and one request, not one per demand, and the
+    /// chain can say what happened and why.
+    #[rstest]
+    fn test_a_provider_that_will_not_take_a_demand_is_not_asked_again() {
+        let mut events = install_engine();
+        let primary = FakeDataClientFactory::new("PRIMARY").refusing();
+        let secondary = provider("SECONDARY", "200.00");
+        let mut chain = chain(vec![leg(&primary), leg(&secondary)]);
+
+        chain.start().unwrap();
+
+        let first = bars_request();
+        chain.request_bars(first.clone()).unwrap();
+
+        let DataEvent::Response(DataResponse::Bars(answer)) = next_event(&mut events) else {
+            panic!("expected a bar response");
+        };
+
+        assert_eq!(answer.correlation_id, first.request_id);
+        assert_eq!(answer.data[0].close, Price::from("200.00"));
+
+        let second = bars_request();
+        chain.request_bars(second.clone()).unwrap();
+
+        let DataEvent::Response(DataResponse::Bars(answer)) = next_event(&mut events) else {
+            panic!("expected a bar response");
+        };
+
+        assert_eq!(answer.correlation_id, second.request_id);
+        assert_eq!(answer.data[0].close, Price::from("200.00"));
+        assert_eq!(
+            primary.asked().len(),
+            1,
+            "the provider that failed was asked once, not once per demand"
+        );
+        assert_eq!(secondary.asked().len(), 2);
+
+        let snapshot = snapshot(&chain, "PRIMARY");
+
+        assert!(snapshot.is_open);
+        assert_eq!(snapshot.attempts, 1);
+        assert_eq!(snapshot.failures, 1);
+        assert_eq!(snapshot.hops, 1, "the chain moved away from it once");
+        assert!(
+            matches!(snapshot.last_failure, Some(Failure::Unreachable(_))),
+            "the reason is kept, was {:?}",
+            snapshot.last_failure
+        );
+    }
+
+    /// A demand stays where it was served. The cooldown here is nothing at all, so the primary is
+    /// available for the second demand and would be asked by a chain that only followed priority.
+    #[rstest]
+    fn test_a_demand_stays_with_the_provider_that_served_it() {
+        let mut events = install_engine();
+        let policy = Policy {
+            cooldown: Duration::ZERO,
+            ..Policy::default()
+        };
+        let primary = FakeDataClientFactory::new("PRIMARY").refusing();
+        let secondary = provider("SECONDARY", "200.00");
+        let mut chain = chain_with(policy, vec![leg(&primary), leg(&secondary)]);
+
+        chain.start().unwrap();
+
+        chain.request_bars(bars_request()).unwrap();
+        let DataEvent::Response(DataResponse::Bars(answer)) = next_event(&mut events) else {
+            panic!("expected a bar response");
+        };
+        assert_eq!(answer.data[0].close, Price::from("200.00"));
+
+        let second = bars_request();
+        chain.request_bars(second.clone()).unwrap();
+
+        let DataEvent::Response(DataResponse::Bars(answer)) = next_event(&mut events) else {
+            panic!("expected a bar response");
+        };
+
+        assert_eq!(answer.correlation_id, second.request_id);
+        assert_eq!(answer.data[0].close, Price::from("200.00"));
+        assert_eq!(
+            primary.asked().len(),
+            1,
+            "the chain did not go back to the primary the moment it could be asked"
+        );
+    }
+
+    /// The failure a chain cannot see when it asks: a provider that takes the demand and says nothing.
+    /// The boundary holds it to account, and the next demand does not go there.
+    #[rstest]
+    fn test_a_provider_that_never_answers_is_held_to_it() {
+        let mut events = install_engine();
+        let policy = Policy {
+            answer_deadline: Duration::from_millis(50),
+            ..Policy::default()
+        };
+        let silent = FakeDataClientFactory::new("PRIMARY").silent();
+        let secondary = provider("SECONDARY", "200.00");
+        let mut chain = chain_with(policy, vec![leg(&silent), leg(&secondary)]);
+
+        chain.start().unwrap();
+
+        chain.request_bars(bars_request()).unwrap();
+        assert!(
+            silent.asked().len() == 1,
+            "the silent provider took the demand"
+        );
+
+        let snapshot = await_set_aside(&chain, "PRIMARY");
+
+        assert_eq!(snapshot.last_failure, Some(Failure::Unanswered));
+        assert_eq!(snapshot.answers, 0);
+
+        let second = bars_request();
+        chain.request_bars(second.clone()).unwrap();
+
+        let DataEvent::Response(DataResponse::Bars(answer)) = next_event(&mut events) else {
+            panic!("expected a bar response");
+        };
+
+        assert_eq!(answer.correlation_id, second.request_id);
+        assert_eq!(answer.data[0].close, Price::from("200.00"));
+        assert_eq!(
+            silent.asked().len(),
+            1,
+            "a provider that did not answer is not asked again for the next demand"
+        );
+    }
+
+    /// The counts are the chain's account of itself, so a provider nobody asked is not in them.
+    #[rstest]
+    fn test_the_health_reports_only_the_providers_that_were_asked() {
+        let mut events = install_engine();
+        let primary = provider("PRIMARY", "100.00");
+        let secondary = provider("SECONDARY", "200.00");
+        let mut chain = chain(vec![leg(&primary), leg(&secondary)]);
+
+        chain.start().unwrap();
+
+        assert!(chain.health().is_empty());
+
+        chain.request_bars(bars_request()).unwrap();
+        next_event(&mut events);
+
+        let health = chain.health();
+
+        assert_eq!(health.len(), 1, "the secondary was never asked");
+        assert_eq!(health[0].provider, id("PRIMARY"));
+        assert_eq!(health[0].attempts, 1);
+        assert_eq!(health[0].answers, 1);
     }
 }

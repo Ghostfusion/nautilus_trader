@@ -159,6 +159,7 @@ pub struct FakeDataClient {
     sender: EventSender<DataEvent>,
     mark: Price,
     refuses: bool,
+    silent: bool,
     connected: bool,
     asked: Rc<RefCell<Vec<FakeDemand>>>,
 }
@@ -175,6 +176,7 @@ impl FakeDataClient {
         id: ClientId,
         mark: Price,
         refuses: bool,
+        silent: bool,
         asked: Rc<RefCell<Vec<FakeDemand>>>,
     ) -> anyhow::Result<Self> {
         let sender = try_get_data_event_sender()
@@ -185,9 +187,31 @@ impl FakeDataClient {
             sender,
             mark,
             refuses,
+            silent,
             connected: true,
             asked,
         })
+    }
+
+    /// Returns whether this client has a transport to send the request on.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the client refuses, which is what a client with nowhere to send says.
+    fn has_transport(&self) -> anyhow::Result<()> {
+        if self.refuses {
+            anyhow::bail!("the client has no transport to send the request on");
+        }
+
+        Ok(())
+    }
+
+    /// Returns whether this client takes the request and never answers it.
+    ///
+    /// A client that is up with nothing behind it takes the demand and says nothing, which is the
+    /// failure a chain can only see on the event channel.
+    fn is_silent(&self) -> bool {
+        self.silent
     }
 
     /// Writes an answer, as a client does when its provider has answered it.
@@ -266,8 +290,10 @@ impl DataClient for FakeDataClient {
             .borrow_mut()
             .push(FakeDemand::Instruments(request.clone()));
 
-        if self.refuses {
-            anyhow::bail!("the client has no transport to send the request on");
+        self.has_transport()?;
+
+        if self.is_silent() {
+            return Ok(());
         }
 
         let instrument = fake_equity(InstrumentId::from("AAPL.US"));
@@ -289,8 +315,10 @@ impl DataClient for FakeDataClient {
             .borrow_mut()
             .push(FakeDemand::Instrument(request.clone()));
 
-        if self.refuses {
-            anyhow::bail!("the client has no transport to send the request on");
+        self.has_transport()?;
+
+        if self.is_silent() {
+            return Ok(());
         }
 
         self.write(DataResponse::Instrument(Box::new(InstrumentResponse::new(
@@ -310,8 +338,10 @@ impl DataClient for FakeDataClient {
             .borrow_mut()
             .push(FakeDemand::Bars(request.clone()));
 
-        if self.refuses {
-            anyhow::bail!("the client has no transport to send the request on");
+        self.has_transport()?;
+
+        if self.is_silent() {
+            return Ok(());
         }
 
         self.write(DataResponse::Bars(BarsResponse::new(
@@ -336,6 +366,7 @@ pub struct FakeDataClientFactory {
     name: String,
     mark: Price,
     refuses: bool,
+    silent: bool,
     asked: Rc<RefCell<Vec<FakeDemand>>>,
 }
 
@@ -347,6 +378,7 @@ impl FakeDataClientFactory {
             name: name.to_string(),
             mark: Price::from("100.00"),
             refuses: false,
+            silent: false,
             asked: Rc::new(RefCell::new(Vec::new())),
         }
     }
@@ -372,6 +404,15 @@ impl FakeDataClientFactory {
 
         self
     }
+
+    /// Returns this factory with its clients taking every request and answering none of them, as a
+    /// provider that is up and not serving does.
+    #[must_use]
+    pub fn silent(mut self) -> Self {
+        self.silent = true;
+
+        self
+    }
 }
 
 impl DataClientFactory for FakeDataClientFactory {
@@ -383,7 +424,13 @@ impl DataClientFactory for FakeDataClientFactory {
         _clock: Rc<RefCell<dyn Clock>>,
     ) -> anyhow::Result<Box<dyn DataClient>> {
         let id = ClientId::from(name);
-        let client = FakeDataClient::new(id, self.mark, self.refuses, Rc::clone(&self.asked))?;
+        let client = FakeDataClient::new(
+            id,
+            self.mark,
+            self.refuses,
+            self.silent,
+            Rc::clone(&self.asked),
+        )?;
 
         Ok(Box::new(client))
     }

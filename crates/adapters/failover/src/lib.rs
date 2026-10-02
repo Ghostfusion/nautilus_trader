@@ -56,6 +56,7 @@
 pub mod chain;
 pub mod composite;
 pub mod failure;
+pub mod health;
 pub mod pump;
 pub mod tap;
 pub mod testing;

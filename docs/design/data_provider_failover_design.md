@@ -509,3 +509,28 @@ therefore assembled rather than deserialized, in the same way a node already ass
 which is a public API decision rather than a detail: a chain is built by naming its legs in priority
 order, and each leg is the same pair of factory and configuration that a node would register on its
 own.
+
+## 17. As implemented: health, and what a chain does after a hop
+
+**A demand being answered is the only proof that a provider served it.** A deadline is what turns that
+around: a demand that a provider took and did not answer within its deadline is a provider that did
+not serve, and the boundary is the only place that can notice. It is held against the provider that
+took the demand, so the *next* demand does not go there. The demand already lost stays lost: the
+chain cannot re-ask a provider from its own accounts, because it is not the thread that owns the
+client, and pretending otherwise would be pretending a request had never been made.
+
+**Stickiness is the ordering rather than a flag.** A demand starts where the chain last answered, and
+the priority order fills in behind it. A provider that has recovered is therefore not asked again the
+moment it is willing: it is asked when the provider that replaced it fails, or when the chain is
+deliberately brought back. Fail-back is a decision rather than a side effect of recovery, which is what
+section 14.3 asks for, and it is also what keeps a metered fallback from oscillating.
+
+**The retry budget is not reachable from a live request.** A retry is for a transient failure, and the
+only failures a live request can see are the ones a provider reports when it is asked, which are gaps
+rather than transients. The budget remains as policy for a caller that drives the chain itself and so
+owns its providers' failures; from the composite, a failure is a hop or it is nothing.
+
+**What the chain knows about itself is part of its interface.** Every provider's attempts, failures,
+answers and hops are kept, together with why it last failed and whether it has been set aside. A chain
+that kept its hops to itself would be a system whose outages are invisible precisely because it
+survived them.

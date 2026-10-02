@@ -15,93 +15,119 @@
 
 //! The engine side of a chain's boundary.
 //!
-//! A provider answers a request by writing an event, and the engine matches that answer to the
-//! request by the correlation identifier the caller gave it. A chain watches the same stream for a
-//! different reason: a provider's own call reports only that the command was accepted, so whether a
-//! provider actually served a demand is visible nowhere else. This is where a chain's events leave
-//! for the engine, under the chain's identity, and where what answers a demand is decided.
+//! The pump has two halves and they belong together: the sender a chain's providers are built with,
+//! and the task that drains what they write. What it drains it forwards to the engine under the
+//! chain's identity, and it reads on the way past.
 //!
-//! # Why the register is part of the boundary
+//! # What it reads, and why that is the only place it can be read
 //!
-//! The answer to "did this provider serve the demand" is a response carrying the caller's
-//! correlation identifier, and nothing else. A chain that hopped because it could not see an answer
-//! would be guessing; one that hopped because it saw the provider refuse has a reason it can report.
-//! The register is what turns the second case out of the first.
+//! A response answers a request, and the only thing that ties the two together is the correlation
+//! identifier the caller gave. A chain keeps the demands it has issued until they are answered,
+//! because the one failure a provider cannot report *when it is asked* is that it took the demand and
+//! then said nothing - and a provider that is down is exactly the provider that does that. So an
+//! answer says which provider served, and a deadline passing with nothing in a demand's place says
+//! which provider did not, and neither of those is visible from the demand itself.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use nautilus_common::{live::sender::EventSender, messages::DataEvent};
 use nautilus_core::UUID4;
 use nautilus_model::identifiers::ClientId;
 use parking_lot::Mutex;
 
-use crate::tap::Tap;
+use crate::{failure::Failure, health::Health, tap::Tap};
 
-/// The demands a chain is waiting on, by the identifier the caller gave them.
-///
-/// A forgotten demand is not woken. An answer that arrives after its deadline has passed is a late
-/// answer, and it must not be counted as serving a demand made later, so the record of the demand is
-/// removed when the chain stops waiting for it rather than when an answer does or does not arrive.
-#[derive(Debug, Default)]
-pub struct Answers {
-    waiting: Mutex<HashMap<UUID4, tokio::sync::oneshot::Sender<()>>>,
+/// A demand that has been issued and not yet answered.
+#[derive(Debug, Clone)]
+struct Expected {
+    provider: ClientId,
+    due: Instant,
 }
 
-impl Answers {
+/// The demands a chain has issued and not yet seen answered.
+///
+/// This is keyed by the caller's correlation identifier, because that is what the answer carries. A
+/// demand is removed when it is answered or when its deadline passes, never by being replaced: a late
+/// answer to a demand that has already been given up on must not be counted as serving a later one.
+#[derive(Debug, Default)]
+pub struct Pending {
+    demands: Mutex<std::collections::HashMap<UUID4, Expected>>,
+}
+
+impl Pending {
     /// Creates an empty register.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Returns a receiver that is woken when the demand identified by `correlation_id` is answered.
-    ///
-    /// A second demand for the same identifier replaces the first. Identifiers are the caller's to
-    /// mint, and an engine matches one answer to one running demand, so two of them at once is a
-    /// caller's error rather than a state the chain can serve both of.
-    pub fn wait_for(&self, correlation_id: UUID4) -> tokio::sync::oneshot::Receiver<()> {
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.waiting.lock().insert(correlation_id, sender);
-
-        receiver
+    /// Notes that `provider` has taken a demand, and has until `due` to answer it.
+    pub fn expect(&self, request_id: UUID4, provider: ClientId, due: Instant) {
+        self.demands
+            .lock()
+            .insert(request_id, Expected { provider, due });
     }
 
-    /// Stops waiting for `correlation_id`, whether or not an answer has arrived.
-    pub fn forget(&self, correlation_id: UUID4) {
-        self.waiting.lock().remove(&correlation_id);
+    /// Stops expecting anything for `request_id`.
+    pub fn forget(&self, request_id: UUID4) {
+        self.demands.lock().remove(&request_id);
     }
 
-    /// Notes that `event` answers a demand, and reports whether one was waiting for it.
-    ///
-    /// A demand stops waiting either by being forgotten or by giving up what it waits on, and
-    /// neither of those is an answer.
+    /// Notes that `event` answers a demand, and returns the provider that was expected to answer it.
     ///
     /// Market data answers nothing: it carries no identifier, and it is not what a request is
     /// matched to.
     #[must_use]
-    pub fn resolve(&self, event: &DataEvent) -> bool {
+    pub fn resolve(&self, event: &DataEvent) -> Option<ClientId> {
         let DataEvent::Response(response) = event else {
-            return false;
+            return None;
         };
 
-        match self.waiting.lock().remove(response.correlation_id()) {
-            Some(sender) => sender.send(()).is_ok(),
-            None => false,
-        }
+        self.demands
+            .lock()
+            .remove(response.correlation_id())
+            .map(|expected| expected.provider)
+    }
+
+    /// Returns the demands whose deadline has passed, and forgets them.
+    #[must_use]
+    pub fn expire(&self, now: Instant) -> Vec<(UUID4, ClientId)> {
+        let mut demands = self.demands.lock();
+
+        demands
+            .extract_if(|_, expected| now >= expected.due)
+            .map(|(request_id, expected)| (request_id, expected.provider))
+            .collect()
+    }
+
+    /// Returns how many demands are outstanding.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.demands.lock().len()
+    }
+
+    /// Returns whether no demand is outstanding.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
-/// Carries a chain's events to the engine, under the chain's identity.
+/// Carries a chain's events to the engine, under the chain's identity, and holds its providers to
+/// account for what they were asked.
 ///
-/// The pump does not write: the providers do, because each captures the sender it is given when it
-/// is constructed. That gives the pump two halves, and they belong together - the sender, which a
-/// chain installs only while it is building its providers, and the task, which runs for as long as
-/// they can still write. A provider built while the engine's own sender is installed writes past the
-/// chain entirely, so the two halves are created together and returned together.
+/// The pump does not write: the providers do, because each captures the sender it is given when it is
+/// constructed. That gives the pump two halves, and they belong together - the sender, which a chain
+/// installs only while it is building its providers, and the task, which runs for as long as they can
+/// still write and reads what they answer for the whole of that time.
 #[derive(Debug)]
 pub struct Pump {
     tap: Tap,
-    answers: Arc<Answers>,
+    pending: Arc<Pending>,
+    health: Arc<Health>,
     events: tokio::sync::mpsc::UnboundedReceiver<DataEvent>,
 }
 
@@ -111,7 +137,8 @@ impl Pump {
     pub fn new(
         client_id: ClientId,
         engine: EventSender<DataEvent>,
-        answers: Arc<Answers>,
+        pending: Arc<Pending>,
+        health: Arc<Health>,
     ) -> (Self, EventSender<DataEvent>) {
         let (sender, events) = tokio::sync::mpsc::unbounded_channel();
         let tap = Tap::new(client_id, engine);
@@ -119,7 +146,8 @@ impl Pump {
         (
             Self {
                 tap,
-                answers,
+                pending,
+                health,
                 events,
             },
             EventSender::from(sender),
@@ -132,15 +160,41 @@ impl Pump {
     /// the events could be for, and a chain that is being torn down should not keep writing into a
     /// channel nobody reads.
     pub async fn run(mut self) {
-        while let Some(event) = self.events.recv().await {
-            if self.answers.resolve(&event) {
-                log::debug!("an answer reached the demand waiting for it");
-            }
+        // The deadline is checked several times within itself, so that a demand is given what it was
+        // promised within a fraction of it rather than up to twice it.
+        let tick = (self.health.policy().answer_deadline / 4).max(Duration::from_millis(10));
+        let mut ticker = tokio::time::interval(tick);
 
-            if !self.tap.forward(event) {
-                log::warn!("stopping the chain's boundary: the engine can no longer receive");
+        loop {
+            tokio::select! {
+                event = self.events.recv() => {
+                    let Some(event) = event else {
+                        return;
+                    };
 
-                return;
+                    if let Some(provider) = self.pending.resolve(&event) {
+                        log::debug!("{provider} answered a demand");
+                        self.health.answered(&provider);
+                    }
+
+                    if !self.tap.forward(event) {
+                        log::warn!("stopping the chain's boundary: the engine can no longer receive");
+
+                        return;
+                    }
+                }
+                _ = ticker.tick() => {
+                    let now = Instant::now();
+
+                    for (request_id, provider) in self.pending.expire(now) {
+                        log::warn!(
+                            "{provider} took a demand and did not answer it: {request_id} is \
+                             unanswered"
+                        );
+
+                        self.health.failed(&provider, &Failure::Unanswered, now);
+                    }
+                }
             }
         }
     }
@@ -161,12 +215,25 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::health::Policy;
 
     const CHAIN: &str = "CHAIN";
     const PROVIDER: &str = "MOOMOO";
 
     fn chain_id() -> ClientId {
         ClientId::from(CHAIN)
+    }
+
+    fn provider() -> ClientId {
+        ClientId::from(PROVIDER)
+    }
+
+    fn health() -> Arc<Health> {
+        Arc::new(Health::new(Policy {
+            failure_threshold: 1,
+            cooldown: Duration::from_secs(60),
+            answer_deadline: Duration::from_millis(500),
+        }))
     }
 
     fn bar_type() -> BarType {
@@ -181,7 +248,7 @@ mod tests {
     fn answer(correlation_id: UUID4) -> DataEvent {
         DataEvent::Response(DataResponse::Bars(BarsResponse::new(
             correlation_id,
-            ClientId::from(PROVIDER),
+            provider(),
             bar_type(),
             Vec::new(),
             None,
@@ -196,50 +263,67 @@ mod tests {
     }
 
     #[rstest]
-    fn test_a_waiting_demand_is_woken_by_its_answer() {
-        let answers = Answers::new();
-        let correlation_id = UUID4::new();
-        let mut waiting = answers.wait_for(correlation_id);
+    fn test_an_answer_names_the_provider_the_demand_was_given_to() {
+        let pending = Pending::new();
+        let request_id = UUID4::new();
+        let due = Instant::now() + Duration::from_secs(30);
 
-        assert!(answers.resolve(&answer(correlation_id)));
-        assert!(waiting.try_recv().is_ok());
+        pending.expect(request_id, provider(), due);
+
+        assert_eq!(pending.resolve(&answer(request_id)), Some(provider()));
+        assert!(pending.is_empty());
     }
 
     #[rstest]
-    fn test_an_answer_nobody_is_waiting_for_wakes_nobody() {
-        let answers = Answers::new();
+    fn test_an_answer_to_nothing_is_not_an_answer() {
+        let pending = Pending::new();
 
-        assert!(!answers.resolve(&answer(UUID4::new())));
+        assert_eq!(pending.resolve(&answer(UUID4::new())), None);
+        assert_eq!(pending.resolve(&market_data()), None);
     }
 
-    /// The late answer to a demand that has already given up.
+    /// The late answer to a demand that has already been given up on.
     #[rstest]
-    fn test_a_forgotten_demand_is_not_woken() {
-        let answers = Answers::new();
-        let correlation_id = UUID4::new();
-        let mut waiting = answers.wait_for(correlation_id);
+    fn test_a_forgotten_demand_is_not_answered() {
+        let pending = Pending::new();
+        let request_id = UUID4::new();
 
-        answers.forget(correlation_id);
+        pending.expect(
+            request_id,
+            provider(),
+            Instant::now() + Duration::from_secs(30),
+        );
+        pending.forget(request_id);
 
-        assert!(!answers.resolve(&answer(correlation_id)));
-        assert!(waiting.try_recv().is_err());
-    }
-
-    #[rstest]
-    fn test_a_demand_is_woken_once_even_if_an_answer_arrives_twice() {
-        let answers = Answers::new();
-        let correlation_id = UUID4::new();
-        let _waiting = answers.wait_for(correlation_id);
-
-        assert!(answers.resolve(&answer(correlation_id)));
-        assert!(!answers.resolve(&answer(correlation_id)));
+        assert_eq!(pending.resolve(&answer(request_id)), None);
     }
 
     #[rstest]
-    fn test_market_data_answers_nothing() {
-        let answers = Answers::new();
+    fn test_a_demand_is_expired_only_once_its_deadline_has_passed() {
+        let pending = Pending::new();
+        let request_id = UUID4::new();
+        let now = Instant::now();
+        let due = now + Duration::from_secs(30);
 
-        assert!(!answers.resolve(&market_data()));
+        pending.expect(request_id, provider(), due);
+
+        assert!(pending.expire(now).is_empty());
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending.expire(due), vec![(request_id, provider())]);
+        assert!(pending.is_empty(), "an expired demand is given up on");
+    }
+
+    /// A demand is answered or given up on, never both.
+    #[rstest]
+    fn test_an_answered_demand_cannot_also_expire() {
+        let pending = Pending::new();
+        let request_id = UUID4::new();
+        let due = Instant::now();
+
+        pending.expect(request_id, provider(), due);
+
+        assert_eq!(pending.resolve(&answer(request_id)), Some(provider()));
+        assert!(pending.expire(due).is_empty());
     }
 
     #[tokio::test]
@@ -248,7 +332,8 @@ mod tests {
         let (pump, providers) = Pump::new(
             chain_id(),
             EventSender::from(engine),
-            Arc::new(Answers::new()),
+            Arc::new(Pending::new()),
+            health(),
         );
 
         providers.send(answer(UUID4::new())).unwrap();
@@ -267,20 +352,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_the_pump_wakes_the_demand_its_answer_belongs_to() {
+    async fn test_the_pump_holds_a_provider_to_account_for_an_answer_it_gave() {
         let (engine, _engine_events) = tokio::sync::mpsc::unbounded_channel();
-        let answers = Arc::new(Answers::new());
-        let (pump, providers) = Pump::new(chain_id(), EventSender::from(engine), answers.clone());
+        let health = health();
+        let pending = Arc::new(Pending::new());
+        let (pump, providers) = Pump::new(
+            chain_id(),
+            EventSender::from(engine),
+            Arc::clone(&pending),
+            Arc::clone(&health),
+        );
 
-        let correlation_id = UUID4::new();
-        let mut waiting = answers.wait_for(correlation_id);
+        health.failed(&provider(), &Failure::Unanswered, Instant::now());
+        assert!(health.snapshot(&provider()).is_open);
 
-        providers.send(answer(correlation_id)).unwrap();
+        let request_id = UUID4::new();
+        health.asked(&provider());
+        pending.expect(
+            request_id,
+            provider(),
+            Instant::now() + Duration::from_secs(30),
+        );
+
+        providers.send(answer(request_id)).unwrap();
         drop(providers);
 
         pump.run().await;
 
-        assert!(waiting.try_recv().is_ok());
+        assert!(
+            !health.snapshot(&provider()).is_open,
+            "an answer clears the failures"
+        );
+        assert_eq!(health.snapshot(&provider()).answers, 1);
+    }
+
+    /// The failure a chain cannot see when it asks: a provider that took the demand and said nothing.
+    #[tokio::test]
+    async fn test_the_pump_holds_a_provider_to_account_for_a_demand_it_never_answered() {
+        let (engine, _engine_events) = tokio::sync::mpsc::unbounded_channel();
+        let health = Arc::new(Health::new(Policy {
+            failure_threshold: 1,
+            cooldown: Duration::from_secs(60),
+            answer_deadline: Duration::from_millis(20),
+        }));
+        let pending = Arc::new(Pending::new());
+        let (pump, _providers) = Pump::new(
+            chain_id(),
+            EventSender::from(engine),
+            Arc::clone(&pending),
+            Arc::clone(&health),
+        );
+        let pump = tokio::spawn(pump.run());
+
+        pending.expect(
+            UUID4::new(),
+            provider(),
+            Instant::now() + Duration::from_millis(20),
+        );
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let snapshot = health.snapshot(&provider());
+
+        assert!(snapshot.is_open, "the demand went unanswered");
+        assert_eq!(snapshot.last_failure, Some(Failure::Unanswered));
+
+        pump.abort();
     }
 
     /// A chain being torn down writes into a channel nobody reads, and must not keep writing.
@@ -292,7 +429,8 @@ mod tests {
         let (pump, providers) = Pump::new(
             chain_id(),
             EventSender::from(engine),
-            Arc::new(Answers::new()),
+            Arc::new(Pending::new()),
+            health(),
         );
 
         providers.send(market_data()).unwrap();

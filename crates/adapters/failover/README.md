@@ -30,6 +30,8 @@ event-driven architecture, providing research-to-live semantic parity.
   the chain's and the caller's correlation identifier is left alone.
 - `pump`: the sender a chain gives its providers and the task that drains it, together with the
   register of which demand each answer answers.
+- `health`: what the chain knows about its providers, when one of them has stopped being worth
+  asking, and the counts that make an outage visible rather than merely survived.
 - `composite`: the data client the engine sees, which serves a demand from the first provider that
   will take it, and is assembled from legs rather than configured.
 - `testing`: providers and clients whose answers are written down in advance, so that a chain can be
