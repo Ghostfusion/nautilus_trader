@@ -260,11 +260,32 @@ marketing list.
 | `/commodities/historical/{CODE}`             | Not mapped. No data client command reaches a commodity series.                                                                                                   |
 | `/ust/...` rates                             | Not mapped. Yield series are not tradeable instruments here.                                                                                                     |
 
-Real-time WebSocket channels (`wss://ws.eodhistoricaldata.com/ws/us` for trades,
-`/ws/us-quote` for quotes, `/ws/us-status` and `/ws/eu-status` for status) are the correct path for
-undelayed tick data. They require a streaming entitlement on the top tier plans and are **not
-implemented** here: without an entitlement they cannot be verified, and the polling client above
-covers bar and delayed quote streaming on the lower tiers.
+## WebSocket channels
+
+Real-time WebSocket channels are the correct path for undelayed tick data:
+
+| Channel                                       | Data                    |
+| :-------------------------------------------- | :---------------------- |
+| `wss://ws.eodhistoricaldata.com/ws/us`        | US trades.              |
+| `wss://ws.eodhistoricaldata.com/ws/us-quote`  | US quotes.              |
+| `wss://ws.eodhistoricaldata.com/ws/us-status` | US market status.       |
+| `wss://ws.eodhistoricaldata.com/ws/eu-status` | European market status. |
+
+The token travels as the `api_token` query parameter, as it does on the REST API, and a
+subscription is requested with `{"action":"subscribe","symbols":"AAPL,MSFT"}`, where `symbols` is a
+comma separated string rather than an array.
+
+A WebSocket client is **not implemented**. It requires a streaming entitlement, and the channels
+cannot be verified without one: against a token from a plan without streaming, a connection
+completes the WebSocket handshake and then receives `{"status":403,"message":"Server error"}` and
+closes, before any subscribe message is sent. The polling client above covers bars and delayed
+quotes on the tiers that do not carry streaming.
+
+This section records what an implementation starts from. The payload field names published
+upstream are deliberately not reproduced here, because nothing in this adapter has verified them
+against a live feed, and a price parsed from a guessed field name is worse than no price at all.
+See the [provider's documentation](https://eodhd.com/financial-apis/new-real-time-data-api-websockets)
+for the frames.
 
 ## Loading EODHD historical data
 
@@ -352,6 +373,7 @@ suffix, rather than a listing venue such as `NASDAQ`.
   `/real-time`, `/div`, `/splits`, `/news` and `/sentiments` returned data, while `/intraday`,
   `/technical`, `/fundamentals` and `/screener` returned HTTP 403 and the WebSocket channels closed
   with `{"status":403}`. Confirm an endpoint against your own token rather than assuming the tier.
+  See [WebSocket channels](#websocket-channels) for the streaming entitlement in detail.
 - EODHD reports most failures as an HTTP 200 with a JSON error body rather than an error status.
   The client checks for that envelope before deserializing, so a rejected request surfaces as an
   error instead of an empty result.
