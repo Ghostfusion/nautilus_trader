@@ -46,6 +46,7 @@
 
 pub mod codec;
 pub mod connection;
+pub mod entitlement;
 
 /// The generated types for the vendored gateway schema.
 ///

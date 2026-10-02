@@ -182,8 +182,15 @@ Read from the entitlement endpoint, which reports per-market quote rights:
 | `us_future_qot_right`      | `N/A` | US futures refused                     |
 | `us_future_qot_right_cme`  | `NO`  | CME futures refused                    |
 | `us_future_qot_right_cboe` | `NO`  | CBOE futures refused                   |
+| `hk_option_qot_right`      | `LV1` | HK option quotes, level 1              |
+| `hk_future_qot_right`      | `LV1` | HK futures, level 1                    |
 | `api_level`                | `N/A` | not a gating value here                |
 | `update_type`              | `NO`  | no entitlement-upgrade flag in play    |
+
+The two HK derivative rows were not in the client's own summary. They came from the adapter's
+entitlement read on the same login, which reports both at level one rather than absent. That is not
+a cosmetic difference: a right the gateway does not report is unknown, while a right it reports as
+`NO` is a refusal, and the two call for different messages to the operator.
 
 The refusals are explicit rather than empty: an option-chain request answers `No permission to get
 quotes for US.AAPL. Please check US MarketOptions quote permissions.`, and a futures request

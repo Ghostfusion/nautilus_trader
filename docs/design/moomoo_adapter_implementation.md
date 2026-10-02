@@ -349,17 +349,25 @@ venue state can outlive the last release of intent for up to a minute by design.
 
 ## 9. Entitlement gate
 
-Resolved once at start from the entitlement read and stored as a capability record:
+Resolved once at start from the entitlement read and stored as a capability record. Read through the
+adapter's own transport on this login, that record is:
 
-- US equity quotes: available at the observed level, level two.
+- US equity quotes: available at level two.
 - HK equity quotes: available at level one.
-- US options: unavailable, with the venue's reason recorded.
-- US futures: unavailable, with the venue's reason recorded.
+- HK options and HK futures: available at level one, which the earlier probe did not surface.
+- US options: refused, reported as `QotRight_No`.
+- US futures: not reported at all, which is unknown rather than refused.
 - Subscription allowance and historical allowance: captured at start and tracked as they are spent.
 
-A capability check happens before the corresponding request is made, and an unentitled request
-fails immediately with the venue's own text. The text matters: it tells the operator to buy a quote
-card, which is actionable, where "insufficient permission" is not.
+The distinction between a refusal and an absent value is kept rather than collapsed into a boolean,
+because the two need different words to the operator: one means a purchased capability is missing,
+the other means the gateway did not answer for that market.
+
+A capability check happens before the corresponding request is made. An unentitled request fails
+immediately, with a message that names the market and the right the gateway reported for it, so the
+operator learns at startup rather than when a strategy first depends on the market. Where the
+gateway itself refuses a request, its own text is surfaced unchanged, because that text is the
+actionable part: it names the quote card to buy, which "insufficient permission" does not.
 
 ## 10. Instruments
 
