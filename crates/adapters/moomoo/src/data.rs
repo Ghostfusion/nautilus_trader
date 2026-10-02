@@ -60,13 +60,14 @@ use nautilus_common::{
     messages::{
         DataEvent,
         data::{
-            RequestBars, RequestInstrument, RequestInstruments, SubscribeBars, SubscribeBookDeltas,
+            BarsResponse, DataResponse, InstrumentResponse, InstrumentsResponse, RequestBars,
+            RequestInstrument, RequestInstruments, SubscribeBars, SubscribeBookDeltas,
             SubscribeInstrument, SubscribeInstruments, SubscribeQuotes, SubscribeTrades,
             UnsubscribeBars, UnsubscribeBookDeltas, UnsubscribeQuotes, UnsubscribeTrades,
         },
     },
 };
-use nautilus_core::time::get_atomic_clock_realtime;
+use nautilus_core::{Params, UUID4, UnixNanos, time::get_atomic_clock_realtime};
 use nautilus_model::{
     data::{BarType, Data},
     enums::AggregationSource,
@@ -130,6 +131,17 @@ struct Watches {
     books: HashSet<InstrumentId>,
     /// The bar types a consumer wants, keyed by what a K-line push identifies it by.
     bars: HashMap<(InstrumentId, Interval), BarType>,
+}
+
+/// What a request for one instrument has to be answered with.
+///
+/// A subscription has no request to answer, so a load made for one carries nothing and is answered
+/// with an instrument event instead: a response needs an identifier to be matched by, and a
+/// subscription has none.
+#[derive(Debug, Clone)]
+struct InstrumentRequest {
+    correlation_id: UUID4,
+    params: Option<Params>,
 }
 
 /// A live data client for the moomoo OpenD gateway.
@@ -278,10 +290,15 @@ impl MoomooDataClient {
     /// A consumer that names one instrument should not have to load a market to get it, so the
     /// instrument is loaded by the same two requests the universe load uses for one security, and
     /// the answer is emitted when it arrives.
-    fn load_instrument(&self, instrument_id: InstrumentId) -> anyhow::Result<()> {
+    fn load_instrument(
+        &self,
+        instrument_id: InstrumentId,
+        request: Option<InstrumentRequest>,
+    ) -> anyhow::Result<()> {
         let connection = self.connection()?;
         let sender = self.data_sender.clone();
         let instruments = Arc::clone(&self.instruments);
+        let client_id = self.client_id;
 
         get_runtime().spawn(async move {
             let Ok((market, code)) = market_of(instrument_id) else {
@@ -294,8 +311,25 @@ impl MoomooDataClient {
                 Ok(instrument) => {
                     instruments.lock().insert(instrument_id, instrument.clone());
 
-                    if let Err(e) = sender.send(DataEvent::Instrument(instrument)) {
-                        log::error!("failed to send an instrument event: {e}");
+                    match request {
+                        Some(asked) => respond(
+                            &sender,
+                            DataResponse::Instrument(Box::new(InstrumentResponse::new(
+                                asked.correlation_id,
+                                client_id,
+                                instrument_id,
+                                instrument,
+                                None,
+                                None,
+                                get_atomic_clock_realtime().get_time_ns(),
+                                asked.params,
+                            ))),
+                        ),
+                        None => {
+                            if let Err(e) = sender.send(DataEvent::Instrument(instrument)) {
+                                log::error!("failed to send an instrument event: {e}");
+                            }
+                        }
                     }
                 }
                 Err(e) => log::error!("cannot load {instrument_id}: {e}"),
@@ -414,6 +448,25 @@ fn default_window(interval: Interval, now: Timestamp) -> (Timestamp, Timestamp) 
         now - jiff::SignedDuration::from_secs(days * SECONDS_PER_DAY),
         now,
     )
+}
+
+/// Sends a response to the engine, logging a failure instead of abandoning the path that produced
+/// it.
+///
+/// A response is what completes the request it answers. A request answered with data alone is one
+/// the engine has to wait out, because the data carries no identifier it can be matched to, which is
+/// why every request this client serves ends with one of these.
+fn respond(sender: &EventSender<DataEvent>, response: DataResponse) {
+    if let Err(e) = sender.send(DataEvent::Response(response)) {
+        log::error!("failed to send a response: {e}");
+    }
+}
+
+/// Converts a caller's bound into the nanoseconds a response reports it in.
+fn bound_nanos(bound: Option<Timestamp>) -> Option<UnixNanos> {
+    bound
+        .and_then(|timestamp| u64::try_from(timestamp.as_nanosecond()).ok())
+        .map(UnixNanos::from)
 }
 
 /// Sends data to the engine, logging a failure instead of abandoning the path that produced it.
@@ -849,12 +902,12 @@ impl DataClient for MoomooDataClient {
             }
             // A consumer that named one instrument is answered by loading it rather than by being
             // told to load a market first.
-            None if self.is_connected() => self.load_instrument(instrument_id),
+            None if self.is_connected() => self.load_instrument(instrument_id, None),
             None => bail!("{instrument_id} is not loaded and the client is not connected"),
         }
     }
 
-    fn request_instruments(&self, _request: RequestInstruments) -> anyhow::Result<()> {
+    fn request_instruments(&self, request: RequestInstruments) -> anyhow::Result<()> {
         let instruments = self.instruments();
 
         if instruments.is_empty() {
@@ -862,8 +915,39 @@ impl DataClient for MoomooDataClient {
                 "no instruments are loaded to respond with for {}",
                 self.client_id
             );
-        } else {
-            self.emit_instruments(&instruments);
+
+            return Ok(());
+        }
+
+        // A response names the venue it describes, and this client serves more than one, so a
+        // request that names a venue is answered for that venue and one that names none is answered
+        // once per venue the client holds rather than under a venue chosen for it.
+        let mut by_venue: IndexMap<Venue, Vec<InstrumentAny>> = IndexMap::new();
+
+        for instrument in instruments {
+            let venue = instrument.id().venue;
+
+            if request.venue.is_some_and(|wanted| wanted != venue) {
+                continue;
+            }
+
+            by_venue.entry(venue).or_default().push(instrument);
+        }
+
+        for (venue, instruments) in by_venue {
+            respond(
+                &self.data_sender,
+                DataResponse::Instruments(InstrumentsResponse::new(
+                    request.request_id,
+                    self.client_id,
+                    venue,
+                    instruments,
+                    bound_nanos(request.start),
+                    bound_nanos(request.end),
+                    get_atomic_clock_realtime().get_time_ns(),
+                    request.params.clone(),
+                )),
+            );
         }
 
         Ok(())
@@ -871,16 +955,34 @@ impl DataClient for MoomooDataClient {
 
     fn request_instrument(&self, request: RequestInstrument) -> anyhow::Result<()> {
         let instrument_id = request.instrument_id;
+        let asked = InstrumentRequest {
+            correlation_id: request.request_id,
+            params: request.params.clone(),
+        };
+        let start = bound_nanos(request.start);
+        let end = bound_nanos(request.end);
 
         match self.instrument(&instrument_id) {
             Some(instrument) => {
-                if let Err(e) = self.data_sender.send(DataEvent::Instrument(instrument)) {
-                    log::error!("failed to send an instrument event: {e}");
-                }
+                respond(
+                    &self.data_sender,
+                    DataResponse::Instrument(Box::new(InstrumentResponse::new(
+                        asked.correlation_id,
+                        self.client_id,
+                        instrument_id,
+                        instrument,
+                        start,
+                        end,
+                        get_atomic_clock_realtime().get_time_ns(),
+                        asked.params,
+                    ))),
+                );
 
                 Ok(())
             }
-            None if self.is_connected() => self.load_instrument(instrument_id),
+            // A consumer that named one instrument is answered by loading it rather than by being
+            // told to load a market first.
+            None if self.is_connected() => self.load_instrument(instrument_id, Some(asked)),
             None => bail!("{instrument_id} is not loaded and the client is not connected"),
         }
     }
@@ -963,13 +1065,18 @@ impl DataClient for MoomooDataClient {
         let connection = self.connection()?;
         let sender = self.data_sender.clone();
         let config = self.config.clone();
+        let correlation_id = request.request_id;
+        let client_id = self.client_id;
 
         // The venue requires both bounds and reads them as wall clock readings, so a request that
         // names neither is given a window rather than refused.
         let now = Timestamp::now();
         let (default_start, default_end) = default_window(interval, now);
+        let start = bound_nanos(Some(request.start.unwrap_or(default_start)));
+        let end = bound_nanos(Some(request.end.unwrap_or(default_end)));
         let begin = gateway_datetime(request.start.unwrap_or(default_start));
-        let end = gateway_datetime(request.end.unwrap_or(default_end));
+        let end_text = gateway_datetime(request.end.unwrap_or(default_end));
+        let params = request.params;
 
         get_runtime().spawn(async move {
             let history = HistoryRequest {
@@ -978,7 +1085,7 @@ impl DataClient for MoomooDataClient {
                 interval,
                 adjustment: config.adjustment,
                 begin,
-                end,
+                end: end_text,
                 session: config.session,
                 page_size: None,
             };
@@ -989,9 +1096,21 @@ impl DataClient for MoomooDataClient {
                 Ok(bars) => {
                     log::debug!("requested {} bars for {bar_type}", bars.len());
 
-                    for bar in bars {
-                        send(&sender, Data::Bar(bar));
-                    }
+                    // The response carries the bars, and the engine emits them from it, so sending
+                    // them as data as well would emit each one twice.
+                    respond(
+                        &sender,
+                        DataResponse::Bars(BarsResponse::new(
+                            correlation_id,
+                            client_id,
+                            bar_type,
+                            bars,
+                            start,
+                            end,
+                            get_atomic_clock_realtime().get_time_ns(),
+                            params,
+                        )),
+                    );
                 }
                 Err(e) => log::error!("cannot request bars for {bar_type}: {e}"),
             }

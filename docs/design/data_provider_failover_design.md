@@ -443,11 +443,13 @@ when it does not, so whether a forwarded request comes back with the chain's ide
 provider honouring a field it has no obligation to honour. The composite therefore sets it rather
 than trusting it: what the engine sees is the chain, whoever answered.
 
-**Two providers of the two legs answer a request with data and no response at all.** Neither the
-EODHD client nor the moomoo one sends a `DataResponse` for a bar request, so neither completes a
-request in the engine's own pipeline; the bars arrive as data events and a caller's request is left
-to time out. This is a defect in both request paths rather than a property of the chain, and it is
-recorded here because the composite's hop depends on the same response: a provider that cannot
+**One of the two legs answered a request with data and no response at all.** Neither the EODHD
+client nor the moomoo one sent a `DataResponse` for a bar request, so neither completed a request in
+the engine's own pipeline: the data arrived and the caller was left to time out. The moomoo client now
+answers a bar request and an instrument request with a response carrying the caller's identifier,
+both of which were checked against the gateway, and a request for a universe the same way; the EODHD
+client still does not. It
+is recorded here because the composite's hop depends on the same response: a provider that cannot
 answer is only distinguishable from one that has not answered yet if it says so.
 
 **A provider's failure is not visible from its request API.** `DataClient::request_bars` and its
