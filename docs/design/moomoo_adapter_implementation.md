@@ -469,6 +469,28 @@ As implemented, and confirmed against a live gateway:
 - A security type other than an equity is refused rather than approximated, so a warrant or a future
   cannot arrive as an equity carrying the wrong tick.
 
+Loading a whole market's universe, rather than one instrument at a time, was measured against the
+gateway before anything was written for it, and the measurement changes what the provider can
+promise.
+
+- **The static list needs no symbol list.** One market and the equity security type returns the
+  whole market in one answer: thirteen thousand one hundred and twelve United States securities and
+  three thousand seven hundred and ninety-nine Hong Kong ones, read live.
+- **A snapshot request takes four hundred securities at most.** Asking for five hundred is refused
+  with a message naming the limit, so a market is snapshotted in batches and never in one call.
+- **One ineligible security fails an entire snapshot batch.** Every United States batch measured was
+  refused as a whole, naming a single over-the-counter code, and the market list carries many of
+  them. The venue answers a request or refuses it; it has no way to answer for the members it does
+  hold. A batch therefore cannot be assumed to succeed, and a member cannot be assumed usable
+  because the static list mentioned it.
+
+The consequence is that the snapshot is required for a single instrument and optional for a
+universe. A universe load batches by four hundred, and a batch the venue refuses falls back to
+static information for its members, using the market's fallback precision and logging what could not
+be priced. That is a weaker promise than the single-instrument path and is recorded as one: for Hong
+Kong, where the tick size is banded by price, a fallback precision is wrong for the symbols whose
+band it does not describe, and the log line is what tells an operator which ones those are.
+
 ## 11. Bars
 
 The request takes a symbol, a range, an interval, an adjustment mode, a session mode, a page size,
