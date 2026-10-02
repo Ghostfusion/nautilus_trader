@@ -6180,6 +6180,8 @@ dependencies = [
  "nautilus-model",
  "parking_lot",
  "rstest",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
 ]

@@ -534,3 +534,32 @@ owns its providers' failures; from the composite, a failure is a hop or it is no
 answers and hops are kept, together with why it last failed and whether it has been set aside. A chain
 that kept its hops to itself would be a system whose outages are invisible precisely because it
 survived them.
+
+## 18. As implemented: streams
+
+**A stream is a demand the chain holds rather than one it answers.** The chain records what it is
+streaming and which provider serves it, and that record is what makes the strict rules of section 9.3
+implementable at all: what moves is a provider's streams, in the order they were taken, rather than
+one instrument at a time.
+
+**The old subscription is given up before the new one is taken.** A stream that is briefly absent is
+visible to whoever is watching it; a stream served from two providers at once is not, and it is two
+datasets where the caller asked for one. The order is pinned by a test over the calls both clients
+were given, because neither client can see it alone.
+
+**A move is announced.** The chain writes a `CustomData` event under the `FailoverContinuity` data
+type, carrying the stream, the provider it came from, the provider it went to, and the reason - which
+is the failure the provider was set aside for. It is written by the chain about itself rather than by
+a provider, so it goes to the engine directly: there is no provider's identity in it to rewrite.
+
+**Fail-back returns to the priority order, and only when asked.** Stickiness is what a checkpoint is
+an exception to, so a checkpoint deliberately ignores the provider currently being served from and
+looks for the highest-priority provider that can serve. Nothing in the chain does that on its own,
+because moving back means a fresh subscription and a provider that may refuse to release the old one
+for a minute.
+
+**A stream moves when the chain is next asked to do something.** The boundary cannot call a provider
+from its own task, and a provider is not `Send`, so a stream whose provider dies does not move by
+itself: the move happens at the next streamed demand or at a checkpoint. This is the same limit as
+for requests in section 17, and it is the reason an operator or an adapter's own reconnect path has
+to give the chain a chance to act rather than expecting the chain to notice on its own.

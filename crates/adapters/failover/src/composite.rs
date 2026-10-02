@@ -60,41 +60,57 @@ use nautilus_common::{
     },
     messages::{
         DataEvent,
-        data::{RequestBars, RequestInstrument, RequestInstruments},
+        data::{
+            RequestBars, RequestInstrument, RequestInstruments, SubscribeBars, SubscribeQuotes,
+            SubscribeTrades, UnsubscribeBars, UnsubscribeQuotes, UnsubscribeTrades,
+        },
     },
 };
 use nautilus_core::UUID4;
-use nautilus_model::identifiers::{ClientId, Venue};
+use nautilus_model::{
+    data::{CustomData, Data, DataType},
+    identifiers::{ClientId, Venue},
+};
 
 use crate::{
     chain::{Provider, Served, Trace, run},
     failure::Failure,
     health::{Health, Policy, Snapshot},
     pump::{Pending, Pump},
+    streaming::{
+        CONTINUITY_DATA_TYPE, Continuity, Stream, Streaming, Subscription, Unsubscription,
+    },
 };
 
-/// One request, as a chain hands it from provider to provider.
+/// One demand, as a chain hands it from provider to provider.
+///
+/// A request is answered and over; a subscription continues. Both are demands, and both are passed
+/// along the same chain, but only a request has an answer to wait for.
 #[derive(Debug, Clone)]
-pub enum Request {
+pub enum Demand {
     /// A list of instruments for a venue.
     Instruments(RequestInstruments),
     /// One instrument.
     Instrument(RequestInstrument),
     /// Bars for one instrument and bar type.
     Bars(RequestBars),
+    /// A stream for the chain to hold.
+    Subscribe(Subscription),
 }
 
-impl Request {
-    /// Returns the identifier the caller gave this request.
+impl Demand {
+    /// Returns the identifier the caller gave this demand, when it is one that is answered.
     ///
     /// This is what the engine matches an answer to a request by, and it is the caller's, so a chain
-    /// carries it rather than minting one.
+    /// carries it rather than minting one. A subscription is not answered by an identifier: it is
+    /// held, and what it delivers arrives as data.
     #[must_use]
-    pub fn request_id(&self) -> UUID4 {
+    pub fn request_id(&self) -> Option<UUID4> {
         match self {
-            Self::Instruments(request) => request.request_id,
-            Self::Instrument(request) => request.request_id,
-            Self::Bars(request) => request.request_id,
+            Self::Instruments(request) => Some(request.request_id),
+            Self::Instrument(request) => Some(request.request_id),
+            Self::Bars(request) => Some(request.request_id),
+            Self::Subscribe(_) => None,
         }
     }
 
@@ -125,7 +141,26 @@ impl Request {
 
                 Self::Bars(request)
             }
+            Self::Subscribe(subscription) => Self::Subscribe(subscription.addressed_to(client_id)),
         }
+    }
+}
+
+/// Asks a client for a stream, whichever kind it is.
+fn subscribe(client: &mut dyn DataClient, command: &Subscription) -> anyhow::Result<()> {
+    match command {
+        Subscription::Bars(command) => client.subscribe_bars(command.clone()),
+        Subscription::Quotes(command) => client.subscribe_quotes(command.clone()),
+        Subscription::Trades(command) => client.subscribe_trades(command.clone()),
+    }
+}
+
+/// Takes a stream away from a client, whichever kind it is.
+fn unsubscribe(client: &mut dyn DataClient, command: &Unsubscription) -> anyhow::Result<()> {
+    match command {
+        Unsubscription::Bars(command) => client.unsubscribe_bars(command),
+        Unsubscription::Quotes(command) => client.unsubscribe_quotes(command),
+        Unsubscription::Trades(command) => client.unsubscribe_trades(command),
     }
 }
 
@@ -174,28 +209,33 @@ struct Built {
 }
 
 impl Provider for Built {
-    type Demand = Request;
+    type Demand = Demand;
     type Answer = ClientId;
 
     fn id(&self) -> ClientId {
         self.name
     }
 
-    fn serve(&mut self, demand: &Request) -> Result<Self::Answer, Failure> {
+    fn serve(&mut self, demand: &Demand) -> Result<Self::Answer, Failure> {
         self.health.asked(&self.name);
 
         let taken = match demand {
-            Request::Instruments(request) => self.client.request_instruments(request.clone()),
-            Request::Instrument(request) => self.client.request_instrument(request.clone()),
-            Request::Bars(request) => self.client.request_bars(request.clone()),
+            Demand::Instruments(request) => self.client.request_instruments(request.clone()),
+            Demand::Instrument(request) => self.client.request_instrument(request.clone()),
+            Demand::Bars(request) => self.client.request_bars(request.clone()),
+            Demand::Subscribe(subscription) => subscribe(self.client.as_mut(), subscription),
         };
 
         match taken {
             Ok(()) => {
-                // A provider that has taken a demand owes an answer for it, and the boundary is the
-                // only thing that can notice that it never arrives.
-                let due = Instant::now() + self.health.policy().answer_deadline;
-                self.pending.expect(demand.request_id(), self.name, due);
+                // A provider that has taken a request owes an answer for it, and the boundary is the
+                // only thing that can notice that it never arrives. A subscription is not answered
+                // that way: what it delivers arrives as data, and a stream that stops arriving is not
+                // an unanswered request.
+                if let Some(request_id) = demand.request_id() {
+                    let due = Instant::now() + self.health.policy().answer_deadline;
+                    self.pending.expect(request_id, self.name, due);
+                }
 
                 Ok(self.name)
             }
@@ -243,6 +283,10 @@ pub struct CompositeDataClient {
     /// The provider the chain is currently being served by, when one has served.
     current: Cell<Option<ClientId>>,
     health: Arc<Health>,
+    streaming: Streaming,
+    /// Where the chain writes what is its own rather than a provider's, such as a move of source.
+    engine: EventSender<DataEvent>,
+    clock: Rc<RefCell<dyn Clock>>,
     pump: Option<Pump>,
 }
 
@@ -278,7 +322,7 @@ impl CompositeDataClient {
         let mut built = Vec::with_capacity(legs.len());
 
         {
-            let _boundary = Boundary::install(boundary, engine);
+            let _boundary = Boundary::install(boundary, engine.clone());
 
             for (priority, leg) in legs.into_iter().enumerate() {
                 let client = leg.factory.create(
@@ -303,6 +347,9 @@ impl CompositeDataClient {
             legs: RefCell::new(built),
             current: Cell::new(None),
             health,
+            streaming: Streaming::new(),
+            engine,
+            clock: Rc::clone(clock),
             pump: Some(pump),
         })
     }
@@ -317,8 +364,14 @@ impl CompositeDataClient {
         self.health.snapshots()
     }
 
+    /// Returns what the chain is streaming, and which provider serves each stream.
+    #[must_use]
+    pub fn streamed(&self) -> Vec<(Stream, ClientId)> {
+        self.streaming.held()
+    }
+
     /// Passes one demand to the first provider that will take it.
-    fn route(&self, request: &Request) -> anyhow::Result<()> {
+    fn route(&self, request: &Demand) -> anyhow::Result<()> {
         let now = Instant::now();
         let current = self.current.get();
         let addressed = request.addressed_to(self.client_id);
@@ -368,6 +421,238 @@ impl CompositeDataClient {
                 anyhow::bail!("no provider in the chain took the demand: {failure}")
             }
             Served::Unconfigured => anyhow::bail!("the chain has no providers"),
+        }
+    }
+}
+
+impl CompositeDataClient {
+    /// Returns the providers the chain may ask, in the order it prefers them.
+    ///
+    /// The provider already being served from comes first, the priority order fills in behind it, and
+    /// what has been set aside is left out - so that the chain has one answer to which provider serves
+    /// it rather than one answer per kind of demand.
+    fn preferred_providers(&self, now: Instant) -> Vec<ClientId> {
+        let legs = self.legs.borrow();
+        let mut providers: Vec<ClientId> = legs
+            .iter()
+            .filter(|leg| self.health.admit(&leg.name, now))
+            .map(|leg| leg.name)
+            .collect();
+
+        if let Some(index) = self
+            .current
+            .get()
+            .and_then(|current| providers.iter().position(|provider| *provider == current))
+        {
+            let current = providers.remove(index);
+            providers.insert(0, current);
+        }
+
+        providers
+    }
+
+    /// Returns the provider the chain streams from, which is determined once for all of them.
+    fn streaming_provider(&mut self) -> anyhow::Result<ClientId> {
+        let now = Instant::now();
+
+        let Some(serving) = self.streaming.provider() else {
+            return self
+                .preferred_providers(now)
+                .into_iter()
+                .next()
+                .context("the chain has no provider that can stream");
+        };
+
+        if self.health.admit(&serving, now) {
+            return Ok(serving);
+        }
+
+        // The provider that was streaming has failed, and everything it held moves with it. A stream
+        // is never moved on its own: moving one instrument at a time would leave the chain streaming
+        // from two providers at once, which is indistinguishable from a stream that is simply wrong.
+        let to = self
+            .preferred_providers(now)
+            .into_iter()
+            .find(|provider| *provider != serving)
+            .context("the chain has no provider left to stream from")?;
+
+        self.move_streams(&serving, to)?;
+
+        Ok(to)
+    }
+
+    /// Moves every stream `from` holds to `to`, in the order they were taken.
+    ///
+    /// The old subscription is given up before the new one is taken, so that a stream is never served
+    /// from two providers at once, and every move is written as a continuity event, so that a change
+    /// of source is visible rather than silent.
+    fn move_streams(&mut self, from: &ClientId, to: ClientId) -> anyhow::Result<()> {
+        let reason = self.health.snapshot(from).last_failure.map_or_else(
+            || "the provider stopped serving".to_string(),
+            |failure| failure.to_string(),
+        );
+
+        for (stream, command) in self.streaming.held_by(from) {
+            self.streaming.release(&stream);
+
+            if let Err(e) = self.release_at(from, &command.released()) {
+                // A provider that is being left may not take the unsubscription either. The stream
+                // still moves, and what could not be given up is recorded rather than hidden.
+                log::warn!("{from} would not give up {stream}: {e}");
+            }
+
+            let provider = match self.subscribe_at(to, &command) {
+                Ok(()) => to,
+                Err(e) => {
+                    log::error!("{to} would not take {stream}: {e}");
+
+                    // The stream is left where it was, which is worse than where it was going, so it
+                    // goes back into the record as the failed provider's and is moved again later.
+                    self.streaming.hold(stream, *from, command);
+
+                    return Err(e);
+                }
+            };
+
+            log::warn!("{stream} is now streamed from {provider}, and was served by {from}");
+            self.announce(&stream, *from, provider, &reason);
+        }
+
+        self.current.set(Some(to));
+
+        Ok(())
+    }
+
+    /// Asks one provider to take one stream.
+    fn subscribe_at(&mut self, provider: ClientId, command: &Subscription) -> anyhow::Result<()> {
+        let addressed = command.addressed_to(self.client_id);
+        let leg = self.leg_mut(&provider)?;
+
+        leg.serve(&Demand::Subscribe(addressed.clone()))
+            .map_err(|failure| {
+                anyhow::anyhow!("{provider} would not take the stream: {failure}")
+            })?;
+
+        self.streaming.hold(addressed.stream(), provider, addressed);
+
+        Ok(())
+    }
+
+    /// Asks one provider to give one stream up.
+    fn release_at(&mut self, provider: &ClientId, command: &Unsubscription) -> anyhow::Result<()> {
+        let leg = self.leg_mut(provider)?;
+
+        unsubscribe(leg.client.as_mut(), command)
+    }
+
+    /// Returns one provider, as the chain holds it.
+    fn leg_mut(&mut self, provider: &ClientId) -> anyhow::Result<&mut Built> {
+        self.legs
+            .get_mut()
+            .iter_mut()
+            .find(|leg| leg.name == *provider)
+            .with_context(|| format!("the chain has no provider called {provider}"))
+    }
+
+    /// Takes a stream, from the provider the chain is streaming from.
+    fn subscribe(&mut self, subscription: &Subscription) -> anyhow::Result<()> {
+        let stream = subscription.stream();
+
+        // A stream the chain already holds is already being streamed: asking twice does not move it,
+        // and it does not give one stream two sources.
+        if let Some(provider) = self.streaming.provider_of(&stream) {
+            log::debug!("{stream} is already streamed from {provider}");
+
+            return Ok(());
+        }
+
+        // A provider that will not take the stream at all is a provider the chain leaves, and every
+        // stream it holds leaves with it, so the attempt is repeated at the next provider rather than
+        // repeated at that one.
+        let attempts = self.legs.borrow().len().max(1);
+        let mut last = None;
+
+        for _ in 0..attempts {
+            let provider = self.streaming_provider()?;
+
+            match self.subscribe_at(provider, subscription) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    log::warn!("{provider} would not take {stream}: {e}");
+                    last = Some(e);
+                }
+            }
+        }
+
+        Err(last.unwrap_or_else(|| anyhow::anyhow!("no provider would take {stream}")))
+    }
+
+    /// Gives up a stream, at the provider that was serving it.
+    fn unsubscribe(&mut self, command: &Unsubscription) -> anyhow::Result<()> {
+        let stream = command.stream();
+
+        let Some(provider) = self.streaming.release(&stream) else {
+            log::debug!("{stream} is not streamed by the chain");
+
+            return Ok(());
+        };
+
+        self.release_at(&provider, command)
+    }
+
+    /// Brings the chain back to the provider it prefers, deliberately.
+    ///
+    /// Fail-back is not a side effect of a provider recovering. It means giving up every stream a
+    /// fallback holds and taking them again at the preferred provider, which is a fresh subscription
+    /// at a provider that may itself refuse to release the old one for a while - so it is asked for at
+    /// a checkpoint rather than done the moment it becomes possible.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no provider is available, or when a stream cannot be moved.
+    pub fn checkpoint(&mut self) -> anyhow::Result<()> {
+        let preferred = self
+            .legs
+            .borrow()
+            .iter()
+            .find(|leg| self.health.admit(&leg.name, Instant::now()))
+            .map(|leg| leg.name)
+            .context("the chain has no provider available")?;
+
+        self.current.set(Some(preferred));
+
+        let Some(serving) = self.streaming.provider() else {
+            return Ok(());
+        };
+
+        if serving == preferred {
+            return Ok(());
+        }
+
+        self.move_streams(&serving, preferred)
+    }
+
+    /// Writes the event that says a stream changed source.
+    ///
+    /// This is written by the chain about itself rather than by a provider, so it is written to the
+    /// engine directly: there is no provider's identity to rewrite, and the event is the chain's.
+    fn announce(&self, stream: &Stream, from: ClientId, to: ClientId, reason: &str) {
+        let now = self.clock.borrow().timestamp_ns();
+        let continuity = Continuity {
+            stream: stream.to_string(),
+            from,
+            to,
+            reason: reason.to_string(),
+            ts_event: now,
+            ts_init: now,
+        };
+        let data = Data::Custom(CustomData::new(
+            Arc::new(continuity),
+            DataType::new(CONTINUITY_DATA_TYPE, None, None),
+        ));
+
+        if let Err(e) = self.engine.send(DataEvent::Data(data)) {
+            log::error!("cannot write the continuity event for {stream}: {e}");
         }
     }
 }
@@ -483,15 +768,39 @@ impl DataClient for CompositeDataClient {
     }
 
     fn request_instruments(&self, request: RequestInstruments) -> anyhow::Result<()> {
-        self.route(&Request::Instruments(request))
+        self.route(&Demand::Instruments(request))
     }
 
     fn request_instrument(&self, request: RequestInstrument) -> anyhow::Result<()> {
-        self.route(&Request::Instrument(request))
+        self.route(&Demand::Instrument(request))
     }
 
     fn request_bars(&self, request: RequestBars) -> anyhow::Result<()> {
-        self.route(&Request::Bars(request))
+        self.route(&Demand::Bars(request))
+    }
+
+    fn subscribe_bars(&mut self, cmd: SubscribeBars) -> anyhow::Result<()> {
+        self.subscribe(&Subscription::Bars(cmd))
+    }
+
+    fn subscribe_quotes(&mut self, cmd: SubscribeQuotes) -> anyhow::Result<()> {
+        self.subscribe(&Subscription::Quotes(cmd))
+    }
+
+    fn subscribe_trades(&mut self, cmd: SubscribeTrades) -> anyhow::Result<()> {
+        self.subscribe(&Subscription::Trades(cmd))
+    }
+
+    fn unsubscribe_bars(&mut self, cmd: &UnsubscribeBars) -> anyhow::Result<()> {
+        self.unsubscribe(&Unsubscription::Bars(cmd.clone()))
+    }
+
+    fn unsubscribe_quotes(&mut self, cmd: &UnsubscribeQuotes) -> anyhow::Result<()> {
+        self.unsubscribe(&Unsubscription::Quotes(cmd.clone()))
+    }
+
+    fn unsubscribe_trades(&mut self, cmd: &UnsubscribeTrades) -> anyhow::Result<()> {
+        self.unsubscribe(&Unsubscription::Trades(cmd.clone()))
     }
 }
 
@@ -582,7 +891,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::testing::{FakeConfig, FakeDataClientFactory};
+    use crate::testing::{FakeCall, FakeConfig, FakeDataClientFactory};
 
     const CHAIN: &str = "CHAIN";
 
@@ -637,6 +946,58 @@ mod tests {
             UnixNanos::default(),
             None,
         )
+    }
+
+    fn subscribe_bars_request(symbol: &str) -> SubscribeBars {
+        SubscribeBars::new(
+            BarType::new(
+                InstrumentId::from(symbol),
+                BarSpecification::new(1, BarAggregation::Day, PriceType::Last),
+                AggregationSource::External,
+            ),
+            Some(chain_id()),
+            None,
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+            None,
+        )
+    }
+
+    fn unsubscribe_bars_request(symbol: &str) -> UnsubscribeBars {
+        UnsubscribeBars::new(
+            BarType::new(
+                InstrumentId::from(symbol),
+                BarSpecification::new(1, BarAggregation::Day, PriceType::Last),
+                AggregationSource::External,
+            ),
+            Some(chain_id()),
+            None,
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+            None,
+        )
+    }
+
+    /// Reads the next continuity event the engine was given, ignoring anything else it was given.
+    fn continuity_of(events: &mut tokio::sync::mpsc::UnboundedReceiver<DataEvent>) -> Continuity {
+        loop {
+            let DataEvent::Data(Data::Custom(custom)) = next_event(events) else {
+                continue;
+            };
+
+            return custom
+                .data
+                .as_any()
+                .downcast_ref::<Continuity>()
+                .expect("the chain writes its continuity as a continuity event")
+                .clone();
+        }
+    }
+
+    fn journal() -> Rc<RefCell<Vec<FakeCall>>> {
+        Rc::new(RefCell::new(Vec::new()))
     }
 
     fn leg(factory: &FakeDataClientFactory) -> Leg {
@@ -1039,5 +1400,181 @@ mod tests {
         assert_eq!(health[0].provider, id("PRIMARY"));
         assert_eq!(health[0].attempts, 1);
         assert_eq!(health[0].answers, 1);
+    }
+
+    /// The chain takes a stream from the provider it prefers, and says nothing about it: a stream
+    /// that was not moved is not a change of source.
+    #[rstest]
+    fn test_the_chain_takes_a_stream_from_the_provider_it_prefers() {
+        let _events = install_engine();
+        let journal = journal();
+        let primary = provider("PRIMARY", "100.00").journaling(&journal);
+        let secondary = provider("SECONDARY", "200.00").journaling(&journal);
+        let mut chain = chain(vec![leg(&primary), leg(&secondary)]);
+
+        chain.start().unwrap();
+
+        let bars = subscribe_bars_request("AAPL.US");
+        let stream = Stream::Bars(bars.bar_type);
+        chain.subscribe_bars(bars).unwrap();
+
+        assert_eq!(chain.streamed(), vec![(stream.clone(), id("PRIMARY"))]);
+        assert!(
+            journal
+                .borrow()
+                .contains(&FakeCall::Subscribed(id("PRIMARY"), stream))
+        );
+        assert!(secondary.subscribed().is_empty());
+    }
+
+    /// The exit of this step: the provider streaming is the one that fails, and the whole stream moves
+    /// with it, once, giving the old subscription up before taking the new one.
+    #[rstest]
+    fn test_a_stream_moves_once_when_the_provider_serving_it_fails() {
+        let mut events = install_engine();
+        let journal = journal();
+        let primary = provider("PRIMARY", "100.00").journaling(&journal);
+        let secondary = provider("SECONDARY", "200.00").journaling(&journal);
+        let mut chain = chain(vec![leg(&primary), leg(&secondary)]);
+
+        chain.start().unwrap();
+
+        let bars = subscribe_bars_request("AAPL.US");
+        let stream = Stream::Bars(bars.bar_type);
+        chain.subscribe_bars(bars).unwrap();
+
+        // The provider that is streaming stops serving, which the chain sees when it next asks it.
+        primary.refuse_now();
+        let _ = chain.request_bars(bars_request());
+
+        // A second demand arrives, and the chain moves as a provider rather than per instrument.
+        chain
+            .subscribe_bars(subscribe_bars_request("MSFT.US"))
+            .unwrap();
+
+        let calls = journal.borrow().clone();
+        let given_up = FakeCall::Unsubscribed(id("PRIMARY"), stream.clone());
+        let moved = FakeCall::Subscribed(id("SECONDARY"), stream);
+
+        assert_eq!(
+            calls.iter().filter(|call| **call == moved).count(),
+            1,
+            "the stream moved once"
+        );
+        assert!(
+            calls.iter().position(|call| *call == given_up)
+                < calls.iter().position(|call| *call == moved),
+            "the old subscription was given up before the new one was taken"
+        );
+        assert_eq!(chain.streamed()[0].1, id("SECONDARY"));
+
+        let continuity = continuity_of(&mut events);
+
+        assert_eq!(continuity.from, id("PRIMARY"));
+        assert_eq!(continuity.to, id("SECONDARY"));
+        assert!(continuity.stream.contains("AAPL.US"));
+        assert_eq!(continuity.ts_init, continuity.ts_event);
+    }
+
+    /// Fail-back is asked for rather than done: the chain stays on the fallback while the fallback
+    /// serves, and comes back only at a checkpoint.
+    #[rstest]
+    fn test_a_checkpoint_brings_the_streams_back_to_the_provider_it_prefers() {
+        let _events = install_engine();
+        let journal = journal();
+        let policy = Policy {
+            cooldown: Duration::from_millis(5),
+            ..Policy::default()
+        };
+        let primary = provider("PRIMARY", "100.00").journaling(&journal);
+        let secondary = provider("SECONDARY", "200.00").journaling(&journal);
+        let mut chain = chain_with(policy, vec![leg(&primary), leg(&secondary)]);
+
+        chain.start().unwrap();
+
+        let bars = subscribe_bars_request("AAPL.US");
+        let stream = Stream::Bars(bars.bar_type);
+        chain.subscribe_bars(bars).unwrap();
+
+        primary.refuse_now();
+        let _ = chain.request_bars(bars_request());
+        chain
+            .subscribe_bars(subscribe_bars_request("MSFT.US"))
+            .unwrap();
+
+        assert_eq!(chain.streamed()[0].1, id("SECONDARY"));
+        assert_eq!(
+            chain.streamed()[0].1,
+            id("SECONDARY"),
+            "the chain did not go back the moment the primary could be asked again"
+        );
+
+        // The provider recovers, and the chain is brought back on purpose.
+        primary.recover();
+        std::thread::sleep(Duration::from_millis(50));
+        chain.checkpoint().unwrap();
+
+        assert_eq!(chain.streamed()[0].1, id("PRIMARY"));
+        let calls = journal.borrow().clone();
+
+        assert!(calls.contains(&FakeCall::Unsubscribed(id("SECONDARY"), stream.clone())));
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| **call == FakeCall::Subscribed(id("PRIMARY"), stream.clone()))
+                .count(),
+            2,
+            "the stream was taken at the primary, moved away, and taken again"
+        );
+    }
+
+    /// A stream the chain holds is not subscribed again: asking twice does not give it two sources.
+    #[rstest]
+    fn test_a_stream_already_held_is_not_subscribed_again() {
+        let _events = install_engine();
+        let journal = journal();
+        let primary = provider("PRIMARY", "100.00").journaling(&journal);
+        let mut chain = chain(vec![leg(&primary)]);
+
+        chain.start().unwrap();
+
+        chain
+            .subscribe_bars(subscribe_bars_request("AAPL.US"))
+            .unwrap();
+        chain
+            .subscribe_bars(subscribe_bars_request("AAPL.US"))
+            .unwrap();
+
+        assert_eq!(
+            primary.subscribed().len(),
+            1,
+            "the provider was asked for the stream once"
+        );
+        assert_eq!(chain.streamed().len(), 1);
+    }
+
+    #[rstest]
+    fn test_a_stream_is_given_up_at_the_provider_serving_it() {
+        let _events = install_engine();
+        let journal = journal();
+        let primary = provider("PRIMARY", "100.00").journaling(&journal);
+        let mut chain = chain(vec![leg(&primary)]);
+
+        chain.start().unwrap();
+
+        let bars = subscribe_bars_request("AAPL.US");
+        let stream = Stream::Bars(bars.bar_type);
+        chain.subscribe_bars(bars).unwrap();
+
+        chain
+            .unsubscribe_bars(&unsubscribe_bars_request("AAPL.US"))
+            .unwrap();
+
+        assert!(chain.streamed().is_empty());
+        assert!(
+            journal
+                .borrow()
+                .contains(&FakeCall::Unsubscribed(id("PRIMARY"), stream))
+        );
     }
 }

@@ -58,5 +58,6 @@ pub mod composite;
 pub mod failure;
 pub mod health;
 pub mod pump;
+pub mod streaming;
 pub mod tap;
 pub mod testing;

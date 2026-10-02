@@ -32,6 +32,8 @@ event-driven architecture, providing research-to-live semantic parity.
   register of which demand each answer answers.
 - `health`: what the chain knows about its providers, when one of them has stopped being worth
   asking, and the counts that make an outage visible rather than merely survived.
+- `streaming`: what the chain is streaming, where each stream is served from, and the event that
+  says a stream changed source.
 - `composite`: the data client the engine sees, which serves a demand from the first provider that
   will take it, and is assembled from legs rather than configured.
 - `testing`: providers and clients whose answers are written down in advance, so that a chain can be

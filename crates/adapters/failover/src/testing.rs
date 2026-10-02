@@ -22,7 +22,12 @@
 //! answer is decided before the demand is made, so a test states what it expects to happen rather
 //! than waiting to find out.
 
-use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{
+    any::Any,
+    cell::{Cell, RefCell},
+    collections::VecDeque,
+    rc::Rc,
+};
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -36,7 +41,8 @@ use nautilus_common::{
         DataEvent,
         data::{
             BarsResponse, DataResponse, InstrumentResponse, InstrumentsResponse, RequestBars,
-            RequestInstrument, RequestInstruments,
+            RequestInstrument, RequestInstruments, SubscribeBars, SubscribeQuotes, SubscribeTrades,
+            UnsubscribeBars, UnsubscribeQuotes, UnsubscribeTrades,
         },
     },
 };
@@ -48,7 +54,11 @@ use nautilus_model::{
     types::{Currency, Price, Quantity},
 };
 
-use crate::{chain::Provider, failure::Failure};
+use crate::{
+    chain::Provider,
+    failure::Failure,
+    streaming::{Stream, Subscription, Unsubscription},
+};
 
 /// A provider whose answers are written down in advance.
 ///
@@ -121,6 +131,10 @@ pub enum FakeDemand {
     Instrument(RequestInstrument),
     /// Bars for one instrument and bar type.
     Bars(RequestBars),
+    /// A stream the client was asked to take.
+    Subscribed(Subscription),
+    /// A stream the client was asked to give up.
+    Unsubscribed(Stream),
 }
 
 impl FakeDemand {
@@ -131,8 +145,21 @@ impl FakeDemand {
             Self::Instruments(request) => request.request_id,
             Self::Instrument(request) => request.request_id,
             Self::Bars(request) => request.request_id,
+            Self::Subscribed(_) | Self::Unsubscribed(_) => UUID4::new(),
         }
     }
+}
+
+/// One call a scripted client took, in the order the chain made it.
+///
+/// A chain's rules about streams are about order - the old subscription is given up before the new one
+/// is taken - and order across two clients is not visible from either of them. It is visible here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FakeCall {
+    /// A stream was subscribed.
+    Subscribed(ClientId, Stream),
+    /// A stream was given up.
+    Unsubscribed(ClientId, Stream),
 }
 
 /// The configuration a scripted client reads, which is empty: a scripted client is told what it needs
@@ -158,10 +185,11 @@ pub struct FakeDataClient {
     id: ClientId,
     sender: EventSender<DataEvent>,
     mark: Price,
-    refuses: bool,
-    silent: bool,
+    refuses: Rc<Cell<bool>>,
+    silent: Rc<Cell<bool>>,
     connected: bool,
     asked: Rc<RefCell<Vec<FakeDemand>>>,
+    journal: Option<Rc<RefCell<Vec<FakeCall>>>>,
 }
 
 impl FakeDataClient {
@@ -175,9 +203,10 @@ impl FakeDataClient {
     pub fn new(
         id: ClientId,
         mark: Price,
-        refuses: bool,
-        silent: bool,
+        refuses: Rc<Cell<bool>>,
+        silent: Rc<Cell<bool>>,
         asked: Rc<RefCell<Vec<FakeDemand>>>,
+        journal: Option<Rc<RefCell<Vec<FakeCall>>>>,
     ) -> anyhow::Result<Self> {
         let sender = try_get_data_event_sender()
             .context("a scripted client must be built where a data event sender is installed")?;
@@ -190,6 +219,7 @@ impl FakeDataClient {
             silent,
             connected: true,
             asked,
+            journal,
         })
     }
 
@@ -199,7 +229,7 @@ impl FakeDataClient {
     ///
     /// Returns an error when the client refuses, which is what a client with nowhere to send says.
     fn has_transport(&self) -> anyhow::Result<()> {
-        if self.refuses {
+        if self.refuses.get() {
             anyhow::bail!("the client has no transport to send the request on");
         }
 
@@ -211,7 +241,34 @@ impl FakeDataClient {
     /// A client that is up with nothing behind it takes the demand and says nothing, which is the
     /// failure a chain can only see on the event channel.
     fn is_silent(&self) -> bool {
-        self.silent
+        self.silent.get()
+    }
+
+    /// Takes a stream, as a provider that serves it does.
+    fn take_stream(&self, command: &Subscription) -> anyhow::Result<()> {
+        self.asked
+            .borrow_mut()
+            .push(FakeDemand::Subscribed(command.clone()));
+        self.witness(FakeCall::Subscribed(self.id, command.stream()));
+
+        self.has_transport()
+    }
+
+    /// Gives up a stream, as a provider that was serving it does.
+    fn give_up(&self, command: &Unsubscription) -> anyhow::Result<()> {
+        self.asked
+            .borrow_mut()
+            .push(FakeDemand::Unsubscribed(command.stream()));
+        self.witness(FakeCall::Unsubscribed(self.id, command.stream()));
+
+        self.has_transport()
+    }
+
+    /// Notes a call in the shared journal, when the scripted clients are reporting to one.
+    fn witness(&self, call: FakeCall) {
+        if let Some(journal) = &self.journal {
+            journal.borrow_mut().push(call);
+        }
     }
 
     /// Writes an answer, as a client does when its provider has answered it.
@@ -283,6 +340,30 @@ impl DataClient for FakeDataClient {
         self.connected = false;
 
         Ok(())
+    }
+
+    fn subscribe_bars(&mut self, cmd: SubscribeBars) -> anyhow::Result<()> {
+        self.take_stream(&Subscription::Bars(cmd))
+    }
+
+    fn subscribe_quotes(&mut self, cmd: SubscribeQuotes) -> anyhow::Result<()> {
+        self.take_stream(&Subscription::Quotes(cmd))
+    }
+
+    fn subscribe_trades(&mut self, cmd: SubscribeTrades) -> anyhow::Result<()> {
+        self.take_stream(&Subscription::Trades(cmd))
+    }
+
+    fn unsubscribe_bars(&mut self, cmd: &UnsubscribeBars) -> anyhow::Result<()> {
+        self.give_up(&Unsubscription::Bars(cmd.clone()))
+    }
+
+    fn unsubscribe_quotes(&mut self, cmd: &UnsubscribeQuotes) -> anyhow::Result<()> {
+        self.give_up(&Unsubscription::Quotes(cmd.clone()))
+    }
+
+    fn unsubscribe_trades(&mut self, cmd: &UnsubscribeTrades) -> anyhow::Result<()> {
+        self.give_up(&Unsubscription::Trades(cmd.clone()))
     }
 
     fn request_instruments(&self, request: RequestInstruments) -> anyhow::Result<()> {
@@ -365,9 +446,10 @@ impl DataClient for FakeDataClient {
 pub struct FakeDataClientFactory {
     name: String,
     mark: Price,
-    refuses: bool,
-    silent: bool,
+    refuses: Rc<Cell<bool>>,
+    silent: Rc<Cell<bool>>,
     asked: Rc<RefCell<Vec<FakeDemand>>>,
+    journal: Option<Rc<RefCell<Vec<FakeCall>>>>,
 }
 
 impl FakeDataClientFactory {
@@ -377,9 +459,10 @@ impl FakeDataClientFactory {
         Self {
             name: name.to_string(),
             mark: Price::from("100.00"),
-            refuses: false,
-            silent: false,
+            refuses: Rc::new(Cell::new(false)),
+            silent: Rc::new(Cell::new(false)),
             asked: Rc::new(RefCell::new(Vec::new())),
+            journal: None,
         }
     }
 
@@ -387,6 +470,19 @@ impl FakeDataClientFactory {
     #[must_use]
     pub fn asked(&self) -> Vec<FakeDemand> {
         self.asked.borrow().clone()
+    }
+
+    /// Returns the streams this factory's clients were asked to take, in the order they were asked.
+    #[must_use]
+    pub fn subscribed(&self) -> Vec<Stream> {
+        self.asked
+            .borrow()
+            .iter()
+            .filter_map(|demand| match demand {
+                FakeDemand::Subscribed(subscription) => Some(subscription.stream()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Returns this factory with its clients answering at `mark`.
@@ -399,17 +495,36 @@ impl FakeDataClientFactory {
 
     /// Returns this factory with its clients refusing every request, as one with no transport does.
     #[must_use]
-    pub fn refusing(mut self) -> Self {
-        self.refuses = true;
+    pub fn refusing(self) -> Self {
+        self.refuses.set(true);
 
         self
+    }
+
+    /// Returns this factory with its clients reporting their streams to `journal`, in order.
+    #[must_use]
+    pub fn journaling(mut self, journal: &Rc<RefCell<Vec<FakeCall>>>) -> Self {
+        self.journal = Some(Rc::clone(journal));
+
+        self
+    }
+
+    /// Sets this factory's clients refusing from now on, for the failures that only happen later.
+    pub fn refuse_now(&self) {
+        self.refuses.set(true);
+    }
+
+    /// Sets this factory's clients serving again, for the recovery that a cooldown is waited out for.
+    pub fn recover(&self) {
+        self.refuses.set(false);
+        self.silent.set(false);
     }
 
     /// Returns this factory with its clients taking every request and answering none of them, as a
     /// provider that is up and not serving does.
     #[must_use]
-    pub fn silent(mut self) -> Self {
-        self.silent = true;
+    pub fn silent(self) -> Self {
+        self.silent.set(true);
 
         self
     }
@@ -427,9 +542,10 @@ impl DataClientFactory for FakeDataClientFactory {
         let client = FakeDataClient::new(
             id,
             self.mark,
-            self.refuses,
-            self.silent,
+            Rc::clone(&self.refuses),
+            Rc::clone(&self.silent),
             Rc::clone(&self.asked),
+            self.journal.as_ref().map(Rc::clone),
         )?;
 
         Ok(Box::new(client))
