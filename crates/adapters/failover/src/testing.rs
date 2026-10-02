@@ -13,15 +13,40 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-//! A provider that answers from a script, so that a chain can be exercised without a network.
+//! Providers and clients whose answers are written down in advance, so that a chain can be exercised
+//! without a network.
 //!
-//! What a chain does is a property of the chain and not of a venue, so it should be provable
-//! without one. This provider is deterministic in the only way that matters to a test: every answer
-//! is written down before the demand is made, and each call takes the next one in order.
+//! What a chain does is a property of the chain and not of a venue, so it should be provable without
+//! one. There are two levels of this, because a chain has two: a provider as the chain asks it, and a
+//! client as the boundary carries it. Both are deterministic in the only way that matters: every
+//! answer is decided before the demand is made, so a test states what it expects to happen rather
+//! than waiting to find out.
 
-use std::collections::VecDeque;
+use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc};
 
-use nautilus_model::identifiers::ClientId;
+use anyhow::Context;
+use async_trait::async_trait;
+use nautilus_common::{
+    cache::CacheView,
+    clients::DataClient,
+    clock::Clock,
+    factories::{ClientConfig, DataClientFactory},
+    live::{runner::try_get_data_event_sender, sender::EventSender},
+    messages::{
+        DataEvent,
+        data::{
+            BarsResponse, DataResponse, InstrumentResponse, InstrumentsResponse, RequestBars,
+            RequestInstrument, RequestInstruments,
+        },
+    },
+};
+use nautilus_core::{UUID4, UnixNanos};
+use nautilus_model::{
+    data::{Bar, BarType},
+    identifiers::{ClientId, InstrumentId, Venue},
+    instruments::{Equity, InstrumentAny},
+    types::{Currency, Price, Quantity},
+};
 
 use crate::{chain::Provider, failure::Failure};
 
@@ -85,6 +110,307 @@ impl<D: Clone + 'static, T: 'static> Provider for ScriptedProvider<D, T> {
             .pop_front()
             .expect("the script has no answer left for this demand")
     }
+}
+
+/// What a scripted client was asked for.
+#[derive(Debug, Clone)]
+pub enum FakeDemand {
+    /// A list of instruments for a venue.
+    Instruments(RequestInstruments),
+    /// One instrument.
+    Instrument(RequestInstrument),
+    /// Bars for one instrument and bar type.
+    Bars(RequestBars),
+}
+
+impl FakeDemand {
+    /// Returns the identifier the caller gave this demand, which is what its answer carries.
+    #[must_use]
+    pub fn request_id(&self) -> UUID4 {
+        match self {
+            Self::Instruments(request) => request.request_id,
+            Self::Instrument(request) => request.request_id,
+            Self::Bars(request) => request.request_id,
+        }
+    }
+}
+
+/// The configuration a scripted client reads, which is empty: a scripted client is told what it needs
+/// when it is made, so that a test does not have to write a configuration file to describe it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FakeConfig;
+
+impl ClientConfig for FakeConfig {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// A data client whose request calls are written down in advance.
+///
+/// A real client takes a request and answers it by writing a response, and the boundary is what
+/// carries that response to the engine. This is a client in the respects a chain cares about: it
+/// captures the data event sender of the thread it is built on, exactly as a real adapter does;
+/// whether it takes a demand is decided before the demand is made; and what it answers with is
+/// marked, so that a test can say which provider served.
+#[derive(Debug)]
+pub struct FakeDataClient {
+    id: ClientId,
+    sender: EventSender<DataEvent>,
+    mark: Price,
+    refuses: bool,
+    connected: bool,
+    asked: Rc<RefCell<Vec<FakeDemand>>>,
+}
+
+impl FakeDataClient {
+    /// Creates a client that answers under the identity it is given, marking its answers with `mark`
+    /// and recording what it is asked in `asked`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no data event sender is installed on this thread, which is the same
+    /// condition a real adapter fails on when it is built in the wrong place.
+    pub fn new(
+        id: ClientId,
+        mark: Price,
+        refuses: bool,
+        asked: Rc<RefCell<Vec<FakeDemand>>>,
+    ) -> anyhow::Result<Self> {
+        let sender = try_get_data_event_sender()
+            .context("a scripted client must be built where a data event sender is installed")?;
+
+        Ok(Self {
+            id,
+            sender,
+            mark,
+            refuses,
+            connected: true,
+            asked,
+        })
+    }
+
+    /// Writes an answer, as a client does when its provider has answered it.
+    fn write(&self, response: DataResponse) -> anyhow::Result<()> {
+        self.sender
+            .send(DataEvent::Response(response))
+            .map_err(|e| anyhow::anyhow!("cannot write the answer: {e}"))
+    }
+
+    /// Returns the one bar this client answers a bar request with.
+    fn bar(&self, bar_type: BarType) -> Bar {
+        Bar::new_checked(
+            bar_type,
+            self.mark,
+            self.mark,
+            self.mark,
+            self.mark,
+            Quantity::new(1.0, 0),
+            UnixNanos::default(),
+            UnixNanos::default(),
+        )
+        .expect("a bar whose prices are all one price is well formed")
+    }
+}
+
+#[async_trait(?Send)]
+impl DataClient for FakeDataClient {
+    fn client_id(&self) -> ClientId {
+        self.id
+    }
+
+    fn venue(&self) -> Option<Venue> {
+        None
+    }
+
+    fn start(&mut self) -> anyhow::Result<()> {
+        self.connected = true;
+
+        Ok(())
+    }
+
+    fn stop(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn reset(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn dispose(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        self.connected
+    }
+
+    fn is_disconnected(&self) -> bool {
+        !self.connected
+    }
+
+    async fn connect(&mut self) -> anyhow::Result<()> {
+        self.connected = true;
+
+        Ok(())
+    }
+
+    async fn disconnect(&mut self) -> anyhow::Result<()> {
+        self.connected = false;
+
+        Ok(())
+    }
+
+    fn request_instruments(&self, request: RequestInstruments) -> anyhow::Result<()> {
+        self.asked
+            .borrow_mut()
+            .push(FakeDemand::Instruments(request.clone()));
+
+        if self.refuses {
+            anyhow::bail!("the client has no transport to send the request on");
+        }
+
+        let instrument = fake_equity(InstrumentId::from("AAPL.US"));
+
+        self.write(DataResponse::Instruments(InstrumentsResponse::new(
+            request.request_id,
+            request.client_id.unwrap_or(self.id),
+            request.venue.unwrap_or_else(|| Venue::from("SIM")),
+            vec![instrument],
+            None,
+            None,
+            UnixNanos::default(),
+            None,
+        )))
+    }
+
+    fn request_instrument(&self, request: RequestInstrument) -> anyhow::Result<()> {
+        self.asked
+            .borrow_mut()
+            .push(FakeDemand::Instrument(request.clone()));
+
+        if self.refuses {
+            anyhow::bail!("the client has no transport to send the request on");
+        }
+
+        self.write(DataResponse::Instrument(Box::new(InstrumentResponse::new(
+            request.request_id,
+            request.client_id.unwrap_or(self.id),
+            request.instrument_id,
+            fake_equity(request.instrument_id),
+            None,
+            None,
+            UnixNanos::default(),
+            None,
+        ))))
+    }
+
+    fn request_bars(&self, request: RequestBars) -> anyhow::Result<()> {
+        self.asked
+            .borrow_mut()
+            .push(FakeDemand::Bars(request.clone()));
+
+        if self.refuses {
+            anyhow::bail!("the client has no transport to send the request on");
+        }
+
+        self.write(DataResponse::Bars(BarsResponse::new(
+            request.request_id,
+            request.client_id.unwrap_or(self.id),
+            request.bar_type,
+            vec![self.bar(request.bar_type)],
+            None,
+            None,
+            UnixNanos::default(),
+            None,
+        )))
+    }
+}
+
+/// A factory that builds scripted clients, so that a chain can be assembled out of legs.
+///
+/// The factory keeps what its clients are asked, because a test that asserts which provider served a
+/// demand has to be able to see which providers were asked for it.
+#[derive(Debug, Clone)]
+pub struct FakeDataClientFactory {
+    name: String,
+    mark: Price,
+    refuses: bool,
+    asked: Rc<RefCell<Vec<FakeDemand>>>,
+}
+
+impl FakeDataClientFactory {
+    /// Creates a factory whose clients answer with a mark of 100.00.
+    #[must_use]
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            mark: Price::from("100.00"),
+            refuses: false,
+            asked: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+
+    /// Returns the demands this factory's clients were asked, in the order they were asked them.
+    #[must_use]
+    pub fn asked(&self) -> Vec<FakeDemand> {
+        self.asked.borrow().clone()
+    }
+
+    /// Returns this factory with its clients answering at `mark`.
+    #[must_use]
+    pub fn marked(mut self, mark: Price) -> Self {
+        self.mark = mark;
+
+        self
+    }
+
+    /// Returns this factory with its clients refusing every request, as one with no transport does.
+    #[must_use]
+    pub fn refusing(mut self) -> Self {
+        self.refuses = true;
+
+        self
+    }
+}
+
+impl DataClientFactory for FakeDataClientFactory {
+    fn create(
+        &self,
+        name: &str,
+        _config: &dyn ClientConfig,
+        _cache: CacheView,
+        _clock: Rc<RefCell<dyn Clock>>,
+    ) -> anyhow::Result<Box<dyn DataClient>> {
+        let id = ClientId::from(name);
+        let client = FakeDataClient::new(id, self.mark, self.refuses, Rc::clone(&self.asked))?;
+
+        Ok(Box::new(client))
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn config_type(&self) -> &'static str {
+        "FakeConfig"
+    }
+}
+
+/// Returns an instrument for `instrument_id`, built the way a provider builds one.
+fn fake_equity(instrument_id: InstrumentId) -> InstrumentAny {
+    InstrumentAny::Equity(
+        Equity::builder()
+            .instrument_id(instrument_id)
+            .raw_symbol(instrument_id.symbol)
+            .currency(Currency::from("USD"))
+            .price_precision(2)
+            .price_increment(Price::from("0.01"))
+            .ts_event(UnixNanos::default())
+            .ts_init(UnixNanos::default())
+            .build()
+            .expect("the instrument is well formed"),
+    )
 }
 
 #[cfg(test)]

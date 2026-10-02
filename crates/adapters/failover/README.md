@@ -30,8 +30,10 @@ event-driven architecture, providing research-to-live semantic parity.
   the chain's and the caller's correlation identifier is left alone.
 - `pump`: the sender a chain gives its providers and the task that drains it, together with the
   register of which demand each answer answers.
-- `testing`: a provider that answers from a script, so that a chain can be exercised without a
-  network.
+- `composite`: the data client the engine sees, which serves a demand from the first provider that
+  will take it, and is assembled from legs rather than configured.
+- `testing`: providers and clients whose answers are written down in advance, so that a chain can be
+  exercised without a network.
 
 Two rules decide everything: a retry is for a transient condition on a provider that is otherwise
 the right one, and a hop is a deliberate move to a different dataset. An empty answer is neither: it

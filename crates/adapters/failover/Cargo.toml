@@ -20,6 +20,8 @@ name = "nautilus_failover"
 crate-type = ["rlib"]
 
 [dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
 nautilus-common = { workspace = true, features = ["live"] }
 nautilus-core = { workspace = true }
 nautilus-model = { workspace = true }

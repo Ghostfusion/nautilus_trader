@@ -6172,11 +6172,13 @@ dependencies = [
 name = "nautilus-failover"
 version = "0.65.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "log",
  "nautilus-common",
  "nautilus-core",
  "nautilus-model",
+ "parking_lot",
  "rstest",
  "thiserror 2.0.21",
  "tokio",

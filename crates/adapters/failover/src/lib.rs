@@ -54,6 +54,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod chain;
+pub mod composite;
 pub mod failure;
 pub mod pump;
 pub mod tap;

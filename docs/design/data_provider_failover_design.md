@@ -489,6 +489,19 @@ a live request is therefore decided from what a provider says when it is asked -
 demand, or why it would not - while a provider that took a demand and then failed to answer is learnt
 off the events, for the next demand rather than for the one already gone.
 
+**A provider that will not take a demand is unreachable, whatever its client's error says.** What a
+request call can report is only that the client could not hand the demand over, and that is what
+`Unreachable` means: there is nothing on the other end for it. The chain moves on rather than
+repeating the attempt, as it does for a rate limit and a refusal. Reading every such error the same
+way costs one wasted request when the error was the caller's own defect, and it costs nothing else:
+the next provider refuses for the same reason, and the chain stops at the end of the legs.
+
+**The boundary is installed for exactly as long as the legs are being built.** A provider takes the
+data event sender it finds when it is constructed, so the sender has to be the chain's at that
+moment - and must be put back immediately afterwards, because anything else built on the same thread
+would otherwise be rewritten into the chain's identity and the engine would be told about a client
+that does not exist. The window is closed by the scope rather than by remembering to close it.
+
 **A leg is a factory and a configuration, and neither is serializable.** The engine's own
 configuration path is serde, and a `ClientConfig` is a trait object, so a chain's configuration
 cannot be a serialized struct of legs the way a single provider's configuration is. The chain is
