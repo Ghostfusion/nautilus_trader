@@ -44,6 +44,9 @@ pub mod qot_get_ticker {
 pub mod qot_request_history_kl {
     include!("qot_request_history_kl.rs");
 }
+pub mod qot_request_history_kl_quota {
+    include!("qot_request_history_kl_quota.rs");
+}
 pub mod qot_sub {
     include!("qot_sub.rs");
 }

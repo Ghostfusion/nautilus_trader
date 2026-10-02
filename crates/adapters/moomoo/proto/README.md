@@ -16,24 +16,38 @@ alongside, and the crate's build script is inert unless asked to regenerate.
 
 ## What is vendored
 
-Only the transitive import closure of the protocols the adapter uses, which is 20 files:
+Only the transitive import closure of the protocols the adapter uses, which is 21 files:
 
 ```
-Common.proto                     Qot_GetKL.proto
-GetGlobalState.proto             Qot_GetOrderBook.proto
-GetUserInfo.proto                Qot_GetSecuritySnapshot.proto
-InitConnect.proto                Qot_GetStaticInfo.proto
-KeepAlive.proto                  Qot_GetSubInfo.proto
-Notify.proto                     Qot_GetTicker.proto
-Qot_Common.proto                 Qot_RequestHistoryKL.proto
-Qot_GetBasicQot.proto            Qot_Sub.proto
-Qot_UpdateBasicQot.proto         Qot_UpdateKL.proto
-Qot_UpdateOrderBook.proto        Qot_UpdateTicker.proto
+Common.proto
+GetGlobalState.proto
+GetUserInfo.proto
+InitConnect.proto
+KeepAlive.proto
+Notify.proto
+Qot_Common.proto
+Qot_GetBasicQot.proto
+Qot_GetKL.proto
+Qot_GetOrderBook.proto
+Qot_GetSecuritySnapshot.proto
+Qot_GetStaticInfo.proto
+Qot_GetSubInfo.proto
+Qot_GetTicker.proto
+Qot_RequestHistoryKL.proto
+Qot_RequestHistoryKLQuota.proto
+Qot_Sub.proto
+Qot_UpdateBasicQot.proto
+Qot_UpdateKL.proto
+Qot_UpdateOrderBook.proto
+Qot_UpdateTicker.proto
 ```
 
-The full package ships 184 definitions. The 20 above are the exact import closure of the set the
+The full package ships 184 definitions. The 21 above are the exact import closure of the set the
 adapter needs, and every import resolves inside them, so no `google/protobuf` well-known type has to
 be vendored or compiled.
+
+The set grows by endpoint, not by accident: `Qot_RequestHistoryKLQuota` was added when the adapter
+needed to read the historical allowance, and its own two imports were already present.
 
 ## Regenerating
 
@@ -48,3 +62,7 @@ MOOMOO_PROTO_REBUILD=1 PROTOC=/path/to/protoc cargo build -p nautilus-moomoo
 The build script writes the generated Rust into `src/generated/`, which is committed. Regeneration is
 deliberate rather than automatic so that a stale generated file is caught in review instead of
 appearing as a build failure on a host without `protoc`.
+
+Comments are disabled in the generated output. The definitions document their fields in Chinese, and
+the generated Rust is committed, so the comments stay in the `.proto` files, which remain the
+reference for field semantics.

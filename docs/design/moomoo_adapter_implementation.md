@@ -152,6 +152,7 @@ proto/
   Qot_UpdateOrderBook.proto
   Qot_GetStaticInfo.proto
   Qot_GetSecuritySnapshot.proto
+  Qot_RequestHistoryKLQuota.proto
 ```
 
 Two rules for the vendored set. First, vendor only what is used, so the crate's generated surface
@@ -163,12 +164,14 @@ The definitions are from the same package version whose codec was read during th
 generated types and the verified frame layout are known to be mutually consistent.
 
 **The list above is the verified transitive import closure, not an estimate.** Parsing all 184
-vendored definitions and following every `import` from those twenty roots yields exactly those twenty
-files and no others, and every import resolves inside the package, so no `google/protobuf` well-known
-type has to be vendored or compiled.
+vendored definitions and following every `import` from those twenty-one roots yields exactly those
+twenty-one files and no others, and every import resolves inside the package, so no `google/protobuf`
+well-known type has to be vendored or compiled. The set grows by endpoint rather than by accident:
+the allowance schema was added when the adapter needed to read that allowance, and its own imports
+were already present.
 
-**The schema is `proto2`, and that is what the generator has to be right about.** All twenty files
-declare `proto2` and carry 246 `required` fields. prost supports it: prost-build emits the `required`
+**The schema is `proto2`, and that is what the generator has to be right about.** All twenty-one files
+declare `proto2` and carry 252 `required` fields. prost supports it: prost-build emits the `required`
 label, and prost derives unconditional encoding for those fields, which is what proto2 presence
 means. The first implementation pinned that against an independent encoder rather than trusting it,
 and three proto2 behaviours now have conformance tests (section 17):
@@ -417,18 +420,27 @@ and a continuation key.
 
 Implementation requirements:
 
-- **Pagination**: loop until the continuation key is absent, and spend one unit of the historical
-  allowance per request, refusing when the allowance is exhausted rather than looping until the
-  venue errors.
+- **Pagination**: loop until the continuation key is absent. The allowance is checked once before
+  the first page rather than once per page, because the gateway's unit is a **security** and not a
+  request: it counts how many securities have been downloaded in the current period, and a later
+  request for one of them is free until the period rolls over. Reading that as a per-request unit
+  overstates what pagination costs and understates what a new symbol costs.
 - **Adjustment**: an explicit, configured choice defaulting to raw and never silently following the
   venue default, which is adjusted (design 12.2).
-- **Session**: an explicit choice for intraday intervals, because extended-hours rows are not
-  returned otherwise.
-- **Ordering and dedup**: rows arrive oldest first within a page, and the adapter must assemble
-  pages into one ordered, deduplicated series before emitting, because a consumer that sees a
-  duplicate bar cannot tell it from a correction.
-- **Time**: the exchange-local timestamp is converted with the market's timezone to a nanosecond
-  event time in one function, tested across a daylight-saving transition for the US market.
+- **Session**: an explicit choice, because extended-hours rows are not returned otherwise.
+- **Ordering and dedup**: rows arrive oldest first within a page, and the adapter assembles pages
+  into one ordered, deduplicated series before emitting, because a consumer that sees a duplicate
+  bar cannot tell it from a correction. Where a bar has already been seen, the later row is kept,
+  since a later page is where a correction arrives.
+- **Time**: one function converts a row's own timestamp into an event time, and which instant that
+  is depends on the interval. A bar coarser than a day carries a date and is placed at UTC midnight,
+  which is what the EODHD adapter does for the same daily bar; placing it at local midnight instead
+  would put the two providers five hours apart, and a different number of hours either side of a
+  daylight saving change. A bar finer than a day carries an exchange wall clock reading and is
+  resolved through that market's IANA time zone, tested across a daylight-saving transition for the
+  US market, because a fixed offset is wrong for half the year.
+- **Blank rows** mark an interval in which nothing traded and carry only a time, so they are skipped
+  rather than emitted as a bar whose open, high, low and close are all the same number.
 
 The interval vocabulary is the venue's, and the adapter maps its own interval type onto it
 explicitly, refusing intervals the venue does not offer rather than rounding to the nearest one.

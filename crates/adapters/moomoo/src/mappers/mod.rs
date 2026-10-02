@@ -20,4 +20,5 @@
 //! payload with no gateway and no network, which is the only way most of these paths can be tested
 //! at all.
 
+pub mod bars;
 pub mod instrument;

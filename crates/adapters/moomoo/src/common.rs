@@ -87,6 +87,18 @@ impl Market {
         }
     }
 
+    /// Returns the IANA time zone the market's wall clock runs on.
+    ///
+    /// This is a name rather than an offset because an offset is wrong for half the year in New
+    /// York, and a bar placed an hour off is a bar the next one overwrites.
+    #[must_use]
+    pub fn time_zone(self) -> &'static str {
+        match self {
+            Self::Us => "America/New_York",
+            Self::Hk => "Asia/Hong_Kong",
+        }
+    }
+
     /// Returns the price precision to use when no usable spread is available.
     ///
     /// This is a fallback, not a definition. A United States equity quotes in cents, and the price

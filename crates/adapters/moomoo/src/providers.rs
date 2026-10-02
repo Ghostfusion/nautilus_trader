@@ -21,14 +21,24 @@
 //! not touch the subscription allowance.
 
 use anyhow::{Context, bail};
-use nautilus_model::instruments::InstrumentAny;
+use nautilus_model::{
+    data::{Bar, BarType},
+    instruments::InstrumentAny,
+};
 use prost::Message as _;
 
 use crate::{
     common::Market,
     connection::{Connection, RET_OK},
-    generated::{qot_common, qot_get_security_snapshot, qot_get_static_info},
-    mappers::instrument::instrument_from,
+    generated::{
+        qot_common::{self, KLine},
+        qot_get_security_snapshot, qot_get_static_info, qot_request_history_kl,
+        qot_request_history_kl_quota,
+    },
+    mappers::{
+        bars::{Adjustment, BarSession, Interval, build_bars},
+        instrument::instrument_from,
+    },
 };
 
 /// The protocol identifier of the static information request.
@@ -150,4 +160,200 @@ pub async fn load_instrument(
     let snapshot = request_snapshot(connection, security).await?;
 
     instrument_from(&static_info, Some(&snapshot))
+}
+
+/// The protocol identifier of the historical K-line request.
+pub const PROTO_ID_REQUEST_HISTORY_KL: u32 = 3103;
+
+/// The protocol identifier of the historical allowance read.
+pub const PROTO_ID_REQUEST_HISTORY_KL_QUOTA: u32 = 3104;
+
+/// The most pages one series is assembled from before the loop is treated as a defect.
+///
+/// The venue bounds a series itself, so this only exists so that a continuation key the venue keeps
+/// returning cannot spin forever.
+const MAX_HISTORY_PAGES: u32 = 64;
+
+/// One security the historical allowance has already been spent on in the current period.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllowanceSpend {
+    /// The security, in the gateway's own form.
+    pub code: String,
+    /// When the unit was spent, as the gateway reports it.
+    pub request_time: String,
+}
+
+/// The gateway's own tally of the historical allowance.
+///
+/// The unit is a security, not a request. The gateway counts how many securities have been
+/// downloaded in the current period, and a later request for one of them is free until the period
+/// rolls over. That is what makes pagination cheap and the first load of a new security expensive,
+/// and it is why the allowance is checked once per series rather than once per page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryAllowance {
+    /// Securities already spent on in the current period.
+    pub used: i32,
+    /// Securities still available.
+    pub remaining: i32,
+    /// Which securities were spent on, as the gateway reports them.
+    pub spent: Vec<AllowanceSpend>,
+}
+
+impl HistoryAllowance {
+    /// Returns whether a security has already been spent on in the current period.
+    #[must_use]
+    pub fn covers(&self, market: Market, code: &str) -> bool {
+        let wanted = describe(&security(market, code));
+
+        self.spent.iter().any(|spend| spend.code == wanted)
+    }
+}
+
+/// Reads the gateway's own tally of the historical allowance.
+///
+/// The adapter also keeps its own estimate of what it has spent, but this is the authority: the
+/// allowance is shared with every other tool the operator runs against the same gateway.
+///
+/// # Errors
+///
+/// Returns an error if the request fails, the gateway refuses it, the answer cannot be decoded, or
+/// it carries no payload.
+pub async fn request_history_allowance(
+    connection: &Connection,
+) -> anyhow::Result<HistoryAllowance> {
+    let request = qot_request_history_kl_quota::Request {
+        c2s: qot_request_history_kl_quota::C2s {
+            b_get_detail: Some(true),
+            header: None,
+        },
+    };
+
+    let message = connection
+        .request(PROTO_ID_REQUEST_HISTORY_KL_QUOTA, &request.encode_to_vec())
+        .await?;
+
+    let response = qot_request_history_kl_quota::Response::decode(message.body.as_slice())
+        .context("cannot decode a historical allowance response")?;
+    check_outcome(response.ret_type, response.ret_msg, "historical allowance")?;
+
+    let s2c = response
+        .s2c
+        .context("the historical allowance response carried no payload")?;
+
+    Ok(HistoryAllowance {
+        used: s2c.used_quota,
+        remaining: s2c.remain_quota,
+        spent: s2c
+            .detail_list
+            .into_iter()
+            .map(|detail| AllowanceSpend {
+                code: describe(&detail.security),
+                request_time: detail.request_time,
+            })
+            .collect(),
+    })
+}
+
+/// A historical bar request.
+#[derive(Debug, Clone)]
+pub struct HistoryRequest {
+    /// The market the security trades on.
+    pub market: Market,
+    /// The security's code, without its market prefix.
+    pub code: String,
+    /// The bar interval.
+    pub interval: Interval,
+    /// The price adjustment.
+    pub adjustment: Adjustment,
+    /// The first date to include, as the gateway writes a date.
+    pub begin: String,
+    /// The last date to include, as the gateway writes a date.
+    pub end: String,
+    /// The session the request covers.
+    pub session: BarSession,
+    /// The largest number of bars to ask for in one page, when the caller sets one.
+    pub page_size: Option<i32>,
+}
+
+/// Loads a bar series, paginating until the venue stops returning a continuation key.
+///
+/// The allowance is checked before the first page rather than discovered part way through, because
+/// the unit is spent on the security: a series for a security already paid for in this period costs
+/// nothing, and a series for a new one needs a unit to be available.
+///
+/// # Errors
+///
+/// Returns an error if the allowance cannot be read, if it is exhausted and the security is not
+/// already covered, if a page is refused, if the venue keeps paginating past the page bound, or if
+/// the rows cannot be mapped.
+pub async fn request_history_bars(
+    connection: &Connection,
+    request: &HistoryRequest,
+    bar_type: BarType,
+    price_precision: u8,
+) -> anyhow::Result<Vec<Bar>> {
+    let allowance = request_history_allowance(connection).await?;
+
+    if allowance.remaining <= 0 && !allowance.covers(request.market, &request.code) {
+        bail!(
+            "the historical allowance is exhausted at {} securities in this period, and {} is not \
+             one of them",
+            allowance.used,
+            describe(&security(request.market, &request.code))
+        );
+    }
+
+    let mut next_key: Option<Vec<u8>> = None;
+    let mut rows: Vec<KLine> = Vec::new();
+    let mut pages = 0_u32;
+
+    loop {
+        if pages >= MAX_HISTORY_PAGES {
+            bail!("the gateway kept returning a continuation key past {MAX_HISTORY_PAGES} pages");
+        }
+        pages += 1;
+
+        let body = qot_request_history_kl::Request {
+            c2s: qot_request_history_kl::C2s {
+                rehab_type: request.adjustment.rehab_type(),
+                kl_type: request.interval.kl_type(),
+                security: security(request.market, &request.code),
+                begin_time: request.begin.clone(),
+                end_time: request.end.clone(),
+                max_ack_kl_num: request.page_size,
+                need_kl_fields_flag: None,
+                next_req_key: next_key.take(),
+                extended_time: Some(request.session.extended_time()),
+                session: Some(request.session.session()),
+                header: None,
+            },
+        };
+
+        let message = connection
+            .request(PROTO_ID_REQUEST_HISTORY_KL, &body.encode_to_vec())
+            .await?;
+
+        let response = qot_request_history_kl::Response::decode(message.body.as_slice())
+            .context("cannot decode a historical bar response")?;
+        check_outcome(response.ret_type, response.ret_msg, "historical bars")?;
+
+        let s2c = response
+            .s2c
+            .context("the historical bar response carried no payload")?;
+
+        rows.extend(s2c.kl_list);
+
+        match s2c.next_req_key.filter(|key| !key.is_empty()) {
+            Some(key) => next_key = Some(key),
+            None => {
+                return build_bars(
+                    &rows,
+                    bar_type,
+                    request.interval,
+                    request.market,
+                    price_precision,
+                );
+            }
+        }
+    }
 }
