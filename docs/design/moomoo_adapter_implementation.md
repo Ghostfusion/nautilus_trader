@@ -160,6 +160,19 @@ rediscovered.
 The definitions are from the same package version whose codec was read during the probe, so the
 generated types and the verified frame layout are known to be mutually consistent.
 
+**The list above is the verified transitive import closure, not an estimate.** Parsing all 184
+vendored definitions and following every `import` from those twenty roots yields exactly those twenty
+files and no others, and every import resolves inside the package, so no `google/protobuf` well-known
+type has to be vendored or compiled. Two consequences follow for the generated code, both visible in
+the schema before any code is written:
+
+- **Every package is named after its file** (`Common`, `InitConnect`, `Qot_Common`), so the generated
+  module names are PascalCase and the checked-in output will need either an allow attribute or a
+  rename pass. The existing precedent does exactly this: `dydx-proto` post-processes its generated
+  files with regex patches.
+- **The message names are uniform across packages** (`C2S`, `S2C`, `Request`, `Response` repeated in
+  each), so generated types must always be addressed by module path rather than imported unqualified.
+
 ### Generation strategy
 
 Generation happens once, deliberately, and the result is checked in. A build-time `protoc` would make
@@ -213,16 +226,28 @@ requested push format. The handshake response is where the gateway reports the k
 and that interval governs the heartbeat, so it must be captured before the heartbeat task can be
 started.
 
-The client version field is taken from the value the shipped client uses for this gateway version;
-it is a constant in the vendor package and should be read from there rather than invented. The
-probe verified the handshake fields and their names but did not need the version value, because it
-used the vendor client itself.
+The client version field is the shipped client's own default, `CLIENT_VERSION = 300`
+(`moomoo/common/constant.py:356`), read through `SysConfig.get_client_ver()`, which falls back to
+that constant when no override is set. It is not a free choice: the gateway has a version of its own,
+and this field is how the client identifies the protocol it speaks. The probe verified the handshake
+fields and their names but did not need the value, because it used the vendor client itself.
+
+The handshake request carries a small fixed set beyond the version, and the client's own `pack_req`
+(`moomoo/quote/quote_query.py:243`) is the authority for it: the client ID, whether to receive
+notifications, whether the connection is encrypted, and the requested push format.
 
 ### 7.2 Heartbeat
 
-A task owns the heartbeat on the negotiated interval. Its failure is the connection's failure
-signal. Since the gateway drops a socket that stays quiet beyond the window, a missing heartbeat
-manifests first as a closed socket, which is the intended detection path.
+A task owns the heartbeat, and the interval has one detail that is easy to get subtly wrong. The
+shipped client does not use the interval the gateway reports; it uses **four fifths** of it
+(`moomoo/common/open_context_base.py:680`, `keep_alive_interval * 4 / 5`), having started from a
+ten-second default before the handshake completes (`open_context_base.py:72`). Sending on the full
+interval leaves no margin against the gateway's own timeout, so the adapter should apply the same
+reduction rather than the raw value.
+
+Its failure is the connection's failure signal. Since the gateway drops a socket that stays quiet
+beyond the window, a missing heartbeat manifests first as a closed socket, which is the intended
+detection path.
 
 ### 7.3 Dispatch
 
