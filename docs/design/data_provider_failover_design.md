@@ -563,3 +563,57 @@ from its own task, and a provider is not `Send`, so a stream whose provider dies
 itself: the move happens at the next streamed demand or at a checkpoint. This is the same limit as
 for requests in section 17, and it is the reason an operator or an adapter's own reconnect path has
 to give the chain a chance to act rather than expecting the chain to notice on its own.
+
+## 19. As proved: the two real legs
+
+The chain was assembled out of EODHD and moomoo, in that order, and run live. Both legs answered for
+the same security under the same instrument identifier, and the second run moved the demand across a
+forced hop.
+
+The assembly is a chain of legs, each of which is the factory and the configuration that would have
+built that client on its own:
+
+```rust
+let legs = vec![
+    Leg::new(ClientId::from("EODHD"), Box::new(EodhdDataClientFactory), Box::new(eodhd_config)),
+    Leg::new(ClientId::from("MOOMOO"), Box::new(MoomooDataClientFactory), Box::new(moomoo_config)),
+];
+let chain = CompositeDataClient::new(ClientId::from("FAILOVER"), legs, policy, &cache, &clock)?;
+```
+
+**The primary serves.** With EODHD reachable, a request for `AAPL.US-1-DAY-LAST-EXTERNAL` came back as
+a bar response carrying the chain's identity and the caller's correlation identifier, with one bar the
+venue returned. The chain's own account of itself named EODHD as the provider asked and the provider
+that answered:
+
+```
+Bars{ client_id=FAILOVER correlation_id=38777c50 bar_type=AAPL.US-1-DAY-LAST-EXTERNAL rows=1 close=330.32 }
+EODHD: attempts=1 answers=1 failures=0 hops=0 set_aside=false
+```
+
+**The forced failure is the one a synchronous call cannot see.** EODHD was pointed at an endpoint with
+nothing behind it, so its request call *succeeded* - it took the demand - and no answer was ever
+written. That is what a provider that is up with nothing behind it does, and it is why the boundary
+keeps the demands it has issued: after the deadline, the chain held EODHD to account for the demand it
+never answered.
+
+```
+the first demand was not answered, as it should not be
+EODHD: attempts=1 answers=0 failures=1 hops=1 set_aside=true last_failure=Unanswered
+```
+
+**The next demand is served by the other leg, under the same identifier.** With EODHD set aside, the
+same request was served by moomoo: 251 bars, the chain's identity, the caller's correlation
+identifier, and the same `AAPL.US-1-DAY-LAST-EXTERNAL` bar type that EODHD had served in the first
+run.
+
+```
+Bars{ client_id=FAILOVER correlation_id=6f9633fd bar_type=AAPL.US-1-DAY-LAST-EXTERNAL rows=251 close=258.02 }
+MOOMOO: attempts=1 answers=1 failures=0 hops=0 set_aside=false
+```
+
+The two runs differ in the number of bars and in the price of the first one, which is the point rather
+than a defect: two providers, one identifier, and a chain that says which of them served. The live
+proof was run with a temporary harness rather than a committed test, because it needs an API key and a
+running gateway, and a test that needs either of those does not belong in a suite that runs without
+them.

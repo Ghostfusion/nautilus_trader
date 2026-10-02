@@ -514,6 +514,11 @@ impl FakeDataClientFactory {
         self.refuses.set(true);
     }
 
+    /// Sets this factory's clients taking demands and never answering them from now on.
+    pub fn silent_now(&self) {
+        self.silent.set(true);
+    }
+
     /// Sets this factory's clients serving again, for the recovery that a cooldown is waited out for.
     pub fn recover(&self) {
         self.refuses.set(false);

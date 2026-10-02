@@ -398,12 +398,26 @@ impl CompositeDataClient {
         let mut trace = Trace::default();
         let served = run(&mut legs[..asking], &addressed, &mut trace);
 
-        // Moving from one provider to a different one is a hop, and it is counted against the one
-        // that was left. An attempt repeated at the same provider is not a hop.
+        // A hop is counted against the provider that was left, once per demand. Two things are a hop:
+        // the chain being served by a different provider than the one that served it last, which is
+        // what a provider set aside for failing to answer produces, and a provider it gave up on
+        // during the demand itself. An attempt repeated at the same provider is not a hop.
+        let mut left: Vec<ClientId> = Vec::new();
+
+        if let (Some(previous), Served::Answered(provider)) = (current, &served)
+            && *provider != previous
+        {
+            left.push(previous);
+        }
+
         for pair in trace.attempts().windows(2) {
-            if pair[0].provider != pair[1].provider {
-                self.health.hopped_from(&pair[0].provider);
+            if pair[0].provider != pair[1].provider && !left.contains(&pair[0].provider) {
+                left.push(pair[0].provider);
             }
+        }
+
+        for provider in left {
+            self.health.hopped_from(&provider);
         }
 
         match served {
@@ -1377,6 +1391,50 @@ mod tests {
             1,
             "a provider that did not answer is not asked again for the next demand"
         );
+    }
+
+    /// A provider that stops answering is left even though no attempt of it failed: the demand it
+    /// took was never answered, and the deadline is what makes that a hop rather than a mystery.
+    #[rstest]
+    fn test_a_provider_that_stops_answering_is_counted_as_hopped_from() {
+        let mut events = install_engine();
+        let policy = Policy {
+            answer_deadline: Duration::from_millis(50),
+            ..Policy::default()
+        };
+        let primary = provider("PRIMARY", "100.00");
+        let secondary = provider("SECONDARY", "200.00");
+        let mut chain = chain_with(policy, vec![leg(&primary), leg(&secondary)]);
+
+        chain.start().unwrap();
+
+        // The primary serves a demand, so the chain is being served by it.
+        chain.request_bars(bars_request()).unwrap();
+        let DataEvent::Response(DataResponse::Bars(_)) = next_event(&mut events) else {
+            panic!("expected a bar response");
+        };
+
+        // It stops answering, and the deadline sets it aside.
+        primary.silent_now();
+        chain.request_bars(bars_request()).unwrap();
+        await_set_aside(&chain, "PRIMARY");
+
+        // The next demand is served elsewhere, and the chain says it moved away.
+        chain.request_bars(bars_request()).unwrap();
+
+        let DataEvent::Response(DataResponse::Bars(answer)) = next_event(&mut events) else {
+            panic!("expected a bar response");
+        };
+
+        assert_eq!(answer.data[0].close, Price::from("200.00"));
+
+        let snapshot = snapshot(&chain, "PRIMARY");
+
+        assert_eq!(
+            snapshot.hops, 1,
+            "the chain moved away from the primary once"
+        );
+        assert_eq!(snapshot.answers, 1);
     }
 
     /// The counts are the chain's account of itself, so a provider nobody asked is not in them.
