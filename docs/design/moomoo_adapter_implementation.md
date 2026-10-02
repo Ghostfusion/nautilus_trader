@@ -574,7 +574,8 @@ and the local receive time is used instead. That same push is the one the trade 
 The domain book is told a sequence of zero, because the venue assigns none, and the domain book
 skips its ordering check for zero rather than failing it. Each level carries the receive time of its
 own side: against the gateway the two sides differed, and the bid side's timestamp lagged the ask's
-by fifty milliseconds on one recorded push.
+by fifty-five milliseconds on one recorded push, which is why the batch reports the later of the two
+rather than whichever side was read first.
 
 ## 14. Corporate actions
 
