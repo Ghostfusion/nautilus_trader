@@ -29,6 +29,14 @@
 //! On a chain of two providers that bounds a demand at three attempts in the worst case: the
 //! primary, its one retry, and the secondary.
 //!
+//! # Why this is synchronous
+//!
+//! A live data client is called from the engine's own loop, so its calls have to return rather than
+//! wait: a client that awaited a provider's answer would stall the engine and everything queued
+//! behind it, and a client is not `Send`, so the wait cannot be moved to a task either. The chain is
+//! therefore a decision made from what a provider says when it is asked - that it took the demand,
+//! or why it would not - and what arrives afterwards is observed where the events do.
+//!
 //! # What the chain is not
 //!
 //! It is not a load balancer and not a health tracker. It is handed an order and a demand, and it
@@ -36,7 +44,6 @@
 //! primary is a policy above it, which is what lets a caller hold a demand on the provider that is
 //! currently serving it rather than reconsidering on every request.
 
-use async_trait::async_trait;
 use nautilus_model::identifiers::ClientId;
 
 use crate::failure::{Action, Failure};
@@ -46,7 +53,6 @@ use crate::failure::{Action, Failure};
 /// The chain knows nothing about what a provider is made of: that a provider can be asked for a
 /// demand, that it answers or says why it could not, and what it is called. Everything else about
 /// talking to a venue belongs to the provider.
-#[async_trait(?Send)]
 pub trait Provider {
     /// What this provider is asked for.
     type Demand;
@@ -57,7 +63,11 @@ pub trait Provider {
     fn id(&self) -> ClientId;
 
     /// Serves one demand, or returns why it could not.
-    async fn serve(&mut self, demand: &Self::Demand) -> Result<Self::Answer, Failure>;
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`Failure`] that classifies why this provider could not serve the demand.
+    fn serve(&mut self, demand: &Self::Demand) -> Result<Self::Answer, Failure>;
 }
 
 /// One attempt at one provider.
@@ -123,7 +133,7 @@ impl<T> Served<T> {
 /// Every attempt is appended to `trace`, so a caller that wants one trace per demand passes a fresh
 /// one. A hop is logged with the failure that caused it, because a hop is a change of dataset and
 /// an operator has to be able to see when one happened.
-pub async fn run<P>(providers: &mut [P], demand: &P::Demand, trace: &mut Trace) -> Served<P::Answer>
+pub fn run<P>(providers: &mut [P], demand: &P::Demand, trace: &mut Trace) -> Served<P::Answer>
 where
     P: Provider,
 {
@@ -140,7 +150,7 @@ where
         let mut retried = false;
 
         loop {
-            match provider.serve(demand).await {
+            match provider.serve(demand) {
                 Ok(answer) => {
                     trace.record(id, None);
 
@@ -178,6 +188,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use crate::testing::ScriptedProvider;
 
@@ -195,15 +207,15 @@ mod tests {
         provider.demands().len()
     }
 
-    #[tokio::test]
-    async fn test_a_provider_that_answers_is_asked_once_and_the_chain_stops() {
+    #[rstest]
+    fn test_a_provider_that_answers_is_asked_once_and_the_chain_stops() {
         let mut providers = vec![
             provider("PRIMARY", vec![Ok("bars")]),
             provider("SECONDARY", vec![Ok("other bars")]),
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served.answer().as_deref(), Some("bars")));
         assert_eq!(asked(&providers[0]), 1);
@@ -213,15 +225,15 @@ mod tests {
         assert!(trace.attempts()[0].failure.is_none());
     }
 
-    #[tokio::test]
-    async fn test_a_transient_failure_is_retried_once_and_then_hopped() {
+    #[rstest]
+    fn test_a_transient_failure_is_retried_once_and_then_hopped() {
         let mut providers = vec![
             provider("PRIMARY", vec![Err(Failure::Unanswered), Ok("bars")]),
             provider("SECONDARY", vec![Ok("other bars")]),
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served.answer().as_deref(), Some("bars")));
         assert_eq!(asked(&providers[0]), 2, "one attempt and one retry");
@@ -230,8 +242,8 @@ mod tests {
         assert_eq!(trace.attempts()[1].failure, None);
     }
 
-    #[tokio::test]
-    async fn test_a_transient_failure_that_recurs_moves_to_the_next_provider() {
+    #[rstest]
+    fn test_a_transient_failure_that_recurs_moves_to_the_next_provider() {
         let mut providers = vec![
             provider(
                 "PRIMARY",
@@ -241,7 +253,7 @@ mod tests {
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served.answer().as_deref(), Some("other bars")));
         assert_eq!(
@@ -253,8 +265,8 @@ mod tests {
         assert_eq!(trace.attempts().len(), 3);
     }
 
-    #[tokio::test]
-    async fn test_a_provider_that_cannot_be_reached_is_not_retried() {
+    #[rstest]
+    fn test_a_provider_that_cannot_be_reached_is_not_retried() {
         let mut providers = vec![
             provider(
                 "PRIMARY",
@@ -264,7 +276,7 @@ mod tests {
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served.answer().as_deref(), Some("other bars")));
         assert_eq!(
@@ -275,23 +287,23 @@ mod tests {
         assert_eq!(asked(&providers[1]), 1);
     }
 
-    #[tokio::test]
-    async fn test_a_rate_limited_provider_is_hopped_and_recorded() {
+    #[rstest]
+    fn test_a_rate_limited_provider_is_hopped_and_recorded() {
         let mut providers = vec![
             provider("PRIMARY", vec![Err(Failure::RateLimited)]),
             provider("SECONDARY", vec![Ok("other bars")]),
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served.answer().as_deref(), Some("other bars")));
         assert_eq!(asked(&providers[0]), 1, "a rate limit is never retried");
         assert_eq!(trace.attempts()[0].failure, Some(Failure::RateLimited));
     }
 
-    #[tokio::test]
-    async fn test_an_entitlement_refusal_is_hopped_and_recorded() {
+    #[rstest]
+    fn test_an_entitlement_refusal_is_hopped_and_recorded() {
         let mut providers = vec![
             provider(
                 "PRIMARY",
@@ -301,7 +313,7 @@ mod tests {
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served.answer().as_deref(), Some("other bars")));
         assert_eq!(asked(&providers[0]), 1);
@@ -311,8 +323,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_a_defect_stops_the_chain_and_never_reaches_the_next_provider() {
+    #[rstest]
+    fn test_a_defect_stops_the_chain_and_never_reaches_the_next_provider() {
         let mut providers = vec![
             provider(
                 "PRIMARY",
@@ -322,7 +334,7 @@ mod tests {
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served, Served::Failed(Failure::Invalid(_))));
         assert_eq!(asked(&providers[0]), 1);
@@ -333,8 +345,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_the_chain_never_returns_to_a_provider_it_has_left() {
+    #[rstest]
+    fn test_the_chain_never_returns_to_a_provider_it_has_left() {
         let mut providers = vec![
             provider(
                 "PRIMARY",
@@ -345,7 +357,7 @@ mod tests {
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served.answer().as_deref(), Some("third time")));
         assert_eq!(asked(&providers[0]), 1);
@@ -368,8 +380,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_an_exhausted_chain_reports_the_last_failure() {
+    #[rstest]
+    fn test_an_exhausted_chain_reports_the_last_failure() {
         let mut providers = vec![
             provider(
                 "PRIMARY",
@@ -379,7 +391,7 @@ mod tests {
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served, Served::Failed(Failure::NotFound)));
         assert_eq!(
@@ -389,12 +401,12 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_an_empty_chain_is_unconfigured_rather_than_failed() {
+    #[rstest]
+    fn test_an_empty_chain_is_unconfigured_rather_than_failed() {
         let mut providers: Vec<ScriptedProvider<(), String>> = Vec::new();
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served, Served::Unconfigured));
         assert!(trace.is_empty());
@@ -403,15 +415,15 @@ mod tests {
     /// An empty answer is an answer, and the chain must stop on it rather than ask anyone else: a
     /// symbol that legitimately has no data on the primary is not a reason to serve it from a
     /// different source with different semantics.
-    #[tokio::test]
-    async fn test_an_empty_answer_does_not_hop() {
+    #[rstest]
+    fn test_an_empty_answer_does_not_hop() {
         let mut providers = vec![
             provider("PRIMARY", vec![Ok("")]),
             provider("SECONDARY", vec![Ok("other bars")]),
         ];
         let mut trace = Trace::default();
 
-        let served = run(&mut providers, &(), &mut trace).await;
+        let served = run(&mut providers, &(), &mut trace);
 
         assert!(matches!(served.answer().as_deref(), Some("")));
         assert_eq!(
@@ -422,8 +434,8 @@ mod tests {
     }
 
     /// Every gap, whatever its shape, costs one attempt and no retry.
-    #[tokio::test]
-    async fn test_a_gap_moves_on_without_retrying() {
+    #[rstest]
+    fn test_a_gap_moves_on_without_retrying() {
         for failure in [
             Failure::NotFound,
             Failure::Malformed("bad json".to_string()),
@@ -447,7 +459,7 @@ mod tests {
             ];
             let mut trace = Trace::default();
 
-            let served = run(&mut providers, &(), &mut trace).await;
+            let served = run(&mut providers, &(), &mut trace);
 
             assert!(
                 matches!(served.answer().as_deref(), Some("other bars")),

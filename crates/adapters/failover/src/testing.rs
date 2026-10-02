@@ -21,7 +21,6 @@
 
 use std::collections::VecDeque;
 
-use async_trait::async_trait;
 use nautilus_model::identifiers::ClientId;
 
 use crate::{chain::Provider, failure::Failure};
@@ -63,7 +62,6 @@ impl<D, T> ScriptedProvider<D, T> {
     }
 }
 
-#[async_trait(?Send)]
 impl<D: Clone + 'static, T: 'static> Provider for ScriptedProvider<D, T> {
     type Demand = D;
     type Answer = T;
@@ -72,11 +70,15 @@ impl<D: Clone + 'static, T: 'static> Provider for ScriptedProvider<D, T> {
         self.id
     }
 
+    /// # Errors
+    ///
+    /// Returns the failure the script holds for this attempt.
+    ///
     /// # Panics
     ///
     /// Panics when the script has no answer left. A call that was not scripted is a test that
     /// expected something else to happen, and answering it anyway would hide that.
-    async fn serve(&mut self, demand: &Self::Demand) -> Result<Self::Answer, Failure> {
+    fn serve(&mut self, demand: &Self::Demand) -> Result<Self::Answer, Failure> {
         self.demands.push(demand.clone());
 
         self.script
@@ -87,27 +89,26 @@ impl<D: Clone + 'static, T: 'static> Provider for ScriptedProvider<D, T> {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
-    #[tokio::test]
-    async fn test_the_script_is_read_in_order() {
+    #[rstest]
+    fn test_the_script_is_read_in_order() {
         let mut provider = ScriptedProvider::new(
             ClientId::from("PRIMARY"),
             vec![Err(Failure::Unanswered), Ok("second answer".to_string())],
         );
 
         assert_eq!(provider.remaining(), 2);
-        assert_eq!(provider.serve(&7_u32).await, Err(Failure::Unanswered));
-        assert_eq!(
-            provider.serve(&8_u32).await,
-            Ok("second answer".to_string())
-        );
+        assert_eq!(provider.serve(&7_u32), Err(Failure::Unanswered));
+        assert_eq!(provider.serve(&8_u32), Ok("second answer".to_string()));
         assert_eq!(provider.remaining(), 0);
         assert_eq!(provider.demands(), &[7, 8]);
     }
 
-    #[tokio::test]
-    async fn test_a_provider_that_was_never_asked_has_no_demands() {
+    #[rstest]
+    fn test_a_provider_that_was_never_asked_has_no_demands() {
         let provider: ScriptedProvider<u32, String> =
             ScriptedProvider::new(ClientId::from("SECONDARY"), vec![Ok("answer".to_string())]);
 

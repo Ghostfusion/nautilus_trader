@@ -482,6 +482,13 @@ against it on the way out. A demand that has stopped waiting is removed rather t
 late answer cannot stand in for a demand made later - which is the difference between a chain that
 hops because it saw a provider refuse and one that hops because it looked away too soon.
 
+**A live request cannot wait for its answer.** The engine calls a client's request method from its own
+loop, so that call has to return rather than wait: waiting would stall the engine and everything
+queued behind it, and a client is not `Send`, so the wait cannot be moved to a task instead. A hop on
+a live request is therefore decided from what a provider says when it is asked - that it took the
+demand, or why it would not - while a provider that took a demand and then failed to answer is learnt
+off the events, for the next demand rather than for the one already gone.
+
 **A leg is a factory and a configuration, and neither is serializable.** The engine's own
 configuration path is serde, and a `ClientConfig` is a trait object, so a chain's configuration
 cannot be a serialized struct of legs the way a single provider's configuration is. The chain is
