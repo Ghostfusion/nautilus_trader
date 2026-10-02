@@ -600,6 +600,11 @@ The decision is recorded rather than merely executed, so a future change of plat
 be applied deliberately. If feed-scoped identity were ever required, the change is confined to
 symbol and instrument construction; nothing in the transport or the mappings depends on it.
 
+A later requirement settled the question in the same direction. A provider failover chain needs
+every provider in it to answer with the same instrument identifier, so a provider-scoped venue would
+make EODHD instruments and moomoo instruments that a chain could not join without a translation
+layer. See [the provider failover design](data_provider_failover_design.md), section 5.
+
 ### 12.2 Adjustment default: raw
 
 Adopted as recommended. The venue defaults to forward-adjusted bars, and this adapter does not

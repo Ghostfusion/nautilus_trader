@@ -11,9 +11,10 @@ This document records what the platform can and cannot express today, where the 
 live, the preconditions that make it work at all, and the failure modes that make a naive version
 dangerous.
 
-| Revision | Change                                                                                                                                |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | Initial design from the platform routing and adapter sources, with the EODHD and moomoo limits read from code and from the live probe |
+| Revision | Change                                                                                                                                                                                             |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Initial design from the platform routing and adapter sources, with the EODHD and moomoo limits read from code and from the live probe                                                              |
+| 2        | Closed the open decisions: composite client, hop on entitlement refusal, checkpoint fail-back, EODHD authoritative for definitions, no hopping in research builds, one try per provider per demand |
 
 ## 1. Summary of the finding
 
@@ -126,7 +127,7 @@ A second identity problem sits beside the first: **two providers can disagree ab
 instrument's definition.** Price precision, lot size, and currency may differ between EODHD's
 derived precision and moomoo's derived precision. The chain must nominate **one provider as
 authoritative for instrument definitions** and refuse to let a fallback overwrite the cached
-definition.
+definition. EODHD is that provider, with the coverage rule recorded in section 14.4.
 
 ## 6. Coverage matrix: what can chain with what
 
@@ -297,14 +298,67 @@ The chain cannot be used before it has a second leg, so the order is forced:
 Step 5 is a prerequisite in practice, not a detail: until a second equity adapter exists, the chain
 has nothing to fall over to.
 
-## 14. Open decisions
+## 14. Resolved decisions
 
-1. **Where the chain lives.** This document chooses a composite client with no core change. A
-   platform-level priority list is the cleaner long-term home if the platform adopts it.
-2. **Hop on entitlement refusal.** Recommended yes, with the refusal recorded; the alternative is to
-   treat a capability gap as a hard failure.
-3. **Fail-back policy.** Staying on the secondary until a checkpoint is recommended; immediate
-   fail-back causes thrashing against moomoo's one-minute release minimum.
-4. **Authoritative provider for instrument definitions.** Must be exactly one.
-5. **Whether a backtest may hop at all.** Recommended no by default.
-6. **Maximum hops** per demand, to bound latency in the worst case.
+All six decisions are closed. Where a decision contradicted nothing else in the document it is
+adopted as written; the authoritative-provider decision needed one addition, recorded in 14.4.
+
+| #   | Question                                          | Decision                                                                     |
+| --- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 1   | Where the chain lives                             | A composite data client behind the public factory trait, with no core change |
+| 2   | Hop on entitlement refusal                        | Yes, and the refusal is recorded against the demand that triggered it        |
+| 3   | Fail-back policy                                  | Stay on the secondary until a scheduled checkpoint                           |
+| 4   | Authoritative provider for instrument definitions | EODHD, wherever EODHD covers the instrument                                  |
+| 5   | May a backtest hop                                | No by default                                                                |
+| 6   | Maximum hops per demand                           | Each provider is tried at most once per demand                               |
+
+### 14.1 Where the chain lives
+
+Adopted. The composite owns one client identity, N provider clients under it, and the command
+routing between them, while the engine continues to see a single client. Section 4 records the
+option and the event-identity risk the first test must pin down. A platform-level priority list
+remains the cleaner long-term home if the engine ever adopts one, and nothing here prevents that
+move later.
+
+### 14.2 Hop on entitlement refusal
+
+Adopted. A capability gap is a data-availability gap, so the next provider is tried, but the refusal
+is recorded and surfaced against the demand that triggered it. A plan downgrade must appear as a
+reported reason, never as an unexplained change in data quality.
+
+### 14.3 Fail-back policy
+
+Adopted. A demand that has moved to the secondary stays there until a scheduled checkpoint rather
+than returning the moment the primary answers again. Immediate fail-back would thrash against
+moomoo's one-minute minimum subscription duration and spend quota on each oscillation.
+
+### 14.4 Authoritative provider for instrument definitions: EODHD
+
+EODHD is the authoritative source for instrument definitions. This is coherent with EODHD being the
+primary provider, and it settles the precision and lot-size question raised in section 5.
+
+One rule is required to make it safe: **EODHD is authoritative wherever it covers the instrument**.
+That has two consequences.
+
+- **Covered instrument, primary temporarily unreachable.** A fallback definition is **not** accepted,
+  because accepting it would let precision or lot size change under a running strategy. The
+  instrument is either deferred until EODHD answers, or loaded as explicitly provisional and
+  replaced from EODHD at the next deliberate load, never silently overwritten.
+- **Instrument EODHD does not cover.** Where EODHD has no coverage, for example an instrument outside
+  its exchange list or a market it does not serve, the highest-priority provider that does cover it
+  is authoritative for that instrument.
+
+A provisional definition must be distinguishable from an authoritative one, in the cache or in the
+chain's own bookkeeping, so a later reload cannot be mistaken for a correction of live data.
+
+### 14.5 May a backtest hop
+
+Adopted: no by default. A dataset assembled across a hop is neither provider's dataset (section 10),
+so a research build is served by one provider unless hopping is deliberately enabled and the
+resulting provenance is recorded alongside the result.
+
+### 14.6 Maximum hops per demand
+
+Each provider in the chain is tried at most once per demand, with only the single ambiguity retry of
+section 8. On a two-leg chain that is one hop. The rule is unchanged as legs are added, and it bounds
+worst-case latency by the number of configured providers rather than by a retry count.
