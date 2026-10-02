@@ -104,6 +104,24 @@ pub fn trade_tick_from(
     )
 }
 
+/// Returns whether a ticker record states a size the domain type can hold as a trade.
+///
+/// The venue pushes a ticker record for changes that are not trades, and the common one carries no
+/// size at all: a price with nothing having traded at it. It also states quantities with a fraction
+/// this adapter's size precision cannot hold, observed live as records whose size was under half a
+/// share, and those are not trades either.
+///
+/// The test is made at the precision the size is built at rather than against zero, because a
+/// quantity that rounds to zero is refused by the mapper for the same reason a missing one is:
+/// there is no trade to report. A caller that sees this traffic routinely recognises it here, and a
+/// caller that does not still gets a refusal rather than a phantom tick.
+#[must_use]
+pub fn has_size(ticker: &Ticker) -> bool {
+    let scaled = trade_size(ticker) * 10f64.powi(i32::from(SIZE_PRECISION));
+
+    scaled.round() >= 1.0
+}
+
 /// Returns the trade size the venue reported, preferring its higher precision value.
 ///
 /// The venue states the volume twice, as a whole number and as a value that can carry a fraction,
@@ -183,6 +201,28 @@ mod tests {
         ticker.hp_volume = Some(180.5);
 
         assert_eq!(trade_size(&ticker), 180.5);
+    }
+
+    /// A record whose size the domain type cannot hold as a trade is a change that is not a trade,
+    /// which the venue pushes routinely. The fraction below half a share is the one seen live: it
+    /// rounds to zero once it is built at a whole-share precision.
+    #[rstest]
+    #[case::a_whole_number(180, None, true)]
+    #[case::a_half_share(0, Some(0.5), true)]
+    #[case::below_half_a_share(0, Some(0.4), false)]
+    #[case::a_fraction_of_a_whole_share(0, Some(1.5), true)]
+    #[case::nothing(0, None, false)]
+    #[case::nothing_with_a_fraction(0, Some(0.0), false)]
+    fn test_only_a_record_with_a_size_could_have_traded(
+        #[case] volume: i64,
+        #[case] hp_volume: Option<f64>,
+        #[case] expected: bool,
+    ) {
+        let mut ticker = ticker(1);
+        ticker.volume = volume;
+        ticker.hp_volume = hp_volume;
+
+        assert_eq!(has_size(&ticker), expected);
     }
 
     #[rstest]

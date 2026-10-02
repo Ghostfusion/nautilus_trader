@@ -30,9 +30,17 @@
 //! The third is that the venue's state dies with the socket while the consumers' intent does not,
 //! so a reconnect replays from intent and not from the map of what the venue held.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use anyhow::bail;
+use nautilus_common::live::get_runtime;
 use parking_lot::Mutex;
 use tokio::{
     sync::Notify,
@@ -42,7 +50,7 @@ use tokio::{
 use crate::{
     common::Market,
     connection::Connection,
-    mappers::bars::BarSession,
+    mappers::bars::{Adjustment, BarSession, Interval},
     providers::{self, SubscriptionAllowance},
 };
 
@@ -62,6 +70,12 @@ pub enum SubscriptionType {
     OrderBook,
     /// Tick by tick trades.
     Ticker,
+    /// The venue's K-line push for one interval.
+    ///
+    /// The interval is part of the data type rather than an argument of the request, because the
+    /// venue counts a subscription per interval: a one-minute bar and a five-minute bar on one
+    /// security are two subscriptions against the allowance, not one.
+    KLine(Interval),
 }
 
 impl SubscriptionType {
@@ -72,7 +86,43 @@ impl SubscriptionType {
             Self::Quote => 1,
             Self::OrderBook => 2,
             Self::Ticker => 4,
+            Self::KLine(interval) => kline_sub_type(interval),
         }
+    }
+
+    /// Returns the interval a K-line subscription is for.
+    #[must_use]
+    pub fn interval(self) -> Option<Interval> {
+        match self {
+            Self::KLine(interval) => Some(interval),
+            _ => None,
+        }
+    }
+}
+
+/// Returns the venue's subscription code for a K-line interval, per `Qot_Common.SubType`.
+///
+/// The codes are not in interval order: the venue added its finer steps after its coarser ones, so a
+/// five-minute bar is code seven while a one-minute bar is eleven. The mapping is therefore written
+/// out rather than computed from another code, and every interval the adapter models has one, which
+/// is what makes a bar subscription expressible at all.
+fn kline_sub_type(interval: Interval) -> i32 {
+    match interval {
+        Interval::Day => 6,
+        Interval::Minute5 => 7,
+        Interval::Minute15 => 8,
+        Interval::Minute30 => 9,
+        Interval::Minute60 => 10,
+        Interval::Minute1 => 11,
+        Interval::Week => 12,
+        Interval::Month => 13,
+        Interval::Quarter => 15,
+        Interval::Year => 16,
+        Interval::Minute3 => 17,
+        Interval::Minute10 => 18,
+        Interval::Minute120 => 19,
+        Interval::Minute180 => 20,
+        Interval::Minute240 => 21,
     }
 }
 
@@ -149,6 +199,8 @@ pub struct SubscriptionManager {
     connection: Arc<Connection>,
     release_delay: Duration,
     session: BarSession,
+    adjustment: Adjustment,
+    stopped: AtomicBool,
     state: Mutex<State>,
     allowance: Mutex<Option<SubscriptionAllowance>>,
     wake: Notify,
@@ -158,25 +210,48 @@ impl SubscriptionManager {
     /// Creates a manager and starts its release task.
     ///
     /// `release_delay` is how long a subscription is held after the last consumer loses interest;
-    /// [`RELEASE_DELAY`] is the value that satisfies the venue's own minimum.
+    /// [`RELEASE_DELAY`] is the value that satisfies the venue's own minimum. `session` and
+    /// `adjustment` are the series a K-line subscription is taken for, because the venue states both
+    /// at subscription time rather than per push.
     #[must_use]
     pub fn new(
         connection: Arc<Connection>,
         release_delay: Duration,
         session: BarSession,
+        adjustment: Adjustment,
     ) -> Arc<Self> {
         let manager = Arc::new(Self {
             connection,
             release_delay,
             session,
+            adjustment,
+            stopped: AtomicBool::new(false),
             state: Mutex::new(State::default()),
             allowance: Mutex::new(None),
             wake: Notify::new(),
         });
 
-        tokio::spawn(Arc::clone(&manager).reap());
+        get_runtime().spawn(Arc::clone(&manager).reap());
 
         manager
+    }
+
+    /// Stops the release task.
+    ///
+    /// The task holds a reference to the manager, so it does not end when the last outside reference
+    /// goes: without being told, it would outlive every client that ever built one, and the venue
+    /// state with it. A caller that has finished with the manager says so here.
+    pub fn shutdown(&self) {
+        self.stopped.store(true, Ordering::Release);
+        // A permit rather than a wake-up, because the task may be between iterations and a wake-up
+        // that arrives before a waiter does is one nobody receives.
+        self.wake.notify_one();
+    }
+
+    /// Returns whether the release task has been asked to stop.
+    #[must_use]
+    pub fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
     }
 
     /// Returns the subscriptions the venue currently holds.
@@ -249,6 +324,7 @@ impl SubscriptionManager {
             std::slice::from_ref(&subscription),
             true,
             self.session,
+            self.adjustment,
         )
         .await?;
 
@@ -319,7 +395,14 @@ impl SubscriptionManager {
             return Ok(());
         }
 
-        providers::set_subscriptions(&self.connection, &wanted, true, self.session).await?;
+        providers::set_subscriptions(
+            &self.connection,
+            &wanted,
+            true,
+            self.session,
+            self.adjustment,
+        )
+        .await?;
 
         let now = Instant::now();
         let mut state = self.state.lock();
@@ -363,6 +446,12 @@ impl SubscriptionManager {
     /// Releases subscriptions whose delay has elapsed, and waits for the next one.
     async fn reap(self: Arc<Self>) {
         loop {
+            if self.is_stopped() {
+                log::debug!("the subscription release task is stopping");
+
+                return;
+            }
+
             let due = self.state.lock().take_due(Instant::now());
 
             for (subscription, held) in due {
@@ -371,6 +460,7 @@ impl SubscriptionManager {
                     std::slice::from_ref(&subscription),
                     false,
                     self.session,
+                    self.adjustment,
                 )
                 .await;
 
@@ -577,7 +667,12 @@ mod tests {
         let (pushes, _push_rx) = tokio::sync::mpsc::unbounded_channel();
         let options = ConnectOptions::new("127.0.0.1", port);
         let connection = Arc::new(connect(&options, pushes).await.unwrap());
-        let manager = SubscriptionManager::new(connection, TEST_RELEASE_DELAY, BarSession::Regular);
+        let manager = SubscriptionManager::new(
+            connection,
+            TEST_RELEASE_DELAY,
+            BarSession::Regular,
+            Adjustment::default(),
+        );
 
         (manager, observed)
     }

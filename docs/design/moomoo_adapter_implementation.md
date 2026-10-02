@@ -406,6 +406,15 @@ As implemented, four points needed decisions the outline did not settle.
   types and applies the product of the two, so a batch carrying different types for different
   securities is sent as one request per type. Sending the product would subscribe securities to
   types nobody asked for, and each of those spends allowance.
+- **The manager is stopped, not merely dropped.** Its release task holds a reference to the manager,
+  so the last reference anyone else holds going away does not end it: without being told, one task
+  and the venue state it carries would outlive every client that ever built one. A caller that has
+  finished with the manager says so, and the client says so when it disconnects.
+- **A subscription is taken by a task, and a refusal is logged rather than returned.** The engine's
+  subscribe path is synchronous and the venue is not, so the two cannot be joined without either
+  blocking a thread that belongs to the engine's runtime or returning before the venue has answered.
+  What a caller is told is that the work was started; what the venue said is a log line naming the
+  subscription, and an exhausted allowance is named in it.
 
 ## 9. Entitlement gate
 
@@ -478,11 +487,13 @@ promise.
   three thousand seven hundred and ninety-nine Hong Kong ones, read live.
 - **A snapshot request takes four hundred securities at most.** Asking for five hundred is refused
   with a message naming the limit, so a market is snapshotted in batches and never in one call.
-- **One ineligible security fails an entire snapshot batch.** Every United States batch measured was
-  refused as a whole, naming a single over-the-counter code, and the market list carries many of
-  them. The venue answers a request or refuses it; it has no way to answer for the members it does
-  hold. A batch therefore cannot be assumed to succeed, and a member cannot be assumed usable
-  because the static list mentioned it.
+- **One ineligible security fails an entire snapshot batch.** Six disjoint batches spread across the
+  whole United States list were each refused as a whole, each naming a different over-the-counter
+  code, so this is a property of the market and not of one range of its list: the list carries codes
+  with no quote market throughout, and the venue answers a request or refuses it rather than
+  answering for the members it does hold. Six Hong Kong batches over the same span were all served.
+  A batch therefore cannot be assumed to succeed, and a member cannot be assumed usable because the
+  static list mentioned it.
 
 The consequence is that the snapshot is required for a single instrument and optional for a
 universe. A universe load batches by four hundred, and a batch the venue refuses falls back to
@@ -523,6 +534,26 @@ Implementation requirements:
 The interval vocabulary is the venue's, and the adapter maps its own interval type onto it
 explicitly, refusing intervals the venue does not offer rather than rounding to the nearest one.
 
+As implemented, a live bar subscription is the venue's K-line push rather than a poll, and four
+things follow from that.
+
+- **The interval is part of the subscription type.** The venue counts a subscription per security and
+  data type, and its K-line types are per interval, so a one-minute and a five-minute series on one
+  security are two subscriptions against the allowance rather than one.
+- **The K-line subscription codes are not in interval order.** A five-minute bar is code seven and a
+  one-minute bar is eleven, because the venue added its finer steps after its coarser ones, so the
+  mapping is written out rather than computed from another code. Every interval the adapter models
+  has one, which is what makes a bar subscription expressible at all.
+- **The adjustment travels with the subscription.** The venue's default for a K-line push is a
+  forward adjustment and the adapter's default is raw, so leaving the field out would have served a
+  different series from the one the request path and the corporate actions describe.
+- **A push names the security and the interval, not the bar type.** The bar type a consumer asked for
+  is looked up rather than rebuilt, because a consumer may name a price other than the last and
+  rebuilding it would emit a series nobody asked for under the name of one they did.
+
+Against the gateway a one-minute subscription was accepted and held beside the order book and ticker
+subscriptions for the same security, and it pushed bars stamped at the current minute.
+
 ## 12. Trades
 
 The ticker endpoint and its push counterpart carry code, name, time with millisecond precision,
@@ -562,6 +593,19 @@ produced no trade from it.
 The venue states the volume twice, as a whole number and as a value that can carry a fraction, and
 the fraction-bearing one is preferred when it is sent because it loses nothing the first one has.
 
+As implemented, a trade is emitted only for an instrument a consumer subscribed to, and the push path
+recognises two kinds of record that are not trades before it maps anything. The first is the cached
+replay, which is the rule above. The second was found live and is now recorded as a rule of its own:
+**the venue pushes ticker records whose size the adapter's precision cannot hold as a positive
+quantity**, observed as fractions below half a share, and a size of `0.4` rounds to zero once it is
+built at a whole-share precision. Mapping one produced a refusal, and a refusal that arrives several
+times a minute is worse than no refusal at all, because it teaches an operator to ignore the ones
+that matter. The test for a usable size is therefore made at the precision the size is built at
+rather than against zero.
+
+A live session produced a trade carrying the venue's own aggressor side and the venue's sequence as
+its identifier, on the same subscription that first delivered the cached replay that was refused.
+
 ## 13. Quotes and the order book
 
 ### 13.1 Quotes
@@ -583,6 +627,17 @@ sides' receive times, because the state being reported is only true once both si
 
 Against the gateway the path produced a real book: `AAPL.US` bid 332.91 for 201 against an ask of
 332.95 for 99, from a book of ten levels a side.
+
+As implemented, quotes and book deltas share one venue subscription and are still kept apart. A
+consumer who asked for quotes is given a quote from the record's level one; a consumer who asked for
+a book is given the record as deltas; a consumer who asked for neither is given nothing, even though
+the venue holds a subscription that could serve them. The subscription is released only when both
+have gone, which is what the manager's reference counting is for, because one venue subscription
+serves two kinds of consumer and neither of them owns it.
+
+Against the gateway a quote subscription produced ticks carrying a real two-sided top of the book,
+and the venue held one order book subscription for it. Subscribe to quotes, book deltas and bars for
+one security and the venue holds three subscriptions, not four.
 
 ### 13.2 Order book
 
@@ -707,17 +762,27 @@ to an adjustment stage as an amount.
 
 Configuration fields, following the existing adapter shape:
 
-| Field              | Purpose                                      |
-| ------------------ | -------------------------------------------- |
-| `host`             | Gateway address, defaulting to localhost     |
-| `port`             | Gateway port, defaulting to the standard one |
-| `markets`          | Which markets to load instruments for        |
-| `adjustment`       | Bar adjustment mode, defaulting to raw       |
-| `session`          | Intraday session mode                        |
-| `book_depth`       | Requested depth, capped by entitlement       |
-| `subscribe_trades` | Whether to hold trade subscriptions          |
-| `subscribe_quotes` | Whether to hold quote subscriptions          |
-| `timeout_secs`     | Request timeout                              |
+| Field               | Purpose                                                        | Default           |
+| ------------------- | -------------------------------------------------------------- | ----------------- |
+| `host`              | Gateway address, falling back to `MOOMOO_HOST`                 | `127.0.0.1`       |
+| `port`              | Gateway port, falling back to `MOOMOO_PORT`                    | `11111`           |
+| `markets`           | Which markets' instruments are loaded on connect               | both              |
+| `adjustment`        | Bar adjustment, applied to requests and to subscriptions alike | raw               |
+| `session`           | Session the bars cover                                         | regular           |
+| `book_depth`        | Book levels served, capped at the venue's ceiling of sixty     | `10`              |
+| `subscribe_trades`  | Whether a trade subscription is honoured                       | enabled           |
+| `subscribe_quotes`  | Whether quote and book subscriptions are honoured              | enabled           |
+| `snapshot_universe` | Whether a market's instruments are priced from a snapshot      | enabled           |
+| `load_instruments`  | Whether the configured markets are loaded on connect           | enabled           |
+| `timeout_secs`      | Request timeout                                                | transport default |
+
+Two of these are promises about what the client will do rather than tuning knobs. `subscribe_trades`
+and `subscribe_quotes` gate the two subscriptions that spend an allowance which is small and shared,
+so a client attached to a node for another purpose refuses a stray subscription with a message that
+names the setting instead of quietly taking one. `snapshot_universe` trades a market's price
+precision against a request per four hundred securities, and the measurement in section 10 is what
+decides it: a Hong Kong load is priced from the venue, and a United States one is not, because the
+venue refuses every batch of it.
 
 There is no API key and no secret. The gateway holds the login, and the adapter's only credential-like
 concern is not leaking the gateway address into logs when it is remote.

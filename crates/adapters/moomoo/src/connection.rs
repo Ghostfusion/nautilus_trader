@@ -50,6 +50,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use nautilus_common::live::get_runtime;
 use prost::Message as _;
 use thiserror::Error;
 use tokio::{
@@ -458,10 +459,6 @@ pub async fn connect(
     options: &ConnectOptions,
     pushes: mpsc::UnboundedSender<Message>,
 ) -> Result<Connection, ConnectionError> {
-    let stream = TcpStream::connect((options.host.as_str(), options.port)).await?;
-    // The feed is latency sensitive and the frames are small, so coalescing would only add delay.
-    stream.set_nodelay(true)?;
-
     let pending: std::sync::Arc<Pending> = std::sync::Arc::new(Mutex::new(HashMap::new()));
     let (frames, frame_rx) = mpsc::unbounded_channel();
     let (session_tx, session_rx) = watch::channel(SessionState::Restoring { attempts: 0 });
@@ -489,7 +486,23 @@ pub async fn connect(
         stopped: stop_rx,
     };
 
-    tokio::spawn(supervisor.run(stream, first_tx));
+    let address = options.clone();
+
+    // The socket is opened inside the task that reads it, so that the socket and the runtime
+    // polling it are the same one. A socket registered with one runtime and driven by another still
+    // works, and fails under load in a way that looks like a slow gateway, which is the worst kind
+    // of bug to be handed.
+    get_runtime().spawn(async move {
+        let stream = match open_socket(&address).await {
+            Ok(stream) => stream,
+            Err(e) => {
+                let _ = first_tx.send(Err(e));
+                return;
+            }
+        };
+
+        supervisor.run(stream, first_tx).await;
+    });
 
     match first_rx.await {
         Ok(Ok(())) => Ok(Connection {
@@ -498,14 +511,27 @@ pub async fn connect(
             closed: closed_rx,
             stop: stop_tx,
         }),
-        Ok(Err(message)) => {
+        Ok(Err(error)) => {
             let _ = stop_tx.send(true);
-            Err(ConnectionError::Handshake(message))
+            Err(error)
         }
         // The supervisor sends its first outcome before anything else, so a missing one means it
         // ended before it could.
         Err(_) => Err(ConnectionError::Closed),
     }
+}
+
+/// Opens the socket to the gateway and configures it for the frame stream.
+///
+/// # Errors
+///
+/// Returns [`ConnectionError::Io`] if the socket cannot be established or configured.
+async fn open_socket(options: &ConnectOptions) -> Result<TcpStream, ConnectionError> {
+    let stream = TcpStream::connect((options.host.as_str(), options.port)).await?;
+    // The feed is latency sensitive and the frames are small, so coalescing would only add delay.
+    stream.set_nodelay(true)?;
+
+    Ok(stream)
 }
 
 /// How long a session has to last before the outage that ended it is treated as over.
@@ -551,7 +577,11 @@ impl Supervisor {
     ///
     /// The first socket arrives already open, because failing to open one is the caller's error to
     /// report rather than something to retry behind it.
-    async fn run(mut self, first: TcpStream, first_outcome: oneshot::Sender<Result<(), String>>) {
+    async fn run(
+        mut self,
+        first: TcpStream,
+        first_outcome: oneshot::Sender<Result<(), ConnectionError>>,
+    ) {
         let mut attempts = 0;
         let mut stream = Some(first);
         let mut outcome = Some(first_outcome);
@@ -613,15 +643,27 @@ impl Supervisor {
             };
 
             let started = Instant::now();
-            let result = self.session(socket, outcome.take()).await;
+            let result = self.session(socket, &mut outcome).await;
             let lived = started.elapsed();
 
             // A session that was established and then lasted is a connection that recovered, so the
             // outage it ended is a new one and the wait starts over. Anything else is the same
             // outage continuing, however many sockets it has taken.
-            match result {
-                Ok(_) if lived >= STABLE_SESSION => attempts = 0,
-                _ => attempts = attempts.saturating_add(1),
+            let recovered = result.is_ok() && lived >= STABLE_SESSION;
+
+            // Whether the connection came up is answered by whichever of the two gets there first,
+            // so a session that never established reports its reason here. A connection that did
+            // establish has already answered, and this finds nothing left to answer with.
+            if let Err(e) = result
+                && let Some(sender) = outcome.take()
+            {
+                let _ = sender.send(Err(e));
+            }
+
+            if recovered {
+                attempts = 0;
+            } else {
+                attempts = attempts.saturating_add(1);
             }
 
             if *self.stopped.borrow() {
@@ -660,31 +702,35 @@ impl Supervisor {
     /// An error means no session was established on this socket, which is what tells the caller
     /// whether the outage is a new one.
     ///
-    /// `first` carries the first session's outcome to whoever is waiting to hear whether the
-    /// connection came up, and it is fired as soon as there is an answer either way rather than when
-    /// the session ends: a caller waiting for a connection must not be made to wait for its loss.
+    /// `outcome` carries the first session's result to whoever is waiting to hear whether the
+    /// connection came up. Success is reported here, as soon as there is a handshake, because a
+    /// caller waiting for a connection must not be made to wait for its loss. A failure is left for
+    /// the caller of this method, which is where the reason stops being needed here at all.
     async fn session(
         &mut self,
         stream: TcpStream,
-        first: Option<oneshot::Sender<Result<(), String>>>,
+        outcome: &mut Option<oneshot::Sender<Result<(), ConnectionError>>>,
     ) -> Result<Handshake, ConnectionError> {
         let (mut read_half, mut write_half) = stream.into_split();
         let mut buffer: Vec<u8> = Vec::with_capacity(16 * 1024);
 
-        let outcome = self
+        let attempt = self
             .handshake(&mut read_half, &mut write_half, &mut buffer)
             .await;
 
-        match outcome {
+        match attempt {
             Ok(reported) => {
-                if let Some(sender) = first {
-                    let _ = sender.send(Ok(()));
-                }
-
+                // The session is reported ready before the caller is told the connection came up.
+                // The two are one fact, and a caller told first could read this state and find it
+                // describing the session that has just been replaced.
                 let _ = self
                     .shared
                     .session
                     .send(SessionState::Ready(reported.clone()));
+
+                if let Some(sender) = outcome.take() {
+                    let _ = sender.send(Ok(()));
+                }
 
                 let ending = self
                     .steady(
@@ -704,11 +750,8 @@ impl Supervisor {
                 Ok(reported)
             }
             Err(e) => {
-                if let Some(sender) = first {
-                    let _ = sender.send(Err(e.to_string()));
-                }
-
                 log::warn!("the session could not be established: {e}");
+
                 let _ = write_half.shutdown().await;
                 lock(&self.shared.pending).clear();
 
@@ -820,7 +863,7 @@ impl Supervisor {
 
                     // The answer arrives on the read path like any other response, so this must not
                     // be awaited here: waiting for it would stop the read path that delivers it.
-                    tokio::spawn(async move {
+                    get_runtime().spawn(async move {
                         if let Err(e) = requester.request(PROTO_ID_KEEP_ALIVE, &body).await {
                             log::debug!("the keep-alive went unanswered: {e}");
                         }
@@ -1225,11 +1268,29 @@ mod tests {
             "expected the request to be released, got {result:?}"
         );
 
-        tokio::time::timeout(Duration::from_secs(5), state.changed())
-            .await
-            .expect("the outage should be observable")
-            .expect("the sender should not be dropped");
-        assert_eq!(*state.borrow(), SessionState::Restoring { attempts: 1 });
+        // The outage is waited for rather than read, because releasing a waiter is the socket's
+        // doing and reporting the outage is the supervisor's, and a caller that only saw the first
+        // of the two has not yet been told why its request failed. The watch channel is how the
+        // second is observed, so a single read after a single change is a read of whichever of them
+        // happened to land.
+        let outage = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let current = state.borrow().clone();
+
+                if matches!(current, SessionState::Restoring { .. }) {
+                    return current;
+                }
+
+                state
+                    .changed()
+                    .await
+                    .expect("the sender should not be dropped");
+            }
+        })
+        .await
+        .expect("the outage should be observable");
+
+        assert_eq!(outage, SessionState::Restoring { attempts: 1 });
 
         tokio::time::timeout(Duration::from_secs(5), closed.changed())
             .await

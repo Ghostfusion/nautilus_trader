@@ -46,6 +46,7 @@ use nautilus_model::{
     identifiers::InstrumentId,
     types::{Price, Quantity},
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{common::Market, generated::qot_common::KLine};
 
@@ -53,7 +54,8 @@ use crate::{common::Market, generated::qot_common::KLine};
 const VOLUME_PRECISION: u8 = 0;
 
 /// The adjustment applied to the prices of a K-line series.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Adjustment {
     /// Prices exactly as the venue published them.
     ///
@@ -83,7 +85,8 @@ impl Adjustment {
 ///
 /// The venue never returns extended hours unless they are asked for, so this is a choice the caller
 /// makes rather than something the adapter can infer from the interval.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BarSession {
     /// The regular trading session only.
     #[default]
@@ -121,7 +124,7 @@ impl BarSession {
 /// are named by their minute count, and a quarter is a first-class interval. An interval the venue
 /// does not offer is refused rather than rounded to the nearest one it does, because a strategy
 /// asking for a bar it will not receive has a defect that rounding would hide.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Interval {
     /// One minute.
     Minute1,
@@ -156,6 +159,37 @@ pub enum Interval {
 }
 
 impl Interval {
+    /// Every interval the adapter models.
+    pub const ALL: [Self; 15] = [
+        Self::Minute1,
+        Self::Minute3,
+        Self::Minute5,
+        Self::Minute10,
+        Self::Minute15,
+        Self::Minute30,
+        Self::Minute60,
+        Self::Minute120,
+        Self::Minute180,
+        Self::Minute240,
+        Self::Day,
+        Self::Week,
+        Self::Month,
+        Self::Quarter,
+        Self::Year,
+    ];
+
+    /// Returns the interval a gateway K-line type names.
+    ///
+    /// This is a different enumeration from the subscription code. The K-line type is the interval
+    /// itself and is what a K-line push carries; the subscription code names a push for one interval
+    /// and is what a subscription is taken with. A push is therefore resolved through this.
+    #[must_use]
+    pub fn from_kl_type(kl_type: i32) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|interval| interval.kl_type() == kl_type)
+    }
+
     /// Returns the gateway's own code, per `Qot_Common.KLType`.
     #[must_use]
     pub fn kl_type(self) -> i32 {

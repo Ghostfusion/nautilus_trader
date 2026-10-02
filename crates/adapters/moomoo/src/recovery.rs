@@ -226,7 +226,7 @@ mod tests {
         connection::{ConnectOptions, Message, PROTO_ID_KEEP_ALIVE, RET_OK, connect},
         entitlement::PROTO_ID_GET_USER_INFO,
         generated::{get_user_info, init_connect, qot_common, qot_get_order_book, qot_sub},
-        mappers::bars::BarSession,
+        mappers::bars::{Adjustment, BarSession},
         providers::{PROTO_ID_GET_ORDER_BOOK, PROTO_ID_SUB},
     };
 
@@ -469,6 +469,7 @@ mod tests {
             Arc::clone(&connection),
             Duration::from_secs(65),
             BarSession::default(),
+            Adjustment::default(),
         );
 
         for subscription in subscriptions {

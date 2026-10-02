@@ -6519,8 +6519,12 @@ name = "nautilus-moomoo"
 version = "0.65.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "bon",
+ "indexmap 2.14.2",
  "jiff",
  "log",
+ "nautilus-common",
  "nautilus-core",
  "nautilus-model",
  "parking_lot",
@@ -6528,6 +6532,8 @@ dependencies = [
  "prost-build",
  "rstest",
  "rust_decimal",
+ "serde",
+ "serde_json",
  "sha1 0.10.7",
  "thiserror 2.0.21",
  "tokio",

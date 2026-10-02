@@ -21,16 +21,26 @@ engine for multi-asset, multi-venue trading systems.
 The system spans research, deterministic simulation, and live execution within a single
 event-driven architecture, providing research-to-live semantic parity.
 
+## Feature flags
+
+This crate provides feature flags to control source code inclusion during compilation,
+depending on the intended use case:
+
+- `high-precision` (default): Enables
+  [high-precision mode](https://nautilustrader.io/docs/nightly/getting_started/installation/#precision-mode)
+  to use 128-bit value types.
+
 ## Scope
 
 The intended scope is market data for US and HK equities: instruments, bars, trades, quotes, order
 book, and corporate actions, over a local gateway. Execution is out of scope, and so are US options
 and US futures, which the current entitlement refuses.
 
-The crate currently provides the protocol layer: the vendored `proto2` schema in `proto/`, the Rust
-types generated from it under `src/generated/`, and the inert generator described in
-[`proto/README.md`](proto/README.md). The codec, connection, entitlement record, and data client are
-built on that layer.
+The crate is layered. The vendored `proto2` schema in `proto/`, the Rust types generated from it
+under `src/generated/`, and the inert generator described in [`proto/README.md`](proto/README.md)
+depend on nothing local. The frame codec, the connection, the entitlement record, the subscription
+manager, the mappers, and the data client are built on that layer, and only the last of those needs
+a running gateway.
 
 ## Prerequisites
 

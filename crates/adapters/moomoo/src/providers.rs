@@ -40,7 +40,7 @@ use crate::{
     },
     mappers::{
         bars::{Adjustment, BarSession, Interval, build_bars},
-        instrument::instrument_from,
+        instrument::{SECURITY_TYPE_EQUITY, instrument_from},
     },
     subscription::Subscription,
 };
@@ -116,6 +116,51 @@ pub async fn request_static_info(
         .with_context(|| format!("no static record returned for {}", describe(&security)))
 }
 
+/// The largest number of securities one snapshot request may name.
+///
+/// The venue refuses a request that names more, and it refuses the whole request rather than
+/// truncating it, so the batch size is a property of the venue and not a tuning knob.
+pub const MAX_SNAPSHOT_BATCH: usize = 400;
+
+/// Requests the static record of every security the market lists.
+///
+/// The request names a market and a security type and no securities, which is what makes a whole
+/// market one request: the venue answers with the list it holds rather than needing to be told which
+/// members it has.
+///
+/// The list is the venue's, and it is not a list of tradeable securities. It carries codes the
+/// venue will not quote, so the caller filters it by what it can use rather than trusting it.
+///
+/// # Errors
+///
+/// Returns an error if the request fails, the gateway refuses it, or the answer cannot be decoded.
+pub async fn request_market_static_info(
+    connection: &Connection,
+    market: Market,
+) -> anyhow::Result<Vec<qot_common::SecurityStaticInfo>> {
+    let request = qot_get_static_info::Request {
+        c2s: qot_get_static_info::C2s {
+            market: Some(market.qot_market()),
+            sec_type: Some(SECURITY_TYPE_EQUITY),
+            security_list: Vec::new(),
+            header: None,
+        },
+    };
+
+    let message = connection
+        .request(PROTO_ID_GET_STATIC_INFO, &request.encode_to_vec())
+        .await?;
+
+    let response = qot_get_static_info::Response::decode(message.body.as_slice())
+        .context("cannot decode a static information response")?;
+    check_outcome(response.ret_type, response.ret_msg, "static information")?;
+
+    Ok(response
+        .s2c
+        .map(|s2c| s2c.static_info_list)
+        .unwrap_or_default())
+}
+
 /// Requests the snapshot for one security.
 ///
 /// # Errors
@@ -146,6 +191,60 @@ pub async fn request_snapshot(
         .and_then(|s2c| s2c.snapshot_list.into_iter().next())
         .map(|snapshot| snapshot.basic)
         .with_context(|| format!("no snapshot returned for {}", describe(&security)))
+}
+
+/// Requests the snapshots for a batch of securities.
+///
+/// A batch is the only way to read many snapshots, and it is all or nothing: the venue refuses the
+/// whole request when one of its members cannot be priced, which measured true for every United
+/// States batch read live, because the market's own list carries codes with no quote market. The
+/// refusal is therefore a property of the batch, and the caller is told what the venue said so that
+/// it can decide what to do about the batch rather than about the request.
+///
+/// # Errors
+///
+/// Returns an error if the batch is empty, if it names more securities than the venue accepts, if
+/// the request fails, or if the gateway refuses it.
+pub async fn request_snapshots(
+    connection: &Connection,
+    securities: &[qot_common::Security],
+) -> anyhow::Result<Vec<qot_get_security_snapshot::SnapshotBasicData>> {
+    if securities.is_empty() {
+        bail!("a snapshot request must name at least one security");
+    }
+
+    if securities.len() > MAX_SNAPSHOT_BATCH {
+        bail!(
+            "a snapshot request cannot name more than {MAX_SNAPSHOT_BATCH} securities, and {} \
+             were asked for",
+            securities.len()
+        );
+    }
+
+    let request = qot_get_security_snapshot::Request {
+        c2s: qot_get_security_snapshot::C2s {
+            security_list: securities.to_vec(),
+            header: None,
+        },
+    };
+
+    let message = connection
+        .request(PROTO_ID_GET_SECURITY_SNAPSHOT, &request.encode_to_vec())
+        .await?;
+
+    let response = qot_get_security_snapshot::Response::decode(message.body.as_slice())
+        .context("cannot decode a snapshot response")?;
+    check_outcome(response.ret_type, response.ret_msg, "snapshot")?;
+
+    Ok(response
+        .s2c
+        .map(|s2c| {
+            s2c.snapshot_list
+                .into_iter()
+                .map(|snapshot| snapshot.basic)
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 /// The protocol identifier of the order book request.
@@ -493,6 +592,10 @@ pub async fn request_subscription_allowance(
 /// request per type. Sending the product instead would subscribe securities to types nobody asked
 /// for, and each of those spends allowance that is scarce.
 ///
+/// A K-line batch also states the price adjustment its pushes carry, and it is stated here rather
+/// than left to the venue's default: the venue's default is a forward adjustment, which is not the
+/// series this adapter serves anywhere else.
+///
 /// # Errors
 ///
 /// Returns an error if a request fails, or if the venue refuses it, in which case the venue's own
@@ -502,17 +605,21 @@ pub async fn set_subscriptions(
     subscriptions: &[Subscription],
     subscribe: bool,
     session: BarSession,
+    adjustment: Adjustment,
 ) -> anyhow::Result<()> {
-    let mut by_type: BTreeMap<i32, Vec<qot_common::Security>> = BTreeMap::new();
+    let mut by_type: BTreeMap<(i32, Option<i32>), Vec<qot_common::Security>> = BTreeMap::new();
 
     for subscription in subscriptions {
+        let kind = subscription.kind;
+        let rehab = kind.interval().map(|_| adjustment.rehab_type());
+
         by_type
-            .entry(subscription.kind.sub_type())
+            .entry((kind.sub_type(), rehab))
             .or_default()
             .push(security(subscription.market, &subscription.code));
     }
 
-    for (sub_type, securities) in by_type {
+    for ((sub_type, rehab), securities) in by_type {
         let request = qot_sub::Request {
             c2s: qot_sub::C2s {
                 security_list: securities,
@@ -521,7 +628,7 @@ pub async fn set_subscriptions(
                 // The push registration travels with the subscription: a subscription with no
                 // registration would be held and paid for while delivering nothing.
                 is_reg_or_un_reg_push: Some(subscribe),
-                reg_push_rehab_type_list: Vec::new(),
+                reg_push_rehab_type_list: rehab.into_iter().collect(),
                 is_first_push: None,
                 is_unsub_all: None,
                 is_sub_order_book_detail: None,

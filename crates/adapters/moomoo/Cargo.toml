@@ -19,25 +19,36 @@ workspace = true
 name = "nautilus_moomoo"
 crate-type = ["rlib"]
 
+[features]
+default = ["high-precision"]
+high-precision = ["nautilus-model/high-precision"]
+
 [package.metadata.docs.rs]
+features = ["high-precision"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+nautilus-common = { workspace = true, features = ["live"] }
 nautilus-core = { workspace = true }
 nautilus-model = { workspace = true }
 
 anyhow = { workspace = true }
+async-trait = { workspace = true }
+bon = { workspace = true }
+indexmap = { workspace = true }
 jiff = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
 rust_decimal = { workspace = true }
+serde = { workspace = true }
 sha1 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 
-[build-dependencies]
-prost-build = { workspace = true }
-
 [dev-dependencies]
 rstest = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+prost-build = { workspace = true }

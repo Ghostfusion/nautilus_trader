@@ -18,6 +18,7 @@
 use std::fmt;
 
 use nautilus_model::types::Currency;
+use serde::{Deserialize, Serialize};
 
 /// The client identifier the adapter sends in the handshake.
 ///
@@ -28,7 +29,11 @@ use nautilus_model::types::Currency;
 pub const CLIENT_ID: &str = "MOOMOO";
 
 /// A market this adapter serves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// The serialized form is the gateway's own market code, so a configuration written by hand says
+/// `US` or `HK` rather than naming the Rust variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Market {
     /// United States equities.
     Us,

@@ -30,11 +30,24 @@
 //! [NautilusTrader](https://nautilustrader.io) is an open-source, production-grade, Rust-native
 //! engine for multi-asset, multi-venue trading systems.
 //!
+//! # Feature Flags
+//!
+//! This crate provides feature flags to control source code inclusion during compilation,
+//! depending on the intended use case:
+//!
+//! - `high-precision` (default): Enables
+//!   [high-precision mode](https://nautilustrader.io/docs/nightly/getting_started/installation/#precision-mode)
+//!   to use 128-bit value types.
+//!
 //! # Scope
 //!
-//! This crate currently provides the protocol layer: the frame codec, and the vendored schema with
-//! the Rust types generated from it. The connection, the entitlement record, and the data client
-//! build on top of them.
+//! This crate provides market data for the equities of the markets it serves: instruments, bars,
+//! trades, quotes, order books, and corporate actions. Execution is out of scope.
+//!
+//! The crate is layered rather than monolithic. The frame codec and the vendored schema's generated
+//! types depend on nothing local; the connection is built on those; the subscription manager, the
+//! mappers, and the data client are built on the connection. Only the last of those needs a gateway,
+//! and the codec and the mappers can be exercised without one.
 
 #![warn(rustc::all)]
 #![deny(unsafe_code)]
@@ -46,8 +59,12 @@
 
 pub mod codec;
 pub mod common;
+pub mod config;
 pub mod connection;
+pub mod data;
 pub mod entitlement;
+pub mod factories;
+pub mod loader;
 pub mod mappers;
 pub mod providers;
 pub mod recovery;
