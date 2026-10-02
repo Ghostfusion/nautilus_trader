@@ -10,10 +10,11 @@ This plan maps the work onto the phase sequence in
 than release gates. A market-data-only adapter omits the execution phases entirely, and this one
 does: there is no order submission in the first release.
 
-| Revision | Change                                                                                                                                                                                    |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | Initial plan from the live OpenD probe, with the protocol core proven from the shipped client's own codec                                                                                 |
-| 2        | Recorded the build-time generation constraint, since `prost-build` needs a host `protoc` that this repository does not require, and the push confirmation with its `push_data_type` field |
+| Revision | Change                                                                                                                                                                                                                                                      |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Initial plan from the live OpenD probe, with the protocol core proven from the shipped client's own codec                                                                                                                                                   |
+| 2        | Recorded the build-time generation constraint, since `prost-build` needs a host `protoc` that this repository does not require, and the push confirmation with its `push_data_type` field                                                                   |
+| 3        | Recorded the first implementation: the schema is `proto2` and prost handles it, the generated modules are snake_case rather than the predicted PascalCase, comments are disabled because the definitions are Chinese, and the vendored closure is confirmed |
 
 ## 1. Scope and reading order
 
@@ -163,15 +164,32 @@ generated types and the verified frame layout are known to be mutually consisten
 **The list above is the verified transitive import closure, not an estimate.** Parsing all 184
 vendored definitions and following every `import` from those twenty roots yields exactly those twenty
 files and no others, and every import resolves inside the package, so no `google/protobuf` well-known
-type has to be vendored or compiled. Two consequences follow for the generated code, both visible in
-the schema before any code is written:
+type has to be vendored or compiled.
 
-- **Every package is named after its file** (`Common`, `InitConnect`, `Qot_Common`), so the generated
-  module names are PascalCase and the checked-in output will need either an allow attribute or a
-  rename pass. The existing precedent does exactly this: `dydx-proto` post-processes its generated
-  files with regex patches.
-- **The message names are uniform across packages** (`C2S`, `S2C`, `Request`, `Response` repeated in
-  each), so generated types must always be addressed by module path rather than imported unqualified.
+**The schema is `proto2`, and that is what the generator has to be right about.** All twenty files
+declare `proto2` and carry 246 `required` fields. prost supports it: prost-build emits the `required`
+label, and prost derives unconditional encoding for those fields, which is what proto2 presence
+means. The first implementation pinned that against an independent encoder rather than trusting it,
+and three proto2 behaviours now have conformance tests (section 17):
+
+- A `required` field is encoded even at its default value, so a `false` boolean and an empty string
+  are on the wire. A proto3 assumption would drop them, and the gateway would read the message as
+  malformed.
+- An `optional` field is omitted when unset, which is the presence distinction the generated `Option`
+  carries.
+- A repeated scalar is unpacked, so each element carries its own tag instead of sharing one
+  length-delimited group.
+
+Reality also corrected one prediction. Every proto package is named after its file, but prost
+lowercases the package name when it derives the module, so the generated modules are `common`,
+`qot_common`, and so on, and no allow attribute or rename pass is needed. What does survive is the
+collision: `C2S`, `S2C`, `Request`, and `Response` repeat in every package, so generated types must
+always be addressed by module path rather than imported unqualified.
+
+One generator constraint is not a preference. prost emits the definitions' own comments, which here
+are Chinese, as doc comments on the generated types. This repository's source conventions are
+English-only and the generated files are committed, so the build script disables comments for the
+whole schema, and the vendored `.proto` files remain the reference for field semantics.
 
 ### Generation strategy
 
@@ -185,8 +203,9 @@ The concrete shape:
 
 - `proto/` holds the vendored definitions and a `README.md` recording the source package, its
   version, and the exact regeneration command.
-- The generated Rust is committed under `src/generated/`, with a header naming the generator, its
-  version, and the `.proto` revision, so a diff is attributable to a source revision.
+- The generated Rust is committed under `src/generated/` behind prost's own `@generated` header, with
+  the source package, its version, and the regeneration command recorded in `proto/README.md`, so a
+  diff is attributable to a source revision.
 - Regeneration is a documented one-off that needs `protoc`; the gateway client ships a usable one at
   `moomoo/common/pb/protoc.exe`, so the tooling exists without a global install.
 - Regeneration is not part of `cargo build`, so a stale generated file is a review finding rather
