@@ -326,6 +326,46 @@ requires the snapshot reseed.
 Subscriptions are replayed from intent, not from venue state, because the venue's state died with
 the socket and the strategies' intentions did not.
 
+As implemented, the connection outlives the sockets that carry it, so a caller keeps one handle for
+the life of the adapter. Several decisions the outline did not settle came out of that.
+
+**A dropped socket releases outstanding requests at once.** Every request outstanding when a socket
+ends is failed with a closed-connection error rather than left to its own timeout, because a caller
+waiting out a timeout for an answer that can no longer come is a caller that has lost ten seconds
+for nothing. The request is not repeated by this layer: whether a request may be sent twice is a
+question about the request rather than about the transport, so the decision stays with whoever made
+it.
+
+**Replacement is paced and bounded.** The pause before an attempt doubles and stops at thirty
+seconds, and it resets only after a session that both established and lasted thirty seconds, so a
+gateway that answers and immediately drops is backed away from rather than hammered. There is no
+attempt limit by default, because a gateway that is down for an hour is one that comes back; a limit
+exists for a caller that has somewhere else to go, which is the failover chain.
+
+**A gateway that cannot be reached is an error from the connect call, and a gateway that answers and
+then dies is not.** Those are different things and the code distinguishes them: the first means the
+caller has to go elsewhere, the second means the connection is having an outage, which is what the
+supervisor exists for. The distinction is not academic, because the handshake answer can arrive in
+the same read that ends the socket, and a session that answered the handshake has spoken the
+protocol whatever happened immediately afterwards.
+
+**Recovery restores on every session after the one the connection was made on.** Sessions are told
+apart by the identifier the gateway gives them rather than by counting transitions, because the
+session state is a watch: an outage can begin and end between two polls of it, and a transition that
+was never observed cannot be counted. An identifier survives being missed, and starting mid-outage
+needs no special case because there is then no session to skip.
+
+**The replay precedes the reseed.** The gateway refuses an order book request for a security whose
+book is not subscribed, so the snapshot can only be asked for once the subscription is back. That
+ordering is not a preference, and a reseed that failed for the order of the two would look like a
+reseed that failed for its own reasons.
+
+Read against the live gateway through a relay that tore the connection down mid-stream, the adapter
+reported the outage, established a replacement with a different gateway connection identifier,
+replayed both of the subscriptions it held, and reseeded the book with twenty-one records whose best
+bid was a real price. The book request could not have succeeded had the replay not happened, so the
+snapshot is also the evidence that the subscription was taken out again.
+
 ## 8. Subscription manager
 
 The manager is the piece of this adapter that has no equivalent in the REST adapters, because the

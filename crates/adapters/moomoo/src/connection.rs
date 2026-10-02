@@ -54,9 +54,12 @@ use prost::Message as _;
 use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpStream, tcp::OwnedReadHalf, tcp::OwnedWriteHalf},
+    net::{
+        TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
     sync::{mpsc, oneshot, watch},
-    time::{MissedTickBehavior, interval, timeout},
+    time::{Instant, MissedTickBehavior, interval, sleep, timeout},
 };
 
 use crate::{
@@ -122,6 +125,13 @@ pub struct ConnectOptions {
     pub client_id: String,
     /// How long a request waits for its response.
     pub request_timeout: Duration,
+    /// How many consecutive reconnect attempts are made before the supervisor gives up.
+    ///
+    /// `None`, the default, retries indefinitely: a gateway that is down for an hour is one that
+    /// comes back, and an adapter that stopped trying while the market was open would be worse than
+    /// one that kept trying. A limit is for a caller with somewhere else to go, such as a failover
+    /// chain, and for a test that must not leave a task retrying behind it.
+    pub reconnect_attempts: Option<u32>,
 }
 
 impl ConnectOptions {
@@ -133,6 +143,7 @@ impl ConnectOptions {
             port,
             client_id: CLIENT_ID.to_string(),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            reconnect_attempts: None,
         }
     }
 
@@ -147,6 +158,13 @@ impl ConnectOptions {
     #[must_use]
     pub fn with_request_timeout(mut self, request_timeout: Duration) -> Self {
         self.request_timeout = request_timeout;
+        self
+    }
+
+    /// Sets how many consecutive reconnect attempts are made before the supervisor gives up.
+    #[must_use]
+    pub fn with_reconnect_attempts(mut self, attempts: u32) -> Self {
+        self.reconnect_attempts = Some(attempts);
         self
     }
 }
@@ -164,6 +182,39 @@ pub struct Handshake {
     pub reported_keep_alive: Duration,
     /// The interval the heartbeat actually uses, which is four fifths of the reported one.
     pub keep_alive: Duration,
+}
+
+/// What the connection is currently doing.
+///
+/// A session is one socket with one handshake behind it, and a connection outlives its sessions: a
+/// dropped socket is replaced, and the requests and pushes carried by the connection do not care
+/// which session they travelled on. A caller holding anything derived from a session, such as an
+/// entitlement read or a book built from a stream, watches this to learn that what it holds came
+/// from a socket that has gone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionState {
+    /// The socket is up and the gateway has answered its handshake.
+    Ready(Handshake),
+    /// The socket is down, and this many consecutive attempts to restore it have failed.
+    ///
+    /// The first state published after a drop carries zero, because no attempt has failed yet, and
+    /// a session that is established and then drops again publishes zero afresh: the count measures
+    /// the current outage, not the connection's lifetime.
+    Restoring {
+        /// The number of consecutive attempts that have failed.
+        attempts: u32,
+    },
+}
+
+impl SessionState {
+    /// Returns the handshake, when there is a session behind it.
+    #[must_use]
+    pub fn handshake(&self) -> Option<&Handshake> {
+        match self {
+            Self::Ready(handshake) => Some(handshake),
+            Self::Restoring { .. } => None,
+        }
+    }
 }
 
 /// A message received from the gateway.
@@ -322,42 +373,81 @@ fn unix_seconds() -> i64 {
         .unwrap_or_default()
 }
 
-/// An established, handshaken connection to a gateway.
+/// A connection to a gateway, which outlives the sockets that carry it.
+///
+/// A dropped socket is replaced rather than ending the connection, so a caller keeps one handle for
+/// the life of the adapter and watches [`Connection::state`] to learn when the socket behind it
+/// changed.
 #[derive(Debug)]
 pub struct Connection {
     requester: Requester,
-    handshake: Handshake,
+    session: watch::Receiver<SessionState>,
     closed: watch::Receiver<bool>,
+    stop: watch::Sender<bool>,
 }
 
 impl Connection {
-    /// Returns what the gateway reported in the handshake.
+    /// Returns a receiver reporting what the connection is doing.
+    ///
+    /// A caller holding anything derived from a session watches this. Every [`SessionState::Ready`]
+    /// after the first is a session the caller has to bring its own state back onto, by replaying
+    /// what it wants and by reseeding anything it built from a stream rather than from an answer.
     #[must_use]
-    pub fn handshake(&self) -> &Handshake {
-        &self.handshake
+    pub fn state(&self) -> watch::Receiver<SessionState> {
+        self.session.clone()
     }
 
-    /// Returns a receiver that reports whether the connection has ended.
+    /// Returns what the gateway reported in the current session's handshake.
+    ///
+    /// `None` while there is no session, which lasts the whole of an outage.
+    #[must_use]
+    pub fn handshake(&self) -> Option<Handshake> {
+        self.session.borrow().handshake().cloned()
+    }
+
+    /// Returns a receiver reporting whether the supervisor has stopped for good.
+    ///
+    /// This is not the same as being mid-outage. A dropped socket is replaced, and this becomes true
+    /// only once the supervisor stops, whether it was asked to or it ran out of attempts.
     #[must_use]
     pub fn closed(&self) -> watch::Receiver<bool> {
         self.closed.clone()
     }
 
+    /// Asks the supervisor to stop, which closes the socket and ends the connection.
+    ///
+    /// It does not wait for the teardown, because the caller has nothing to gain from watching a
+    /// socket close and the supervisor may be asleep in a backoff.
+    pub fn shutdown(&self) {
+        let _ = self.stop.send(true);
+    }
+
     /// Sends a request and waits for its response.
+    ///
+    /// The request travels on whichever session is current when it is written. A request outstanding
+    /// when a socket drops is released at once with [`ConnectionError::Closed`] rather than waiting
+    /// out its timeout, and it is not repeated here: whether a request may be sent twice is a
+    /// question about the request, which this layer does not know, so the decision stays with the
+    /// caller that made it.
     ///
     /// # Errors
     ///
     /// Returns [`ConnectionError::Codec`] if the request cannot be framed,
-    /// [`ConnectionError::Closed`] if the connection ends while the request is outstanding, and
-    /// [`ConnectionError::RequestTimeout`] if no response arrives within the configured timeout.
+    /// [`ConnectionError::Closed`] if there is no session or the current one ends while the request
+    /// is outstanding, and [`ConnectionError::RequestTimeout`] if no response arrives within the
+    /// configured timeout.
     pub async fn request(&self, proto_id: u32, body: &[u8]) -> Result<Message, ConnectionError> {
         self.requester.request(proto_id, body).await
     }
 }
 
-/// Connects to the gateway, performs the handshake, and starts the reader, writer, and heartbeat.
+/// Connects to the gateway, performs the first handshake, and starts the supervisor.
 ///
 /// Push frames, and notifications, are delivered to `pushes` as they arrive.
+///
+/// A gateway that cannot be reached, or that refuses the handshake, is an error from this call: the
+/// supervisor's job is to replace a socket that was working, and a caller that cannot connect at all
+/// has somewhere else to go, such as the next provider in a failover chain.
 ///
 /// # Errors
 ///
@@ -372,117 +462,428 @@ pub async fn connect(
     // The feed is latency sensitive and the frames are small, so coalescing would only add delay.
     stream.set_nodelay(true)?;
 
-    let (read_half, write_half) = stream.into_split();
-
     let pending: std::sync::Arc<Pending> = std::sync::Arc::new(Mutex::new(HashMap::new()));
     let (frames, frame_rx) = mpsc::unbounded_channel();
+    let (session_tx, session_rx) = watch::channel(SessionState::Restoring { attempts: 0 });
     let (closed_tx, closed_rx) = watch::channel(false);
-
-    tokio::spawn(write_task(write_half, frame_rx));
-    tokio::spawn(read_task(
-        read_half,
-        std::sync::Arc::clone(&pending),
-        pushes,
-        closed_tx.clone(),
-    ));
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let (first_tx, first_rx) = oneshot::channel();
 
     let requester = Requester {
         frames,
-        pending,
+        pending: std::sync::Arc::clone(&pending),
         next_serial: std::sync::Arc::new(AtomicU32::new(1)),
         timeout: options.request_timeout,
     };
 
-    let handshake = requester.handshake(&options.client_id).await?;
+    let supervisor = Supervisor {
+        shared: Shared {
+            options: options.clone(),
+            requester: requester.clone(),
+            pending,
+            pushes,
+            session: session_tx,
+            closed: closed_tx,
+        },
+        frames: frame_rx,
+        stopped: stop_rx,
+    };
 
-    tokio::spawn(heartbeat_task(
-        requester.clone(),
-        handshake.keep_alive,
-        closed_tx,
-    ));
+    tokio::spawn(supervisor.run(stream, first_tx));
 
-    Ok(Connection {
-        requester,
-        handshake,
-        closed: closed_rx,
-    })
-}
-
-/// Writes frames as they are queued, and shuts the socket down when the queue closes.
-async fn write_task(mut socket: OwnedWriteHalf, mut frames: mpsc::UnboundedReceiver<Vec<u8>>) {
-    while let Some(frame) = frames.recv().await {
-        if let Err(e) = socket.write_all(&frame).await {
-            log::debug!("write failed, closing the connection: {e}");
-            break;
+    match first_rx.await {
+        Ok(Ok(())) => Ok(Connection {
+            requester,
+            session: session_rx,
+            closed: closed_rx,
+            stop: stop_tx,
+        }),
+        Ok(Err(message)) => {
+            let _ = stop_tx.send(true);
+            Err(ConnectionError::Handshake(message))
         }
+        // The supervisor sends its first outcome before anything else, so a missing one means it
+        // ended before it could.
+        Err(_) => Err(ConnectionError::Closed),
     }
-
-    let _ = socket.shutdown().await;
 }
 
-/// Decodes frames and dispatches them until the socket ends or a frame loses the boundary.
-async fn read_task(
-    mut socket: OwnedReadHalf,
+/// How long a session has to last before the outage that ended it is treated as over.
+const STABLE_SESSION: Duration = Duration::from_secs(30);
+
+/// The pause before the first attempt to replace a session.
+const RECONNECT_DELAY: Duration = Duration::from_secs(1);
+
+/// The longest pause between attempts to replace a session.
+const RECONNECT_DELAY_MAX: Duration = Duration::from_secs(30);
+
+/// Returns how long to wait before the next attempt.
+///
+/// The wait doubles with the attempts that have failed in a row and stops at the maximum, so a
+/// gateway down for an hour is asked about a hundred and twenty times rather than three thousand
+/// six hundred.
+fn backoff(attempts: u32) -> Duration {
+    let doublings = attempts.min(5);
+    (RECONNECT_DELAY * (1 << doublings)).min(RECONNECT_DELAY_MAX)
+}
+
+/// The pieces of a connection that outlive any one socket.
+#[derive(Debug, Clone)]
+struct Shared {
+    options: ConnectOptions,
+    requester: Requester,
     pending: std::sync::Arc<Pending>,
     pushes: mpsc::UnboundedSender<Message>,
+    session: watch::Sender<SessionState>,
     closed: watch::Sender<bool>,
-) {
-    let mut buffer: Vec<u8> = Vec::with_capacity(16 * 1024);
+}
 
-    'reading: loop {
-        match socket.read_buf(&mut buffer).await {
-            Ok(0) => {
-                log::debug!("the gateway closed the connection");
-                break;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                log::debug!("read failed, closing the connection: {e}");
-                break;
-            }
-        }
+/// Owns the socket, and replaces it when it drops.
+#[derive(Debug)]
+struct Supervisor {
+    shared: Shared,
+    frames: mpsc::UnboundedReceiver<Vec<u8>>,
+    stopped: watch::Receiver<bool>,
+}
 
-        let mut consumed = 0;
+impl Supervisor {
+    /// Runs sessions, replacing the socket after each one ends, until stopping or giving up.
+    ///
+    /// The first socket arrives already open, because failing to open one is the caller's error to
+    /// report rather than something to retry behind it.
+    async fn run(mut self, first: TcpStream, first_outcome: oneshot::Sender<Result<(), String>>) {
+        let mut attempts = 0;
+        let mut stream = Some(first);
+        let mut outcome = Some(first_outcome);
+
         loop {
-            match decode_frame(&buffer[consumed..]) {
-                Ok(Some(frame)) => {
-                    let total_len = frame.total_len();
-                    let message = Message {
-                        proto_id: frame.header.proto_id,
-                        serial_no: frame.header.serial_no,
-                        body: frame.body.to_vec(),
-                    };
-                    consumed += total_len;
-                    dispatch(message, &pending, &pushes);
-                }
-                Ok(None) => break,
-                Err(CodecError::DigestMismatch {
-                    proto_id,
-                    total_len,
-                    ..
-                }) => {
-                    // The extent is known, so this frame is skipped rather than fatal.
+            let socket = match stream.take() {
+                Some(socket) => socket,
+                None => {
+                    // No reconnect happens without a pause first, so a gateway that is refusing
+                    // connections is asked again at the backoff and not at the speed of this loop.
+                    let wait = backoff(attempts);
                     log::warn!(
-                        "discarding a corrupt frame for protocol {proto_id} over {total_len} bytes"
+                        "the connection is down; trying again in {wait:?} (attempt {})",
+                        attempts.saturating_add(1)
                     );
-                    consumed += total_len;
+
+                    tokio::select! {
+                        () = sleep(wait) => {}
+                        _ = self.stopped.changed() => break,
+                    }
+
+                    let address = (self.shared.options.host.as_str(), self.shared.options.port);
+
+                    match timeout(
+                        self.shared.options.request_timeout,
+                        TcpStream::connect(address),
+                    )
+                    .await
+                    {
+                        Ok(Ok(socket)) => {
+                            if let Err(e) = socket.set_nodelay(true) {
+                                log::warn!("cannot disable Nagle on the new socket: {e}");
+                            }
+
+                            socket
+                        }
+                        Ok(Err(e)) => {
+                            attempts = attempts.saturating_add(1);
+
+                            if !self.may_retry(attempts) {
+                                break;
+                            }
+
+                            log::warn!("cannot reach the gateway: {e}");
+                            continue;
+                        }
+                        Err(_) => {
+                            attempts = attempts.saturating_add(1);
+
+                            if !self.may_retry(attempts) {
+                                break;
+                            }
+
+                            log::warn!("the gateway did not accept a connection in time");
+                            continue;
+                        }
+                    }
                 }
-                Err(e) => {
-                    log::error!("closing the connection, the frame boundary is lost: {e}");
-                    break 'reading;
-                }
+            };
+
+            let started = Instant::now();
+            let result = self.session(socket, outcome.take()).await;
+            let lived = started.elapsed();
+
+            // A session that was established and then lasted is a connection that recovered, so the
+            // outage it ended is a new one and the wait starts over. Anything else is the same
+            // outage continuing, however many sockets it has taken.
+            match result {
+                Ok(_) if lived >= STABLE_SESSION => attempts = 0,
+                _ => attempts = attempts.saturating_add(1),
+            }
+
+            if *self.stopped.borrow() {
+                break;
+            }
+
+            // Saying the socket is gone as soon as it is gone is what lets a caller stop trusting
+            // what it holds without waiting for the next attempt to fail.
+            let _ = self
+                .shared
+                .session
+                .send(SessionState::Restoring { attempts });
+
+            if !self.may_retry(attempts) {
+                break;
             }
         }
 
-        if consumed > 0 {
-            buffer.drain(..consumed);
+        let _ = self.shared.closed.send(true);
+    }
+
+    /// Returns whether another attempt is allowed, reporting the one that is not.
+    fn may_retry(&self, attempts: u32) -> bool {
+        if let Some(limit) = self.shared.options.reconnect_attempts
+            && attempts >= limit
+        {
+            log::error!("giving up after {attempts} attempts to restore the connection");
+            return false;
+        }
+
+        true
+    }
+
+    /// Runs one session until it ends, returning the handshake of the session it established.
+    ///
+    /// An error means no session was established on this socket, which is what tells the caller
+    /// whether the outage is a new one.
+    ///
+    /// `first` carries the first session's outcome to whoever is waiting to hear whether the
+    /// connection came up, and it is fired as soon as there is an answer either way rather than when
+    /// the session ends: a caller waiting for a connection must not be made to wait for its loss.
+    async fn session(
+        &mut self,
+        stream: TcpStream,
+        first: Option<oneshot::Sender<Result<(), String>>>,
+    ) -> Result<Handshake, ConnectionError> {
+        let (mut read_half, mut write_half) = stream.into_split();
+        let mut buffer: Vec<u8> = Vec::with_capacity(16 * 1024);
+
+        let outcome = self
+            .handshake(&mut read_half, &mut write_half, &mut buffer)
+            .await;
+
+        match outcome {
+            Ok(reported) => {
+                if let Some(sender) = first {
+                    let _ = sender.send(Ok(()));
+                }
+
+                let _ = self
+                    .shared
+                    .session
+                    .send(SessionState::Ready(reported.clone()));
+
+                let ending = self
+                    .steady(
+                        &mut read_half,
+                        &mut write_half,
+                        &mut buffer,
+                        reported.keep_alive,
+                    )
+                    .await;
+
+                let _ = write_half.shutdown().await;
+                // Releasing the waiters is what turns a dead socket into an immediate error for
+                // every outstanding request, instead of each one waiting out its own timeout.
+                lock(&self.shared.pending).clear();
+                log::debug!("{ending}");
+
+                Ok(reported)
+            }
+            Err(e) => {
+                if let Some(sender) = first {
+                    let _ = sender.send(Err(e.to_string()));
+                }
+
+                log::warn!("the session could not be established: {e}");
+                let _ = write_half.shutdown().await;
+                lock(&self.shared.pending).clear();
+
+                Err(e)
+            }
         }
     }
 
-    // Releasing the waiters here is what turns a dead connection into an immediate error for every
-    // outstanding request, instead of each one waiting out its own timeout.
-    lock(&pending).clear();
-    let _ = closed.send(true);
+    /// Performs the handshake, driving the read and write paths while it is outstanding.
+    ///
+    /// Nothing may be written before the handshake, so the write path is here for one frame: the
+    /// handshake request itself. The read path has to run all the same, because the answer is a
+    /// response like any other and only this loop can deliver it.
+    async fn handshake(
+        &mut self,
+        read_half: &mut OwnedReadHalf,
+        write_half: &mut OwnedWriteHalf,
+        buffer: &mut Vec<u8>,
+    ) -> Result<Handshake, ConnectionError> {
+        let handshake = self
+            .shared
+            .requester
+            .handshake(&self.shared.options.client_id);
+        tokio::pin!(handshake);
+
+        loop {
+            tokio::select! {
+                result = &mut handshake => return result,
+
+                frame = self.frames.recv() => {
+                    let Some(frame) = frame else {
+                        return Err(ConnectionError::Closed);
+                    };
+
+                    if write_half.write_all(&frame).await.is_err() {
+                        return Err(ConnectionError::Closed);
+                    }
+                }
+
+                read = read_half.read_buf(buffer) => {
+                    match read {
+                        Ok(0) => {
+                            // The answer can arrive in the same read that ends the socket, and it is
+                            // this path that delivered it, so the handshake is polled once more
+                            // before the session is reported as never having been established. A
+                            // gateway that answers and then closes immediately is a gateway that
+                            // spoke the protocol, which is what the caller is waiting to hear.
+                            return match timeout(Duration::ZERO, &mut handshake).await {
+                                Ok(result) => result,
+                                Err(_) => Err(ConnectionError::Closed),
+                            };
+                        }
+                        Ok(_) => {}
+                        Err(e) => return Err(ConnectionError::Io(e)),
+                    }
+
+                    drain_frames(buffer, &self.shared.pending, &self.shared.pushes)?;
+                }
+
+                _ = self.stopped.changed() => return Err(ConnectionError::Closed),
+            }
+        }
+    }
+
+    /// Runs an established session until one of its three paths ends it, returning why.
+    async fn steady(
+        &mut self,
+        read_half: &mut OwnedReadHalf,
+        write_half: &mut OwnedWriteHalf,
+        buffer: &mut Vec<u8>,
+        keep_alive: Duration,
+    ) -> &'static str {
+        let mut ticker = interval(keep_alive);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        // The first tick of an interval completes immediately, and the handshake has just happened.
+        ticker.tick().await;
+
+        loop {
+            tokio::select! {
+                frame = self.frames.recv() => {
+                    let Some(frame) = frame else {
+                        return "the request channel closed";
+                    };
+
+                    if write_half.write_all(&frame).await.is_err() {
+                        return "the gateway stopped accepting writes";
+                    }
+                }
+
+                read = read_half.read_buf(buffer) => {
+                    match read {
+                        Ok(0) => return "the gateway closed the socket",
+                        Ok(_) => {}
+                        Err(_) => return "the socket failed while reading",
+                    }
+
+                    if let Err(e) = drain_frames(buffer, &self.shared.pending, &self.shared.pushes) {
+                        log::error!("the frame boundary is lost: {e}");
+                        return "a frame lost its boundary";
+                    }
+                }
+
+                _ = ticker.tick() => {
+                    let request = keep_alive::Request {
+                        c2s: keep_alive::C2s { time: unix_seconds() },
+                    };
+                    let body = prost::Message::encode_to_vec(&request);
+                    let requester = self.shared.requester.clone();
+
+                    // The answer arrives on the read path like any other response, so this must not
+                    // be awaited here: waiting for it would stop the read path that delivers it.
+                    tokio::spawn(async move {
+                        if let Err(e) = requester.request(PROTO_ID_KEEP_ALIVE, &body).await {
+                            log::debug!("the keep-alive went unanswered: {e}");
+                        }
+                    });
+                }
+
+                _ = self.stopped.changed() => return "the connection was asked to stop",
+            }
+        }
+    }
+}
+
+/// Decodes and dispatches every whole frame in `buffer`, leaving a partial frame in place.
+///
+/// A corrupt frame is skipped using the extent its header states, because that extent is what makes
+/// skipping possible at all. A frame whose boundary cannot be found is the one failure a caller
+/// cannot recover from, since every byte after it is unreadable.
+fn drain_frames(
+    buffer: &mut Vec<u8>,
+    pending: &Pending,
+    pushes: &mpsc::UnboundedSender<Message>,
+) -> Result<(), CodecError> {
+    let mut consumed = 0;
+
+    loop {
+        match decode_frame(&buffer[consumed..]) {
+            Ok(Some(frame)) => {
+                let total_len = frame.total_len();
+                let message = Message {
+                    proto_id: frame.header.proto_id,
+                    serial_no: frame.header.serial_no,
+                    body: frame.body.to_vec(),
+                };
+                consumed += total_len;
+                dispatch(message, pending, pushes);
+            }
+            Ok(None) => break,
+            Err(CodecError::DigestMismatch {
+                proto_id,
+                total_len,
+                ..
+            }) => {
+                // The extent is known, so this frame is skipped rather than fatal.
+                log::warn!(
+                    "discarding a corrupt frame for protocol {proto_id} over {total_len} bytes"
+                );
+                consumed += total_len;
+            }
+            Err(e) => {
+                if consumed > 0 {
+                    buffer.drain(..consumed);
+                }
+
+                return Err(e);
+            }
+        }
+    }
+
+    if consumed > 0 {
+        buffer.drain(..consumed);
+    }
+
+    Ok(())
 }
 
 /// Routes one decoded message: to its waiting request, to the push channel, or nowhere.
@@ -509,36 +910,15 @@ fn dispatch(message: Message, pending: &Pending, pushes: &mpsc::UnboundedSender<
     );
 }
 
-/// Sends the keep-alive on the negotiated interval until it goes unanswered.
-async fn heartbeat_task(requester: Requester, every: Duration, closed: watch::Sender<bool>) {
-    let mut ticker = interval(every);
-    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    // The first tick of an interval completes immediately, and the handshake has just happened.
-    ticker.tick().await;
-
-    loop {
-        ticker.tick().await;
-
-        let request = keep_alive::Request {
-            c2s: keep_alive::C2s {
-                time: unix_seconds(),
-            },
-        };
-        let body = prost::Message::encode_to_vec(&request);
-
-        if let Err(e) = requester.request(PROTO_ID_KEEP_ALIVE, &body).await {
-            log::warn!("keep-alive failed, closing the connection: {e}");
-            let _ = closed.send(true);
-            return;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::future::Future;
 
-    use tokio::net::TcpListener;
+    use rstest::rstest;
+    use tokio::{
+        net::TcpListener,
+        net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+    };
 
     use super::*;
 
@@ -604,30 +984,81 @@ mod tests {
             assert!(decoded.c2s.programming_language.is_none());
             assert!(decoded.c2s.ai_type.is_none());
 
-            let response = init_connect::Response {
-                ret_type: RET_OK,
-                ret_msg: None,
-                err_code: None,
-                s2c: Some(init_connect::S2c {
-                    server_ver: SERVER_VER,
-                    login_user_id: 7,
-                    conn_id: CONN_ID,
-                    conn_aes_key: "0123456789abcdef".to_string(),
-                    keep_alive_interval: REPORTED_KEEP_ALIVE_SECS,
-                    aes_cb_civ: None,
-                    user_attribution: None,
-                }),
-            };
-
             send_message(
                 &mut write,
                 PROTO_ID_INIT_CONNECT,
                 request.serial_no,
-                &prost::Message::encode_to_vec(&response),
+                &prost::Message::encode_to_vec(&handshake_response(CONN_ID)),
             )
             .await;
 
             script(write, read).await;
+        });
+
+        port
+    }
+
+    /// The handshake answer a controlled gateway sends, reporting `conn_id` for the session.
+    fn handshake_response(conn_id: u64) -> init_connect::Response {
+        init_connect::Response {
+            ret_type: RET_OK,
+            ret_msg: None,
+            err_code: None,
+            s2c: Some(init_connect::S2c {
+                server_ver: SERVER_VER,
+                login_user_id: 7,
+                conn_id,
+                conn_aes_key: "0123456789abcdef".to_string(),
+                keep_alive_interval: REPORTED_KEEP_ALIVE_SECS,
+                aes_cb_civ: None,
+                user_attribution: None,
+            }),
+        }
+    }
+
+    /// Starts a controlled gateway that accepts `sessions` connections, handshaking each and
+    /// reporting a distinct connection identifier for it.
+    ///
+    /// The first session is dropped as soon as it is up, which is the outage under test, and each
+    /// later one answers a quote request, which is what proves a replacement carries traffic rather
+    /// than merely existing.
+    async fn spawn_reconnecting_gateway(sessions: u64) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            for index in 0..sessions {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (mut read, mut write) = stream.into_split();
+                let mut buffer = Vec::new();
+
+                let request = recv_message(&mut read, &mut buffer).await;
+                assert_eq!(request.proto_id, PROTO_ID_INIT_CONNECT);
+
+                send_message(
+                    &mut write,
+                    PROTO_ID_INIT_CONNECT,
+                    request.serial_no,
+                    &prost::Message::encode_to_vec(&handshake_response(CONN_ID + index)),
+                )
+                .await;
+
+                if index == 0 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    let _ = write.shutdown().await;
+                    continue;
+                }
+
+                loop {
+                    let message = recv_message(&mut read, &mut buffer).await;
+
+                    if message.proto_id == 3202 {
+                        send_message(&mut write, message.proto_id, message.serial_no, b"restored")
+                            .await;
+                        break;
+                    }
+                }
+            }
         });
 
         port
@@ -642,10 +1073,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_handshake_reports_the_gateway_state() {
-        let port = spawn_gateway(|_write, _read| async {}).await;
+        // The session is held open, because the handshake belongs to the session that is current:
+        // a gateway that has already gone leaves none to report. The halves have to be captured by
+        // the future, or they would drop as soon as the script returns them.
+        let port = spawn_gateway(|write, read| async move {
+            let _held = (write, read);
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        })
+        .await;
         let (connection, _pushes) = connect_to(port).await;
 
-        let handshake = connection.handshake();
+        let handshake = connection.handshake().unwrap_or_else(|| {
+            panic!(
+                "expected the first session to be established, found {:?}",
+                *connection.state().borrow(),
+            )
+        });
 
         assert_eq!(handshake.server_ver, SERVER_VER);
         assert_eq!(handshake.conn_id, CONN_ID);
@@ -754,10 +1197,10 @@ mod tests {
         drop(connection);
     }
 
-    /// A gateway that closes the socket releases outstanding requests immediately rather than
-    /// leaving them to their timeout, and the closure is observable.
+    /// A dropped socket releases outstanding requests immediately rather than leaving them to their
+    /// timeout, and it is reported as an outage rather than as the end of the connection.
     #[tokio::test]
-    async fn test_a_closed_socket_releases_the_waiters() {
+    async fn test_a_dropped_socket_releases_the_waiters_and_reports_the_outage() {
         let port = spawn_gateway(|mut write, _read| async move {
             // Accept the request, then drop the write half without answering.
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -765,7 +1208,15 @@ mod tests {
         })
         .await;
 
-        let (connection, _pushes) = connect_to(port).await;
+        let options = ConnectOptions::new("127.0.0.1", port)
+            .with_client_id(CLIENT_ID)
+            // The gateway's listener goes with the first connection, so a replacement cannot be
+            // made and the supervisor is told to stop rather than retry behind the test.
+            .with_reconnect_attempts(1);
+        let (pushes, _push_rx) = mpsc::unbounded_channel();
+        let connection = connect(&options, pushes).await.unwrap();
+
+        let mut state = connection.state();
         let mut closed = connection.closed();
 
         let result = connection.request(3202, b"query").await;
@@ -774,10 +1225,108 @@ mod tests {
             "expected the request to be released, got {result:?}"
         );
 
-        tokio::time::timeout(Duration::from_secs(2), closed.changed())
+        tokio::time::timeout(Duration::from_secs(5), state.changed())
+            .await
+            .expect("the outage should be observable")
+            .expect("the sender should not be dropped");
+        assert_eq!(*state.borrow(), SessionState::Restoring { attempts: 1 });
+
+        tokio::time::timeout(Duration::from_secs(5), closed.changed())
+            .await
+            .expect("the supervisor should stop once its attempts run out")
+            .expect("the sender should not be dropped");
+        assert!(*closed.borrow());
+    }
+
+    /// The socket is replaced, handshaken again, and carries traffic, which is what makes a drop an
+    /// outage rather than the end.
+    #[tokio::test]
+    async fn test_a_dropped_socket_is_replaced_and_rehandshaken() {
+        let port = spawn_reconnecting_gateway(2).await;
+
+        let options = ConnectOptions::new("127.0.0.1", port)
+            .with_client_id(CLIENT_ID)
+            .with_reconnect_attempts(3);
+        let (pushes, _push_rx) = mpsc::unbounded_channel();
+        let connection = connect(&options, pushes).await.unwrap();
+
+        let first = connection
+            .handshake()
+            .expect("the first session is established");
+        assert_eq!(first.conn_id, CONN_ID);
+
+        let mut state = connection.state();
+
+        let replaced = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let SessionState::Ready(handshake) = state.borrow().clone()
+                    && handshake.conn_id != first.conn_id
+                {
+                    return handshake;
+                }
+
+                state.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("the session should be replaced");
+
+        assert_eq!(
+            replaced.conn_id,
+            CONN_ID + 1,
+            "the replacement is a new session, not the old one reported again",
+        );
+        assert_eq!(
+            connection.handshake().expect("there is a session").conn_id,
+            CONN_ID + 1,
+        );
+
+        let response = connection.request(3202, b"query").await.unwrap();
+        assert_eq!(
+            response.body, b"restored",
+            "the replacement carries requests, not just a handshake",
+        );
+    }
+
+    /// Being asked to stop is not an outage, and it is the only thing besides running out of
+    /// attempts that ends the supervisor.
+    #[tokio::test]
+    async fn test_shutdown_stops_the_supervisor() {
+        let port = spawn_gateway(|write, read| async move {
+            // Hold the session open, so that only the shutdown can end it. The halves have to be
+            // captured by the future, or they would drop as soon as the script returns them.
+            let _held = (write, read);
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        })
+        .await;
+
+        let (connection, _pushes) = connect_to(port).await;
+        let mut closed = connection.closed();
+
+        assert!(
+            !*closed.borrow(),
+            "a live session is not a closed connection"
+        );
+        connection.shutdown();
+
+        tokio::time::timeout(Duration::from_secs(5), closed.changed())
             .await
             .expect("the closure should be observable")
             .expect("the sender should not be dropped");
         assert!(*closed.borrow());
+    }
+
+    /// The wait between attempts grows and then stops growing, so a gateway down for an hour is
+    /// asked roughly a hundred times rather than thousands.
+    #[rstest]
+    #[case(0, 1)]
+    #[case(1, 2)]
+    #[case(2, 4)]
+    #[case(4, 16)]
+    #[case(5, 30)]
+    #[case(9, 30)]
+    #[case(u32::MAX, 30)]
+    fn test_the_reconnect_wait_grows_and_is_capped(#[case] attempts: u32, #[case] seconds: u64) {
+        assert_eq!(backoff(attempts), Duration::from_secs(seconds));
     }
 }
