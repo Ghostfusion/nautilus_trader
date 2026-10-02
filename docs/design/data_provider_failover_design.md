@@ -470,6 +470,18 @@ property the engine depends on is that the correlation identifier is the caller'
 untouched, and a pure function makes that a test rather than an argument. Only a response carries an
 identity at all, so only a response is rewritten, and market data passes through unchanged.
 
+**The sender a provider captures and the task that drains it belong together.** A provider takes the
+sender it finds when it is constructed, so a provider built while the engine's own sender is
+installed writes past the chain entirely and nothing about it is observed. The two halves are
+therefore created as one thing and handed out as one thing, which is why the composite installs the
+boundary only for as long as it is building its legs.
+
+**What answers a demand is a response carrying the caller's correlation identifier, and nothing
+else.** So the chain keeps a register of the demands it is waiting on, and an answer is matched
+against it on the way out. A demand that has stopped waiting is removed rather than counted, so a
+late answer cannot stand in for a demand made later - which is the difference between a chain that
+hops because it saw a provider refuse and one that hops because it looked away too soon.
+
 **A leg is a factory and a configuration, and neither is serializable.** The engine's own
 configuration path is serde, and a `ClientConfig` is a trait object, so a chain's configuration
 cannot be a serialized struct of legs the way a single provider's configuration is. The chain is

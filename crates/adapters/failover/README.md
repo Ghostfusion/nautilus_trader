@@ -28,6 +28,8 @@ event-driven architecture, providing research-to-live semantic parity.
   trace of what was tried.
 - `tap`: the boundary between a chain's providers and the engine, where a provider's identity becomes
   the chain's and the caller's correlation identifier is left alone.
+- `pump`: the sender a chain gives its providers and the task that drains it, together with the
+  register of which demand each answer answers.
 - `testing`: a provider that answers from a script, so that a chain can be exercised without a
   network.
 
