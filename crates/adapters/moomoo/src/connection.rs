@@ -61,6 +61,7 @@ use tokio::{
 
 use crate::{
     codec::{CodecError, PROTO_FMT_PROTOBUF, decode_frame, encode_frame},
+    common::CLIENT_ID,
     generated::{init_connect, keep_alive},
 };
 
@@ -94,9 +95,6 @@ pub const PACKET_ENC_ALGO_NONE: i32 = -1;
 
 /// The ``retType`` of a successful response.
 pub const RET_OK: i32 = 0;
-
-/// The client identifier used when the caller does not supply one.
-pub const DEFAULT_CLIENT_ID: &str = "nautilus-moomoo";
 
 /// The request timeout used when the caller does not supply one.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -133,7 +131,7 @@ impl ConnectOptions {
         Self {
             host: host.into(),
             port,
-            client_id: DEFAULT_CLIENT_ID.to_string(),
+            client_id: CLIENT_ID.to_string(),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
         }
     }

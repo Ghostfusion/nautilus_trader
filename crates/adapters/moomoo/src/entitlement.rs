@@ -27,53 +27,17 @@
 //! granted. Only the level rights are treated as usable, which is why the record keeps the gateway's
 //! vocabulary rather than collapsing it to a boolean.
 
-use std::fmt;
-
 use prost::Message as _;
 use thiserror::Error;
 
 use crate::{
+    common::Market,
     connection::{Connection, ConnectionError, RET_OK},
     generated::get_user_info,
 };
 
 /// The protocol identifier of the entitlement read.
 pub const PROTO_ID_GET_USER_INFO: u32 = 1005;
-
-/// A market this adapter serves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Market {
-    /// United States equities.
-    Us,
-    /// Hong Kong equities.
-    Hk,
-}
-
-impl Market {
-    /// Every market this adapter serves.
-    pub const ALL: [Self; 2] = [Self::Us, Self::Hk];
-
-    /// Returns the gateway's own code for the market.
-    #[must_use]
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Us => "US",
-            Self::Hk => "HK",
-        }
-    }
-
-    /// Parses the gateway's own code for the market.
-    #[must_use]
-    pub fn from_code(code: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|market| market.code() == code)
-    }
-}
-
-impl fmt::Display for Market {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
 
 /// A market's quote entitlement, in the gateway's own vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -396,13 +360,5 @@ mod tests {
             Capabilities::from_response(&response).unwrap_err(),
             EntitlementError::MissingPayload
         ));
-    }
-
-    #[rstest]
-    #[case::us("US", Some(Market::Us))]
-    #[case::hk("HK", Some(Market::Hk))]
-    #[case::unknown("CN", None)]
-    fn test_market_codes_round_trip(#[case] code: &str, #[case] expected: Option<Market>) {
-        assert_eq!(Market::from_code(code), expected);
     }
 }

@@ -6518,7 +6518,10 @@ dependencies = [
 name = "nautilus-moomoo"
 version = "0.65.0"
 dependencies = [
+ "anyhow",
  "log",
+ "nautilus-core",
+ "nautilus-model",
  "prost 0.13.5",
  "prost-build",
  "rstest",

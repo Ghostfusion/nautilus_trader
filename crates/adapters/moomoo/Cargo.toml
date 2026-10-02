@@ -23,6 +23,10 @@ crate-type = ["rlib"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+nautilus-core = { workspace = true }
+nautilus-model = { workspace = true }
+
+anyhow = { workspace = true }
 log = { workspace = true }
 prost = { workspace = true }
 sha1 = { workspace = true }

@@ -45,8 +45,11 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod codec;
+pub mod common;
 pub mod connection;
 pub mod entitlement;
+pub mod mappers;
+pub mod providers;
 
 /// The generated types for the vendored gateway schema.
 ///

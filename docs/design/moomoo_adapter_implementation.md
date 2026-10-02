@@ -80,6 +80,7 @@ crates/adapters/moomoo/
       quotes.rs
       orderbook.rs
       corporate_actions.rs
+    providers.rs             the two calls that define an instrument
     subscription.rs          intent, venue state, allowance
     entitlement.rs           capability resolution
     config.rs                MoomooDataClientConfig
@@ -389,6 +390,25 @@ Mapping rules:
 - Security types the adapter does not model are filtered out rather than approximated into an equity.
 - The client ID is `MOOMOO` while the instrument venue is the market, so provider identity rides at
   the client boundary and instrument identity stays the security (design 12.1).
+
+As implemented, and confirmed against a live gateway:
+
+- `US.AAPL` maps to `AAPL.US`: symbol `AAPL`, venue `US`, and the gateway's own form kept as the raw
+  symbol so it round-trips back to a request with no lookup table. The venue is the market code and
+  not the exchange type, so this identifier is the one the EODHD adapter produces for the same
+  security.
+- Precision comes from the spread by an exact search over decimal places, not from a logarithm. A
+  logarithm reports one decimal place for a spread of `0.05`, because `log10(0.05)` rounds to `-1`,
+  and Hong Kong prices use steps of `0.005` and `0.05` in ordinary bands, so it would describe a tick
+  ten times the real one.
+- A spread that cannot be resolved as a step falls back to the market default rather than reporting
+  a step the venue cannot have.
+- The exchange type is read but not carried into the instrument. It is a listing venue such as
+  `NASDAQ`, it must not become the instrument venue, and no adapter in this repository populates the
+  instrument's free-form `info`, so filing it there would be a new convention invented for one
+  adapter's convenience.
+- A security type other than an equity is refused rather than approximated, so a warrant or a future
+  cannot arrive as an equity carrying the wrong tick.
 
 ## 11. Bars
 
