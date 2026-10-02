@@ -40,7 +40,8 @@ use nautilus_common::{
     messages::{
         DataEvent,
         data::{
-            RequestBars, RequestInstrument, RequestInstruments, SubscribeBars, SubscribeInstrument,
+            BarsResponse, DataResponse, InstrumentResponse, InstrumentsResponse, RequestBars,
+            RequestInstrument, RequestInstruments, SubscribeBars, SubscribeInstrument,
             SubscribeInstruments, SubscribeQuotes, SubscribeTrades, UnsubscribeBars,
             UnsubscribeQuotes, UnsubscribeTrades,
         },
@@ -59,7 +60,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     bars::{EodhdInterval, build_bulk_bar, build_eod_bars, build_intraday_bars, resolve_interval},
-    common::{EODHD_WS_QUOTES_CHANNEL, EODHD_WS_TRADES_CHANNEL, EODHD_WS_VENUE},
+    common::{
+        EODHD_DEFAULT_EXCHANGE, EODHD_WS_QUOTES_CHANNEL, EODHD_WS_TRADES_CHANNEL, EODHD_WS_VENUE,
+    },
     config::EodhdDataClientConfig,
     corporate_actions::{action_from_dividend, action_from_split},
     http::{EodhdDelayedQuote, EodhdHttpClient},
@@ -812,6 +815,18 @@ fn now_seconds() -> i64 {
     i64::try_from(nanos.as_seconds()).unwrap_or(i64::MAX)
 }
 
+/// Writes a response, as a client does when it has answered a request.
+fn respond(sender: &EventSender<DataEvent>, response: DataResponse) {
+    if let Err(e) = sender.send(DataEvent::Response(response)) {
+        log::error!("Failed to send a response: {e}");
+    }
+}
+
+/// Returns one end of a request window as the nanoseconds a response carries it in.
+fn bound_nanos(bound: Option<Timestamp>) -> Option<UnixNanos> {
+    bound.map(UnixNanos::from)
+}
+
 /// Fetches bars for `bar_type` between `from` and `to` inclusive, as epoch seconds.
 async fn fetch_bars(
     http_client: &EodhdHttpClient,
@@ -1078,7 +1093,7 @@ impl DataClient for EodhdDataClient {
         Ok(())
     }
 
-    fn request_instruments(&self, _request: RequestInstruments) -> anyhow::Result<()> {
+    fn request_instruments(&self, request: RequestInstruments) -> anyhow::Result<()> {
         let instruments = self.instruments();
 
         if instruments.is_empty() {
@@ -1086,9 +1101,25 @@ impl DataClient for EodhdDataClient {
                 "No instruments loaded to respond with for {}",
                 self.client_id
             );
-        } else {
-            self.emit_instruments(&instruments);
         }
+
+        // The response carries the instruments, and the engine emits them from it, so writing them as
+        // data as well would emit each one twice.
+        respond(
+            &self.data_sender,
+            DataResponse::Instruments(InstrumentsResponse::new(
+                request.request_id,
+                request.client_id.unwrap_or(self.client_id),
+                request
+                    .venue
+                    .unwrap_or_else(|| Venue::from(EODHD_DEFAULT_EXCHANGE)),
+                instruments,
+                bound_nanos(request.start),
+                bound_nanos(request.end),
+                get_atomic_clock_realtime().get_time_ns(),
+                request.params,
+            )),
+        );
 
         Ok(())
     }
@@ -1097,14 +1128,25 @@ impl DataClient for EodhdDataClient {
         let instrument_id = request.instrument_id;
         let instrument = self.instruments.borrow().get(&instrument_id).cloned();
 
-        match instrument {
-            Some(instrument) => {
-                if let Err(e) = self.data_sender.send(DataEvent::Instrument(instrument)) {
-                    log::error!("Failed to send instrument event: {e}");
-                }
-            }
-            None => log::warn!("Instrument {instrument_id} is not loaded"),
-        }
+        let Some(instrument) = instrument else {
+            log::warn!("Instrument {instrument_id} is not loaded");
+
+            return Ok(());
+        };
+
+        respond(
+            &self.data_sender,
+            DataResponse::Instrument(Box::new(InstrumentResponse::new(
+                request.request_id,
+                request.client_id.unwrap_or(self.client_id),
+                instrument_id,
+                instrument,
+                bound_nanos(request.start),
+                bound_nanos(request.end),
+                get_atomic_clock_realtime().get_time_ns(),
+                request.params,
+            ))),
+        );
 
         Ok(())
     }
@@ -1202,8 +1244,11 @@ impl DataClient for EodhdDataClient {
         let token = self.cancellation_token.child_token();
         let http_client = self.http_client.clone();
         let sender = self.data_sender.clone();
+        let correlation_id = request.request_id;
+        let client_id = request.client_id.unwrap_or(self.client_id);
         let start = request.start;
         let end = request.end;
+        let params = request.params;
         let price_precision = self.config.price_precision;
         let load_corporate_actions = self.config.load_corporate_actions;
 
@@ -1223,9 +1268,21 @@ impl DataClient for EodhdDataClient {
                 Ok(bars) => {
                     log::debug!("Requested {} bars for {bar_type}", bars.len());
 
-                    for bar in bars {
-                        send_bar(&sender, bar);
-                    }
+                    // The response carries the bars, and the engine emits them from it, so sending
+                    // them as data as well would emit each one twice.
+                    respond(
+                        &sender,
+                        DataResponse::Bars(BarsResponse::new(
+                            correlation_id,
+                            client_id,
+                            bar_type,
+                            bars,
+                            bound_nanos(start),
+                            bound_nanos(end),
+                            get_atomic_clock_realtime().get_time_ns(),
+                            params,
+                        )),
+                    );
 
                     if load_corporate_actions {
                         emit_corporate_actions(
@@ -1356,15 +1413,92 @@ impl DataClient for EodhdDataClient {
 
 #[cfg(test)]
 mod tests {
+    use nautilus_common::live::runner::replace_data_event_sender;
+    use nautilus_core::UUID4;
     use nautilus_model::{
         data::BarSpecification,
         enums::{BarAggregation, PriceType},
         identifiers::InstrumentId,
     };
     use rstest::rstest;
+    use tokio::io::AsyncWriteExt;
 
     use super::*;
     use crate::bars::{bar_type_for, date_end_secs, date_start_secs};
+
+    /// One end-of-day row, as the endpoint returns it.
+    const EOD_BODY: &str = r#"[{"date":"2024-01-02","open":100.0,"high":102.0,"low":99.0,"close":101.0,"adjusted_close":101.0,"volume":1000.0}]"#;
+
+    /// Answers one request with `body`, so that a request path can be exercised without the venue.
+    async fn serve_once(body: &'static str) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = vec![0_u8; 4096];
+            let _ = socket.readable().await;
+            let _ = socket.try_read(&mut request);
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        });
+
+        (format!("http://{address}"), handle)
+    }
+
+    /// Waits for the client to answer, or fails the test rather than hanging the suite.
+    async fn answer(events: &mut tokio::sync::mpsc::UnboundedReceiver<DataEvent>) -> DataEvent {
+        tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("the client should answer within the deadline")
+            .expect("the client should have written an event")
+    }
+
+    /// A request is answered with a response under the identity the caller asked for. A chain cannot
+    /// see a provider serve, or fail to serve, from anything else.
+    #[tokio::test]
+    async fn test_a_bar_request_is_answered_with_a_response_carrying_the_callers_identifier() {
+        let (base_url, server) = serve_once(EOD_BODY).await;
+        let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+        replace_data_event_sender(EventSender::from(sender));
+
+        let config = EodhdDataClientConfig::builder()
+            .api_key(SecretString::from("test"))
+            .http_base_url(SecretString::from(base_url))
+            .build();
+        let client = EodhdDataClient::new(ClientId::from("EODHD"), config).unwrap();
+
+        let request = RequestBars::new(
+            bar_type_for(InstrumentId::from("AAPL.US"), EodhdInterval::Day),
+            None,
+            None,
+            None,
+            Some(ClientId::from("CHAIN")),
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+        );
+        let correlation_id = request.request_id;
+
+        client.request_bars(request).unwrap();
+
+        let DataEvent::Response(DataResponse::Bars(response)) = answer(&mut events).await else {
+            panic!("expected a bar response");
+        };
+
+        assert_eq!(response.correlation_id, correlation_id);
+        assert_eq!(response.client_id, ClientId::from("CHAIN"));
+        assert_eq!(response.data.len(), 1);
+        assert_eq!(response.data[0].close.as_f64(), 101.0);
+
+        server.await.unwrap();
+    }
 
     fn bar(ts_seconds: i64, close: f64) -> Bar {
         let instrument_id = InstrumentId::from("AAPL.US");
