@@ -45,6 +45,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod codec;
+pub mod connection;
 
 /// The generated types for the vendored gateway schema.
 ///

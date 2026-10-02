@@ -124,8 +124,18 @@ pub enum CodecError {
     #[error("frame body length of {0} bytes exceeds the maximum of 67108864")]
     BodyTooLarge(u64),
     /// The body does not hash to the digest in the header.
-    #[error("frame body digest does not match the header")]
-    DigestMismatch,
+    ///
+    /// The frame's extent is known from its header, so a reader on a stream can discard exactly
+    /// this frame and continue at the next header rather than closing the connection.
+    #[error(
+        "frame body digest does not match the header for protocol {proto_id} over {total_len} bytes"
+    )]
+    DigestMismatch {
+        /// The protocol identifier the corrupt frame claimed, for reporting.
+        proto_id: u32,
+        /// The full extent of the frame, header included, so a reader can skip it.
+        total_len: usize,
+    },
 }
 
 /// Encodes a frame around `body`.
@@ -199,7 +209,10 @@ pub fn decode_frame(buf: &[u8]) -> Result<Option<Frame<'_>>, CodecError> {
     let body = &buf[HEADER_LEN..total_len];
     let digest: [u8; 20] = Sha1::digest(body).into();
     if digest != sha1 {
-        return Err(CodecError::DigestMismatch);
+        return Err(CodecError::DigestMismatch {
+            proto_id,
+            total_len,
+        });
     }
 
     Ok(Some(Frame {
@@ -322,7 +335,13 @@ mod tests {
         let last = encoded.len() - 1;
         encoded[last] ^= 0xff;
 
-        assert_eq!(decode_frame(&encoded), Err(CodecError::DigestMismatch));
+        assert_eq!(
+            decode_frame(&encoded),
+            Err(CodecError::DigestMismatch {
+                proto_id: 3001,
+                total_len: HEADER_LEN + 7
+            })
+        );
     }
 
     #[rstest]
@@ -330,7 +349,13 @@ mod tests {
         let mut encoded = encode_frame(3001, 1, b"payload").unwrap();
         encoded[16] ^= 0xff;
 
-        assert_eq!(decode_frame(&encoded), Err(CodecError::DigestMismatch));
+        assert_eq!(
+            decode_frame(&encoded),
+            Err(CodecError::DigestMismatch {
+                proto_id: 3001,
+                total_len: HEADER_LEN + 7
+            })
+        );
     }
 
     /// A declared length beyond the bound is rejected before any buffering decision, so it cannot

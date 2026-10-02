@@ -6518,11 +6518,13 @@ dependencies = [
 name = "nautilus-moomoo"
 version = "0.65.0"
 dependencies = [
+ "log",
  "prost 0.13.5",
  "prost-build",
  "rstest",
  "sha1 0.10.7",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

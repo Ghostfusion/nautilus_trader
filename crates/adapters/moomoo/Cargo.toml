@@ -23,9 +23,11 @@ crate-type = ["rlib"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+log = { workspace = true }
 prost = { workspace = true }
 sha1 = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 
 [build-dependencies]
 prost-build = { workspace = true }

@@ -279,21 +279,37 @@ ten-second default before the handshake completes (`open_context_base.py:72`). S
 interval leaves no margin against the gateway's own timeout, so the adapter should apply the same
 reduction rather than the raw value.
 
-Its failure is the connection's failure signal. Since the gateway drops a socket that stays quiet
-beyond the window, a missing heartbeat manifests first as a closed socket, which is the intended
-detection path.
+Its failure is the connection's failure signal, and the keep-alive is therefore a full request with a
+deadline rather than a bare write. That is what makes a silent gateway visible while the socket is
+still open: the reply is correlated like any other response, so an unanswered keep-alive ends the
+connection rather than waiting for the socket to be torn down from the other end. If the socket does
+close first, the reader observes that independently and releases every outstanding request.
 
 ### 7.3 Dispatch
 
 One reader task owns the socket's read half and performs exactly one job: decode frames and hand
-them to a router. The router classifies by protocol id into three groups:
+them to a router. The router keys on the protocol identifier and the serial number together, because
+that pair is what the shipped client correlates on, and classifies into three outcomes:
 
-- A response whose serial number is in the pending map, delivered to the waiting task.
-- A push message, forwarded to the data client.
-- A notification, logged with its payload.
+- A response whose key is in the pending map, delivered to the waiting request.
+- A push, forwarded to the data client. `Notify` belongs here rather than in a category of its own:
+  the gateway sends market state and connection events unprompted, and the shipped client classifies
+  it as a push id for exactly that reason.
+- Anything else, logged as a response no request is waiting for, and not delivered as a push.
 
-The pending map is bounded, entries are removed on delivery, timeout, or task cancellation, and a
-response that arrives after its entry is gone is discarded and counted rather than delivered.
+The pending map holds one entry per outstanding request, and an entry is removed on delivery, on
+timeout, or when the connection ends. The request timeout is what bounds it: a caller cannot leave
+entries behind faster than they expire. A response that arrives after its entry is gone reaches the
+third outcome above rather than a waiter.
+
+A frame that fails to decode is handled according to what its failure means. A digest mismatch has a
+known extent, so the frame is reported and skipped and the stream is read on. A lost frame boundary,
+which is a bad magic or a length beyond the bound, cannot be recovered from by guessing, so the
+connection closes.
+
+When the connection ends, for any reason, the reader releases every waiter through its oneshot
+channel. That is why a dead connection surfaces as an immediate error on each outstanding request
+rather than as each request waiting out its own timeout.
 
 ### 7.4 Reconnect
 
