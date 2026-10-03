@@ -81,7 +81,13 @@
           <button id="run" class="primary">Run analysis</button>
           <button id="export-json">Export results JSON</button>
           <span id="status" class="status"></span>
+          <span id="run-hint" class="hint hidden">Settings changed - press Run analysis</span>
         </div>
+        <p class="note">
+          The app runs itself once when it opens. Pressing Run analysis with nothing changed recomputes
+          exactly the same result, so every number will look identical. There is nothing wrong when
+          that happens. Change any setting in section 2 and press it again to see a different result.
+        </p>
         <div id="ground-truth" class="note"></div>
       </section>
 

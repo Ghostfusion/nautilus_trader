@@ -43,6 +43,8 @@ const state = {
   grid: null,
   split: 0,
   holdoutRevealed: false,
+  // The configuration used by the previous run, so a run can report what changed since.
+  lastConfig: null,
 };
 
 /* ------------------------------------------------------------------ *
@@ -61,6 +63,65 @@ function pvalue(p) {
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+}
+
+/** Status line. Every run reports back, including a run that changed nothing. */
+const STATUS_TONES = { info: '', error: 'error' };
+
+function setStatus(text, tone = 'info') {
+  const element = $('status');
+  if (!element) return;
+  element.textContent = text;
+  element.className = `status ${STATUS_TONES[tone] ?? ''}`.trim();
+}
+
+function setRunHint(visible) {
+  const hint = $('run-hint');
+  if (hint) hint.classList.toggle('hidden', !visible);
+}
+
+/** Friendly names for the frozen settings, so a changed setting can be named in the status line. */
+const CONFIG_LABELS = {
+  alpha: 'significance level',
+  bonferroni: 'Bonferroni correction',
+  minObs: 'minimum observations',
+  rollWindow: 'rolling window',
+  interval: 'rebalance check',
+  band: 'drift band',
+  costBps: 'trading cost',
+  expenseBps: 'expense ratio',
+  overlay: 'overlay',
+  overlayFrequency: 'overlay frequency',
+  overlayLookback: 'overlay lookback',
+  overlaySkip: 'overlay skip',
+  overlayTop: 'overlay top N',
+  holdoutFraction: 'held-out fraction',
+  seed: 'seed',
+};
+
+/** Which settings differ between two runs. Used only to say what changed, never to change a result. */
+function changedKeys(previous, current) {
+  if (!previous) return [];
+  const keys = new Set([...Object.keys(previous), ...Object.keys(current)]);
+  const out = [];
+  for (const key of keys) {
+    if (JSON.stringify(previous[key]) !== JSON.stringify(current[key])) out.push(key);
+  }
+  return out;
+}
+
+/** Make the result visibly respond: flash the panel, and bring it into view if it is off screen. */
+function pulseVerdict() {
+  const panel = $('verdict')?.closest('.panel');
+  if (!panel) return;
+  panel.classList.remove('pulse');
+  void panel.offsetWidth; // restart the animation if it is already running
+  panel.classList.add('pulse');
+  setTimeout(() => panel.classList.remove('pulse'), 1600);
+
+  const rect = panel.getBoundingClientRect();
+  const onScreen = rect.top < window.innerHeight - 80 && rect.bottom > 0;
+  if (!onScreen) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 /* ------------------------------------------------------------------ *
@@ -129,40 +190,77 @@ async function loadCsv() {
  * Run
  * ------------------------------------------------------------------ */
 
-function run() {
+/**
+ * Run the analysis and report back visibly.
+ *
+ * A run with unchanged settings recomputes an identical result, which is indistinguishable from
+ * nothing happening unless the interface says something. So every run: shows a running state on the
+ * button, reports the time and whether anything changed, and flashes the verdict panel. The heavy
+ * computing is deliberately deferred by a frame so the running state can actually paint.
+ */
+async function run() {
   if (!state.matrix) {
-    $('status').textContent = 'no data loaded';
+    setStatus('no data loaded', 'error');
     return;
   }
-  const config = readConfig();
-  $('fingerprint').textContent = configFingerprint(config).hash;
 
-  const total = state.matrix.length;
-  const split = Math.max(
-    Math.min(config.minObs, Math.floor(total * 0.5)),
-    Math.floor(total * (1 - config.holdoutFraction)),
-  );
-  state.split = split;
+  const button = $('run');
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Running...';
+  setStatus('running...');
+  await new Promise((resolve) => setTimeout(resolve, 16));
 
-  // The regime is decided on the observation window only, then frozen for everything downstream.
-  const observation = state.matrix.slice(0, split);
-  state.analysis = analyze({ matrix: observation, sectorNames: state.sectorNames, config });
-  state.full = analyze({ matrix: state.matrix, sectorNames: state.sectorNames, config });
-  state.config = config;
+  try {
+    const config = readConfig();
+    const changed = changedKeys(state.lastConfig, config);
+    $('fingerprint').textContent = configFingerprint(config).hash;
 
-  const regimeLabel = state.analysis.regime.label;
-  state.result = backtest({ matrix: state.matrix, config, regimeLabel });
-  state.attr = attribution({
-    matrix: state.matrix,
-    result: state.result,
-    sectorNames: state.sectorNames,
-    config,
-  });
-  state.grid = runGrid({ matrix: state.matrix, config, regimeLabel, sectorNames: state.sectorNames });
-  state.holdoutRevealed = false;
+    const total = state.matrix.length;
+    const split = Math.max(
+      Math.min(config.minObs, Math.floor(total * 0.5)),
+      Math.floor(total * (1 - config.holdoutFraction)),
+    );
+    state.split = split;
 
-  renderAll();
-  $('status').textContent = `analysed ${total} observations across ${state.sectorNames.length} sectors`;
+    // The regime is decided on the observation window only, then frozen for everything downstream.
+    const observation = state.matrix.slice(0, split);
+    state.analysis = analyze({ matrix: observation, sectorNames: state.sectorNames, config });
+    state.full = analyze({ matrix: state.matrix, sectorNames: state.sectorNames, config });
+    state.config = config;
+
+    const regimeLabel = state.analysis.regime.label;
+    state.result = backtest({ matrix: state.matrix, config, regimeLabel });
+    state.attr = attribution({
+      matrix: state.matrix,
+      result: state.result,
+      sectorNames: state.sectorNames,
+      config,
+    });
+    state.grid = runGrid({ matrix: state.matrix, config, regimeLabel, sectorNames: state.sectorNames });
+    state.holdoutRevealed = false;
+
+    renderAll();
+
+    const detail =
+      changed.length === 0
+        ? state.lastConfig === null
+          ? 'started automatically on load'
+          : 'settings unchanged, so this is the same result again'
+        : `${changed.length} setting${changed.length === 1 ? '' : 's'} changed: ${changed
+            .map((key) => CONFIG_LABELS[key] ?? key)
+            .join(', ')}`;
+    const stamp = new Date().toLocaleTimeString();
+    setStatus(
+      `ran at ${stamp} - ${total} observations across ${state.sectorNames.length} sectors (${detail})`,
+    );
+    state.lastConfig = config;
+    setRunHint(false);
+    pulseVerdict();
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
 }
 
 function renderAll() {
@@ -605,16 +703,16 @@ function syncSource() {
 }
 
 async function runFromUi() {
-  $('status').textContent = 'loading...';
   try {
+    setStatus('preparing data...');
     if ($('source-synthetic').checked) {
       loadSynthetic();
     } else {
       await loadCsv();
     }
-    run();
+    await run();
   } catch (error) {
-    $('status').textContent = `error: ${error.message}`;
+    setStatus(`error: ${error.message}`, 'error');
   }
 }
 
@@ -676,6 +774,19 @@ function init() {
     state.holdoutRevealed = true;
     renderHoldout();
   });
+
+  // Changing any setting or data source means the displayed results are out of date. Saying so is
+  // the difference between a button that appears broken and one that appears to be waiting.
+  document.addEventListener('change', () => setRunHint(true));
+  document.addEventListener('input', () => setRunHint(true));
+
+  // A failure anywhere must be visible on the page. Without these two handlers, an exception is
+  // indistinguishable from a button that does nothing, which is exactly how this was reported.
+  window.addEventListener('error', (event) => setStatus(`error: ${event.message}`, 'error'));
+  window.addEventListener('unhandledrejection', (event) =>
+    setStatus(`error: ${event.reason?.message ?? event.reason}`, 'error'),
+  );
+
   syncSource();
   runFromUi();
 }

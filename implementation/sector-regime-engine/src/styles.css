@@ -333,6 +333,31 @@ canvas {
   padding: 2px 0;
 }
 
+/* Feedback: a run must be visible even when it recomputes an identical result. */
+@keyframes pulse-highlight {
+  0% {
+    box-shadow: 0 0 0 0 rgba(110, 168, 254, 0.55);
+    border-color: var(--accent);
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgba(110, 168, 254, 0);
+    border-color: var(--line);
+  }
+}
+
+.panel.pulse {
+  animation: pulse-highlight 1.4s ease-out;
+}
+
+.status.error {
+  color: var(--bad);
+}
+
+.hint {
+  color: var(--warn);
+  font-size: 13px;
+}
+
 footer {
   padding: 0 26px 30px;
   color: var(--muted);
