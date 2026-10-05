@@ -70,7 +70,7 @@ Solution:
 import csv
 
 PATH = (
-    "D:/Users/vince/PycharmProjects/nautilus_trader/docs/usermanauls/"
+    "<repo-root>/docs/usermanauls/"
     "intraday-systematic/sample_data/usdjpy_1min_bars.csv"
 )
 

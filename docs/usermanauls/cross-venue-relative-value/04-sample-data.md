@@ -138,7 +138,7 @@ from decimal import Decimal
 from pathlib import Path
 
 DATA = Path(
-    "D:/Users/vince/PycharmProjects/nautilus_trader/docs/usermanauls/cross-venue-relative-value/sample_data",
+    "<repo-root>/docs/usermanauls/cross-venue-relative-value/sample_data",
 )
 FILES = {
     "BINANCE": "btcusdt_perp_binance_quotes.csv",

@@ -134,8 +134,8 @@ engine.dispose()
 Run it:
 
 ```bash
-cd D:/Users/vince/PycharmProjects/nautilus_trader/python
-uv run --no-sync python C:/Users/vince/AppData/Local/Temp/po_manual/reports_demo.py
+cd <repo-root>/python
+uv run --no-sync python <temp-dir>/po_manual/reports_demo.py
 ```
 
 Observed output:
@@ -302,9 +302,9 @@ test target for `nautilus-common` does not build on Windows in this checkout bec
 imports treated as errors, so run the integration test binary directly.
 
 ```bash
-export PATH="C:/Users/vince/.cargo/bin;$PATH"
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
-cd D:/Users/vince/PycharmProjects/nautilus_trader
+export PATH="$HOME/.cargo/bin;$PATH"
+export CARGO_TARGET_DIR='<repo-root>/target'
+cd <repo-root>
 cargo nextest run --locked -p nautilus-common --features python --test notifications
 ```
 

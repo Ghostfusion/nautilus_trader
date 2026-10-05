@@ -73,7 +73,7 @@ does not use it; it computes the equivalent numbers by hand from the fills repor
 best way to learn what the metric means. To see the crate's own tests:
 
 ```bash
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
+export CARGO_TARGET_DIR='<repo-root>/target'
 cargo nextest run --locked -p nautilus-trading --features python -E 'test(analytics)'
 ```
 

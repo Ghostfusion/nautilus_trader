@@ -9,7 +9,7 @@ number in it means.
 Open a terminal in the repository root and put the environment on the path (Git Bash on Windows):
 
 ```bash
-export PATH="C:/Users/vince/.cargo/bin;C:/Users/vince/.local/uv012;C:/Users/vince/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
+export PATH="$HOME/.cargo/bin;$HOME/.local/uv012;$HOME/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
 ```
 
 Save the program below as `first_run.py` in the repository root, then run it from the repository

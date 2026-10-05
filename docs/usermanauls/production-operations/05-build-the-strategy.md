@@ -98,9 +98,9 @@ window you chose rather than inheriting a duration.
 The caps live in a Rust-only subsystem, so demonstrate them with the crate's own test target. Run:
 
 ```bash
-export PATH="C:/Users/vince/.cargo/bin;$PATH"
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
-cd D:/Users/vince/PycharmProjects/nautilus_trader
+export PATH="$HOME/.cargo/bin;$PATH"
+export CARGO_TARGET_DIR='<repo-root>/target'
+cd <repo-root>
 cargo nextest run --locked -p nautilus-risk --features python -E 'test(cap::tests)'
 ```
 
@@ -302,8 +302,8 @@ if __name__ == "__main__":
 Run it:
 
 ```bash
-cd D:/Users/vince/PycharmProjects/nautilus_trader/python
-uv run --no-sync python C:/Users/vince/AppData/Local/Temp/po_manual/sandbox_demo.py
+cd <repo-root>/python
+uv run --no-sync python <temp-dir>/po_manual/sandbox_demo.py
 ```
 
 Observed output, trimmed to the lines that matter, from a 43 second run on 2026-10-01:

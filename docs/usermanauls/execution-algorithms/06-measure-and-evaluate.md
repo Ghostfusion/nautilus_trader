@@ -62,8 +62,8 @@ Because there is no Python path, the honest demonstration is the crate's test su
 repository root:
 
 ```bash
-export PATH="C:/Users/vince/.cargo/bin;C:/Users/vince/.local/uv012;C:/Users/vince/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
+export PATH="$HOME/.cargo/bin;$HOME/.local/uv012;$HOME/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
+export CARGO_TARGET_DIR='<repo-root>/target'
 cargo nextest run --locked -p nautilus-trading --features python -E 'test(analytics)'
 ```
 

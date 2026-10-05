@@ -11,7 +11,7 @@ Open a shell. The repository uses `uv` to run Python against the checked-in virt
 environment. On Windows with Git Bash, the commands are:
 
 ```bash
-export PATH="C:/Users/vince/.cargo/bin;C:/Users/vince/.local/uv012;C:/Users/vince/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
+export PATH="$HOME/.cargo/bin;$HOME/.local/uv012;$HOME/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
 cd python
 ```
 

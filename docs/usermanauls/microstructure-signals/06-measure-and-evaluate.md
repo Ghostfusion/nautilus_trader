@@ -191,7 +191,7 @@ Because it is Rust only, the manual does not show a Python snippet that would no
 run the crate's own test, which pins the arithmetic. From the repository root:
 
 ```bash
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
+export CARGO_TARGET_DIR='<repo-root>/target'
 cargo nextest run --locked -p nautilus-trading --features python -E 'test(pinned_metrics_match_hand_computed_values)'
 ```
 

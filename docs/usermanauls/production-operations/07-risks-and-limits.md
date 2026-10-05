@@ -152,8 +152,8 @@ print("restored   :", restored.quote_count, restored.high)
 Run it:
 
 ```bash
-cd D:/Users/vince/PycharmProjects/nautilus_trader/python
-uv run --no-sync python C:/Users/vince/AppData/Local/Temp/po_manual/state_demo.py
+cd <repo-root>/python
+uv run --no-sync python <temp-dir>/po_manual/state_demo.py
 ```
 
 Observed output:

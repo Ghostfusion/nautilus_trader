@@ -16,8 +16,8 @@ Open a Git Bash terminal and set the tool paths. This is the same environment th
 verified in.
 
 ```bash
-export PATH="C:/Users/vince/.cargo/bin;C:/Users/vince/.local/uv012;C:/Users/vince/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
-cd D:/Users/vince/PycharmProjects/nautilus_trader/python
+export PATH="$HOME/.cargo/bin;$HOME/.local/uv012;$HOME/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
+cd <repo-root>/python
 uv --version
 ```
 
@@ -42,7 +42,7 @@ downloading method.
 ## Step 3: write the program
 
 Save this file outside the repository, for example at
-`C:/Users/vince/AppData/Local/Temp/po_manual/ops_first_run.py`. The manual folder holds markdown and
+`<temp-dir>/po_manual/ops_first_run.py`. The manual folder holds markdown and
 CSV only, so do not put Python files under `docs/`.
 
 ```python
@@ -180,8 +180,8 @@ run_case(
 ## Step 4: run it
 
 ```bash
-cd D:/Users/vince/PycharmProjects/nautilus_trader/python
-uv run --no-sync python C:/Users/vince/AppData/Local/Temp/po_manual/ops_first_run.py
+cd <repo-root>/python
+uv run --no-sync python <temp-dir>/po_manual/ops_first_run.py
 ```
 
 ## Step 5: read the output

@@ -136,7 +136,7 @@ checked. If that also fails, the surface is refused with a typed error.
 From the repository root:
 
 ```bash
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
+export CARGO_TARGET_DIR='<repo-root>/target'
 cargo nextest run --locked -p nautilus-model --features python -E 'binary(volatility_surface)'
 ```
 

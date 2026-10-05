@@ -57,7 +57,7 @@ from nautilus_trader.model import Price
 from nautilus_trader.model import Quantity
 
 CSV = Path(
-    r"D:/Users/vince/PycharmProjects/nautilus_trader/docs/usermanauls/"
+    r"<repo-root>/docs/usermanauls/"
     r"intraday-systematic/sample_data/usdjpy_1min_bars.csv",
 )
 BAR_TYPE = BarType.from_str("USD/JPY.SIM-1-MINUTE-MID-EXTERNAL")
@@ -161,7 +161,7 @@ from nautilus_trader.model import Quantity
 from nautilus_trader.persistence import ParquetDataCatalog
 
 CSV = Path(
-    r"D:/Users/vince/PycharmProjects/nautilus_trader/docs/usermanauls/"
+    r"<repo-root>/docs/usermanauls/"
     r"intraday-systematic/sample_data/usdjpy_1min_bars.csv",
 )
 BAR_TYPE = BarType.from_str("USD/JPY.SIM-1-MINUTE-MID-EXTERNAL")

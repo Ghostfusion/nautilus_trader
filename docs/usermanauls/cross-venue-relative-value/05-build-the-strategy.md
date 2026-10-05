@@ -340,7 +340,7 @@ from nautilus_trader.testkit.providers import TestInstrumentProvider
 from nautilus_trader.trading import Strategy
 
 DATA = Path(
-    "D:/Users/vince/PycharmProjects/nautilus_trader/docs/usermanauls/cross-venue-relative-value/sample_data",
+    "<repo-root>/docs/usermanauls/cross-venue-relative-value/sample_data",
 )
 
 BINANCE = Venue("BINANCE")

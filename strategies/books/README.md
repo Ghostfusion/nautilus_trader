@@ -11,16 +11,16 @@ repository.
 
 ## The harvest
 
-| Field | Value |
-| --- | --- |
-| Source | arXiv full listing for `cat:q-fin.TR`, captured 2026-09-23 |
-| Records harvested | 2370 |
-| PDFs on disk | 2359 (11 besides are withdrawn or return HTTP 404) |
-| Size | 3658.5 MB, downloaded in 132 minutes with a 3.0 s delay |
-| Years spanned | 1997-2026 |
-| Records with a journal reference | 378 (16%) |
-| Records with a DOI | 568 (24%) |
-| Primary categories | 1400 q-fin.TR, 124 q-fin.ST, 92 q-fin.MF, 89 cond-mat.stat-mech, 83 econ.GN, 79 q-fin.CP, 61 cs.LG |
+| Field                            | Value                                                                                              |
+| -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Source                           | arXiv full listing for `cat:q-fin.TR`, captured 2026-09-23                                         |
+| Records harvested                | 2370                                                                                               |
+| PDFs on disk                     | 2359 (11 besides are withdrawn or return HTTP 404)                                                 |
+| Size                             | 3658.5 MB, downloaded in 132 minutes with a 3.0 s delay                                            |
+| Years spanned                    | 1997-2026                                                                                          |
+| Records with a journal reference | 378 (16%)                                                                                          |
+| Records with a DOI               | 568 (24%)                                                                                          |
+| Primary categories               | 1400 q-fin.TR, 124 q-fin.ST, 92 q-fin.MF, 89 cond-mat.stat-mech, 83 econ.GN, 79 q-fin.CP, 61 cs.LG |
 
 Every record is cross-listed into `q-fin.TR`, which is what makes the corpus coherent: it is the
 market-microstructure and trading half of quantitative finance, not a general finance dump. The
@@ -28,7 +28,7 @@ early material is econophysics (`cond-mat.*`, `physics.*`, `nlin.*`), the middle
 microstructure and optimal execution, and the recent material is dominated by machine learning and
 crypto venues.
 
-The harvest itself is not vendored into this repository. It lives outside at `E:\fin paper2`, with
+The harvest itself is not vendored into this repository. It is kept outside the repository, with
 the full record set in `.state/metadata.jsonl`. The briefs therefore cite papers by arXiv id, which
 is the durable reference; anyone can re-fetch an id from arXiv without the local copy.
 
@@ -60,24 +60,24 @@ to more than one. `Recent` counts records from 2021 onward, which is the bulk of
 and crypto material. "Candidate papers screened" inside each brief is the size of that category's
 candidate list after the census ranked the matches, which is why it is smaller than `Records`.
 
-| Brief | Records | Years | Journal refs | Recent |
-| --- | --- | --- | --- | --- |
-| `01_execution_and_liquidation.md` | 214 | 2004-2026 | 19 | 97 |
-| `02_market_impact_and_trading_cost.md` | 435 | 1999-2026 | 63 | 206 |
-| `03_limit_order_book_dynamics.md` | 420 | 1999-2026 | 50 | 184 |
-| `04_market_making_and_inventory.md` | 205 | 2000-2026 | 28 | 82 |
-| `05_latency_and_market_structure.md` | 348 | 1998-2026 | 54 | 166 |
-| `06_volatility_and_microstructure_noise.md` | 399 | 1999-2026 | 61 | 209 |
-| `07_order_flow_and_toxicity.md` | 234 | 2001-2026 | 26 | 132 |
-| `08_econophysics_and_agent_based_markets.md` | 441 | 1998-2026 | 108 | 144 |
-| `09_machine_learning_for_trading.md` | 441 | 2007-2026 | 37 | 345 |
-| `10_cross_venue_and_arbitrage.md` | 200 | 1999-2026 | 23 | 116 |
-| `11_market_design_fees_and_auctions.md` | 213 | 2002-2026 | 32 | 111 |
-| `12_liquidity_and_systemic_risk.md` | 104 | 2004-2026 | 10 | 59 |
-| `13_crypto_amm_and_perpetuals.md` | 232 | 2012-2026 | 25 | 200 |
-| `14_news_and_language_model_signals.md` | 117 | 2000-2026 | 16 | 80 |
-| `15_portfolio_construction_under_frictions.md` | 331 | 1998-2026 | 45 | 185 |
-| `16_options_and_derivative_instruments.md` | 242 | 1998-2026 | 23 | 149 |
+| Brief                                          | Records | Years     | Journal refs | Recent |
+| ---------------------------------------------- | ------- | --------- | ------------ | ------ |
+| `01_execution_and_liquidation.md`              | 214     | 2004-2026 | 19           | 97     |
+| `02_market_impact_and_trading_cost.md`         | 435     | 1999-2026 | 63           | 206    |
+| `03_limit_order_book_dynamics.md`              | 420     | 1999-2026 | 50           | 184    |
+| `04_market_making_and_inventory.md`            | 205     | 2000-2026 | 28           | 82     |
+| `05_latency_and_market_structure.md`           | 348     | 1998-2026 | 54           | 166    |
+| `06_volatility_and_microstructure_noise.md`    | 399     | 1999-2026 | 61           | 209    |
+| `07_order_flow_and_toxicity.md`                | 234     | 2001-2026 | 26           | 132    |
+| `08_econophysics_and_agent_based_markets.md`   | 441     | 1998-2026 | 108          | 144    |
+| `09_machine_learning_for_trading.md`           | 441     | 2007-2026 | 37           | 345    |
+| `10_cross_venue_and_arbitrage.md`              | 200     | 1999-2026 | 23           | 116    |
+| `11_market_design_fees_and_auctions.md`        | 213     | 2002-2026 | 32           | 111    |
+| `12_liquidity_and_systemic_risk.md`            | 104     | 2004-2026 | 10           | 59     |
+| `13_crypto_amm_and_perpetuals.md`              | 232     | 2012-2026 | 25           | 200    |
+| `14_news_and_language_model_signals.md`        | 117     | 2000-2026 | 16           | 80     |
+| `15_portfolio_construction_under_frictions.md` | 331     | 1998-2026 | 45           | 185    |
+| `16_options_and_derivative_instruments.md`     | 242     | 1998-2026 | 23           | 149    |
 
 Across the sixteen briefs, 321 distinct papers are cited, 73 of which have a journal reference.
 `corpus_map.md` lists, for each category, the thirty highest-signal records that were not read, so the
@@ -85,24 +85,24 @@ census is traceable and the next reading session has a starting point.
 
 ## The briefs
 
-| Brief | Scope |
-| --- | --- |
-| `01_execution_and_liquidation.md` | Optimal execution and liquidation: the risk/cost tradeoff, VWAP optimality, risk-sensitive objectives, multi-asset schedules, reinforcement-learning execution |
-| `02_market_impact_and_trading_cost.md` | Price impact: the square-root law and its evidence, prefactor bias, mechanical versus informational origins, transient versus permanent decomposition, what fills can identify |
-| `03_limit_order_book_dynamics.md` | The book as a queueing system: order-flow imbalance, fill probability, adverse selection of passive fills, latent liquidity, resilience, deep-learning book models |
-| `04_market_making_and_inventory.md` | Quoting and inventory: the Avellaneda-Stoikov and Cartea-Jaimungal framework, online parameter learning, adverse selection, client tiers, hedging with impact |
-| `05_latency_and_market_structure.md` | The economics of speed: ordinal latency, measured latency budgets, engine design, speed bumps, timestamp and clock integrity, profitability ceilings |
-| `06_volatility_and_microstructure_noise.md` | Realized volatility and noise: the size of microstructure noise, the Epps effect, estimator selection, rough volatility, weak return predictability |
-| `07_order_flow_and_toxicity.md` | Order flow: persistence and long memory, the diffusive-price paradox, imbalance as a predictor, price discovery measurement, adverse selection and informed flow |
-| `08_econophysics_and_agent_based_markets.md` | Stylized facts and simulation: power-law tails, Hawkes processes, long memory, zero-intelligence auctions, and why stylized-fact matching is weak validation |
-| `09_machine_learning_for_trading.md` | Machine learning: risk-adjusted benchmarks, book models, reinforcement learning and its live gap, LLM agents under bias-mitigated evaluation, leakage detection |
-| `10_cross_venue_and_arbitrage.md` | Fragmentation: feed accuracy, dark pools, settlement latency and fees, triangular and cyclic arbitrage, AMM loss, and the fragility of multi-venue simulation |
-| `11_market_design_fees_and_auctions.md` | Market design: maker-taker fees and rebates, tick size, price limits versus circuit breakers, auction mechanics and duration, clearing and priority |
-| `12_liquidity_and_systemic_risk.md` | Collective risk: leverage-driven deleveraging, flash-crash propagation, liquidity stress testing, crowding, clearing biases, drawdown tails |
-| `13_crypto_amm_and_perpetuals.md` | Crypto venues: AMM invariants and LP loss, perpetual futures mechanics, funding, stablecoin deleveraging, wash trading, prediction markets |
-| `14_news_and_language_model_signals.md` | Text signals: what language models add over lexicons, the collapse of net performance with costs and turnover, timestamp and data-freshness leakage controls, capacity |
-| `15_portfolio_construction_under_frictions.md` | Allocation under frictions: liquidity-aware and impact-aware construction, cross-impact coupling, time-consistent liquidation, well-posedness, capacity |
-| `16_options_and_derivative_instruments.md` | Options and derivatives: hedging as a metaorder, joint quoting and hedging, hedging cost and margin in closed form, cross-impact, perpetual design and liquidation |
+| Brief                                          | Scope                                                                                                                                                                          |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `01_execution_and_liquidation.md`              | Optimal execution and liquidation: the risk/cost tradeoff, VWAP optimality, risk-sensitive objectives, multi-asset schedules, reinforcement-learning execution                 |
+| `02_market_impact_and_trading_cost.md`         | Price impact: the square-root law and its evidence, prefactor bias, mechanical versus informational origins, transient versus permanent decomposition, what fills can identify |
+| `03_limit_order_book_dynamics.md`              | The book as a queueing system: order-flow imbalance, fill probability, adverse selection of passive fills, latent liquidity, resilience, deep-learning book models             |
+| `04_market_making_and_inventory.md`            | Quoting and inventory: the Avellaneda-Stoikov and Cartea-Jaimungal framework, online parameter learning, adverse selection, client tiers, hedging with impact                  |
+| `05_latency_and_market_structure.md`           | The economics of speed: ordinal latency, measured latency budgets, engine design, speed bumps, timestamp and clock integrity, profitability ceilings                           |
+| `06_volatility_and_microstructure_noise.md`    | Realized volatility and noise: the size of microstructure noise, the Epps effect, estimator selection, rough volatility, weak return predictability                            |
+| `07_order_flow_and_toxicity.md`                | Order flow: persistence and long memory, the diffusive-price paradox, imbalance as a predictor, price discovery measurement, adverse selection and informed flow               |
+| `08_econophysics_and_agent_based_markets.md`   | Stylized facts and simulation: power-law tails, Hawkes processes, long memory, zero-intelligence auctions, and why stylized-fact matching is weak validation                   |
+| `09_machine_learning_for_trading.md`           | Machine learning: risk-adjusted benchmarks, book models, reinforcement learning and its live gap, LLM agents under bias-mitigated evaluation, leakage detection                |
+| `10_cross_venue_and_arbitrage.md`              | Fragmentation: feed accuracy, dark pools, settlement latency and fees, triangular and cyclic arbitrage, AMM loss, and the fragility of multi-venue simulation                  |
+| `11_market_design_fees_and_auctions.md`        | Market design: maker-taker fees and rebates, tick size, price limits versus circuit breakers, auction mechanics and duration, clearing and priority                            |
+| `12_liquidity_and_systemic_risk.md`            | Collective risk: leverage-driven deleveraging, flash-crash propagation, liquidity stress testing, crowding, clearing biases, drawdown tails                                    |
+| `13_crypto_amm_and_perpetuals.md`              | Crypto venues: AMM invariants and LP loss, perpetual futures mechanics, funding, stablecoin deleveraging, wash trading, prediction markets                                     |
+| `14_news_and_language_model_signals.md`        | Text signals: what language models add over lexicons, the collapse of net performance with costs and turnover, timestamp and data-freshness leakage controls, capacity         |
+| `15_portfolio_construction_under_frictions.md` | Allocation under frictions: liquidity-aware and impact-aware construction, cross-impact coupling, time-consistent liquidation, well-posedness, capacity                        |
+| `16_options_and_derivative_instruments.md`     | Options and derivatives: hedging as a metaorder, joint quoting and hedging, hedging cost and margin in closed form, cross-impact, perpetual design and liquidation             |
 
 ## What the corpus says collectively
 

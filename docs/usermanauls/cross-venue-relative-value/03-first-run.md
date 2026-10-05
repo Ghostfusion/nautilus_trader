@@ -10,7 +10,7 @@ The repository keeps its Python environment in `python/.venv`, and this project'
 at a fixed path. Open a Git Bash terminal at the repository root and set the path once:
 
 ```bash
-export PATH="C:/Users/vince/.cargo/bin;C:/Users/vince/.local/uv012;C:/Users/vince/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
+export PATH="$HOME/.cargo/bin;$HOME/.local/uv012;$HOME/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
 cd python
 uv run --no-sync python --version
 ```
@@ -60,7 +60,7 @@ from nautilus_trader.testkit.providers import TestInstrumentProvider
 from nautilus_trader.trading import Strategy
 
 DATA = Path(
-    "D:/Users/vince/PycharmProjects/nautilus_trader/docs/usermanauls/cross-venue-relative-value/sample_data",
+    "<repo-root>/docs/usermanauls/cross-venue-relative-value/sample_data",
 )
 
 BINANCE = Venue("BINANCE")

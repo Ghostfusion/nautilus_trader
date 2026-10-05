@@ -46,7 +46,7 @@ You can still run the module's own tests, which pin the arithmetic by hand. From
 root:
 
 ```bash
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
+export CARGO_TARGET_DIR='<repo-root>/target'
 cargo nextest run --locked -p nautilus-trading -E 'test(pinned_metrics_match_hand_computed_values)'
 ```
 
@@ -56,19 +56,19 @@ Observed output:
     Blocking waiting for file lock on build directory
    Compiling regex-automata v0.4.18
    Compiling serde_json v1.0.151
-   Compiling nautilus-common v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\common)
+   Compiling nautilus-common v0.65.0 (<repo-root>\crates\common)
    Compiling sysinfo v0.39.6
    Compiling tokio v1.53.1
-   Compiling nautilus-core v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\core)
+   Compiling nautilus-core v0.65.0 (<repo-root>\crates\core)
    Compiling regex v1.13.1
    Compiling rstest_macros v0.27.0
    Compiling rstest v0.27.0
-   Compiling nautilus-model v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\model)
-   Compiling nautilus-analysis v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\analysis)
-   Compiling nautilus-portfolio v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\portfolio)
-   Compiling nautilus-execution v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\execution)
-   Compiling nautilus-risk v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\risk)
-   Compiling nautilus-trading v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\trading)
+   Compiling nautilus-model v0.65.0 (<repo-root>\crates\model)
+   Compiling nautilus-analysis v0.65.0 (<repo-root>\crates\analysis)
+   Compiling nautilus-portfolio v0.65.0 (<repo-root>\crates\portfolio)
+   Compiling nautilus-execution v0.65.0 (<repo-root>\crates\execution)
+   Compiling nautilus-risk v0.65.0 (<repo-root>\crates\risk)
+   Compiling nautilus-trading v0.65.0 (<repo-root>\crates\trading)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 25m 24s
 ------------
  Nextest run ID 1aca55ea-13b3-4dce-b7cc-14ec40598a92 with nextest profile: default

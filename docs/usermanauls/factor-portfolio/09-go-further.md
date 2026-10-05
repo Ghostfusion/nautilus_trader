@@ -66,7 +66,7 @@ Read these in roughly this order.
 The one command that shows the Rust pipeline working is the crate's own test target:
 
 ```bash
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
+export CARGO_TARGET_DIR='<repo-root>/target'
 cargo nextest run --locked -p nautilus-research
 ```
 

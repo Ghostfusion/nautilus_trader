@@ -31,7 +31,7 @@ have never started a NautilusTrader backtest, work through the
 
 ## Prerequisites
 
-- A working NautilusTrader checkout at `D:/Users/vince/PycharmProjects/nautilus_trader`, branch
+- A working NautilusTrader checkout at `<repo-root>`, branch
   `develop`.
 - The Python environment under `python/.venv`, run through `uv`. Lecture 03 shows the exact
   commands.

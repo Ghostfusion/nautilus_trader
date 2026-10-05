@@ -49,7 +49,7 @@ steps.
 First run the crate's own pricing tests. From the repository root:
 
 ```bash
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
+export CARGO_TARGET_DIR='<repo-root>/target'
 cargo nextest run --locked -p nautilus-model --features python -E 'binary(option_pricing)'
 ```
 
@@ -100,7 +100,7 @@ outside the repository. This is the smallest program that calls the Rust pricer:
 // edition = "2021"
 //
 // [dependencies]
-// nautilus-model = { path = "D:/Users/vince/PycharmProjects/nautilus_trader/crates/model", default-features = false }
+// nautilus-model = { path = "<repo-root>/crates/model", default-features = false }
 
 use nautilus_model::data::{price_option, implied_forward_from_parity, OptionPricingParams};
 use nautilus_model::enums::{ExerciseStyle, OptionKind};

@@ -10,7 +10,7 @@ Open a terminal. Every command in this manual is run from the repository root un
 set the tool path. On Windows with Git Bash, the ground-truth setup is:
 
 ```bash
-export PATH="C:/Users/vince/.cargo/bin;C:/Users/vince/.local/uv012;C:/Users/vince/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
+export PATH="$HOME/.cargo/bin;$HOME/.local/uv012;$HOME/AppData/Local/Programs/Python/Python312/cpython-3.14-windows-x86_64-none;$PATH"
 ```
 
 On Linux or macOS the equivalent is:

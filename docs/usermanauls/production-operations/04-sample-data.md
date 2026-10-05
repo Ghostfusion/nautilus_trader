@@ -34,7 +34,7 @@ easy to read once you know that a nanosecond is one thousand-millionth of a seco
 ## Inspect the files from the shell
 
 ```bash
-cd D:/Users/vince/PycharmProjects/nautilus_trader/docs/usermanauls/production-operations/sample_data
+cd <repo-root>/docs/usermanauls/production-operations/sample_data
 wc -l *.csv
 head -4 quotes_audusd.csv
 cat venue_fills_report.csv
@@ -69,7 +69,7 @@ finds nothing.
 ## Read the market file with Python
 
 Save this script outside the repository, for example at
-`C:/Users/vince/AppData/Local/Temp/po_manual/inspect_sample_data.py`, and run it. It prints a
+`<temp-dir>/po_manual/inspect_sample_data.py`, and run it. It prints a
 summary, rebuilds the rows as engine `QuoteTick` objects, and hands them to a backtest engine to
 prove the file is engine-usable.
 
@@ -101,7 +101,7 @@ from nautilus_trader.model import TraderId
 from nautilus_trader.model import Venue
 from nautilus_trader.testkit.providers import TestInstrumentProvider
 
-DATA = Path("D:/Users/vince/PycharmProjects/nautilus_trader/docs/usermanauls/production-operations/sample_data")
+DATA = Path("<repo-root>/docs/usermanauls/production-operations/sample_data")
 QUOTES = DATA / "quotes_audusd.csv"
 
 df = pd.read_csv(QUOTES)
@@ -164,8 +164,8 @@ engine.dispose()
 Run it:
 
 ```bash
-cd D:/Users/vince/PycharmProjects/nautilus_trader/python
-uv run --no-sync python C:/Users/vince/AppData/Local/Temp/po_manual/inspect_sample_data.py
+cd <repo-root>/python
+uv run --no-sync python <temp-dir>/po_manual/inspect_sample_data.py
 ```
 
 Observed output:

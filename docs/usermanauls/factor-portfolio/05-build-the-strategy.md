@@ -450,7 +450,7 @@ The honest way to see it work is to run the crate's own tests. They are real, th
 numbers, and they run offline. From the repository root:
 
 ```bash
-export CARGO_TARGET_DIR='D:/Users/vince/PycharmProjects/nautilus_trader/target'
+export CARGO_TARGET_DIR='<repo-root>/target'
 cargo nextest run --locked -p nautilus-research
 ```
 
@@ -464,9 +464,9 @@ cargo nextest run --locked -p nautilus-research
    Compiling parquet v59.3.0
    Compiling tokio-stream v0.1.19
    Compiling codspeed-criterion-compat v5.0.2
-   Compiling nautilus-model v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\model)
-   Compiling nautilus-persistence v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\persistence)
-   Compiling nautilus-research v0.65.0 (D:\Users\vince\PycharmProjects\nautilus_trader\crates\research)
+   Compiling nautilus-model v0.65.0 (<repo-root>\crates\model)
+   Compiling nautilus-persistence v0.65.0 (<repo-root>\crates\persistence)
+   Compiling nautilus-research v0.65.0 (<repo-root>\crates\research)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 21m 33s
  Nextest run ID 85cb3afe-98fa-489f-910a-175ef6b14522 with nextest profile: default
     Starting 34 tests across 6 binaries
