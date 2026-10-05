@@ -24,6 +24,7 @@ import pytest
 import nautilus_trader.analysis as analysis_module
 from nautilus_trader.analysis import CAGR
 from nautilus_trader.analysis import Alpha
+from nautilus_trader.analysis import Autocorrelation
 from nautilus_trader.analysis import AvgLoser
 from nautilus_trader.analysis import AvgWinner
 from nautilus_trader.analysis import BetaRatio
@@ -44,6 +45,7 @@ from nautilus_trader.analysis import OmegaRatio
 from nautilus_trader.analysis import PortfolioAnalyzer
 from nautilus_trader.analysis import PortfolioStatistic
 from nautilus_trader.analysis import ProfitFactor
+from nautilus_trader.analysis import RescaledRange
 from nautilus_trader.analysis import ReturnsAverage
 from nautilus_trader.analysis import ReturnsAverageLoss
 from nautilus_trader.analysis import ReturnsAverageWin
@@ -61,6 +63,7 @@ from nautilus_trader.analysis import TreynorRatio
 from nautilus_trader.analysis import UlcerIndex
 from nautilus_trader.analysis import UpCaptureRatio
 from nautilus_trader.analysis import ValueAtRisk
+from nautilus_trader.analysis import VarianceRatio
 from nautilus_trader.analysis import WinRate
 from nautilus_trader.model import Currency
 from nautilus_trader.model import Money
@@ -93,6 +96,9 @@ NO_ARG_STATISTICS = [
     (TotalTurnover, "Total Turnover"),
     (UlcerIndex, "Ulcer Index"),
     (WinRate, "Win Rate"),
+    (Autocorrelation, "Autocorrelation"),
+    (VarianceRatio, "Variance Ratio"),
+    (RescaledRange, "Rescaled Range"),
 ]
 
 PERIOD_STATISTICS = [

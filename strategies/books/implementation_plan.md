@@ -55,21 +55,21 @@ Every "Today" line names the file and symbol that owns the behaviour, checked ag
 | Risk limits           | `RiskCap` (metric, scope, limit, window) plus per-order notional, quantity, price and margin checks                                                                                                                   | Participation-rate and inventory caps; cross-strategy enforcement; a coordinated de-risking path                                                                           |
 | Simulation seeding    | `BacktestEngineConfig.random_seed` seeds every built-in fill model that declares no seed, all eleven of them, venue-level and per-instrument; a model declaring its own seed keeps it                                 | Seeding a foreign (Python) fill model's own draws; seeding the latency and slippage models                                                                                 |
 | Synthetic flow        | `crates/backtest/src/synthetic.rs` generates a persistent flow and its induced price path from a target Hurst exponent and an impact exponent bounded at one half, exposed to Python and deterministic under its seed | A bridge from a generated flow into a run's data; the null and robustness harnesses that consume it (W7.2, W7.3), and the scenario that reads a variance ratio back (W3.2) |
+| Interval memory       | `Autocorrelation`, `VarianceRatio` and `RescaledRange` compute the lag autocorrelation, the overlapping-sum variance ratio and the rescaled-range Hurst slope from daily-binned returns, exposed to Python            | A run harness that reads them back from a backtest (W3.2); unit-root tooling; the null and robustness harnesses (W7.2, W7.3)                                               |
 
 ### 2.3 Absent
 
-| Capability                                       | Note                                                                                   |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| Auctions, price bands, circuit breakers          | No model or engine primitive; adapter metadata only                                    |
-| Feed-identity validation                         | Nothing checks reported volume against open interest or a settlement total             |
-| Cross-venue timestamp reconciliation             | Ordering is insertion order; `VirtualClock` monotonicity is per clock                  |
-| Null-model or reference-distribution validation  | Only determinism and accounting reconciliation exist                                   |
-| Publication or knowledge date                    | `CustomData` carries `ts_init` only; `CorporateAction.effective_ns` is venue-effective |
-| News or sentiment data type                      | News reaches the system as adapter metadata only                                       |
-| Model-driven strategy example                    | No ML dependency and no serving hook                                                   |
-| Global kill switch                               | Closest are the Rust-only `set_trading_state` and per-account backtest liquidation     |
-| Impact decay or a transient/permanent split      | A search for `decay` in `crates/execution` and `crates/backtest` returns nothing       |
-| Autocorrelation, variance-ratio or Hurst tooling | The one Hurst estimator sits inside a feature-gated example strategy                   |
+| Capability                                      | Note                                                                                   |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Auctions, price bands, circuit breakers         | No model or engine primitive; adapter metadata only                                    |
+| Feed-identity validation                        | Nothing checks reported volume against open interest or a settlement total             |
+| Cross-venue timestamp reconciliation            | Ordering is insertion order; `VirtualClock` monotonicity is per clock                  |
+| Null-model or reference-distribution validation | Only determinism and accounting reconciliation exist                                   |
+| Publication or knowledge date                   | `CustomData` carries `ts_init` only; `CorporateAction.effective_ns` is venue-effective |
+| News or sentiment data type                     | News reaches the system as adapter metadata only                                       |
+| Model-driven strategy example                   | No ML dependency and no serving hook                                                   |
+| Global kill switch                              | Closest are the Rust-only `set_trading_state` and per-account backtest liquidation     |
+| Impact decay or a transient/permanent split     | A search for `decay` in `crates/execution` and `crates/backtest` returns nothing       |
 
 ## 3. Sequencing
 
@@ -179,14 +179,21 @@ effects sub-hour) and prices remain close to diffusive only because impact is su
 predictable returns that the market does not have.
 
 **Today.** The impact model is a pure function of the fill quantity: it never updates quotes and
-never feeds back into later fills. No autocorrelation, variance-ratio or unit-root tooling exists
-in `crates/analysis` or `crates/research`; the only Hurst estimator is
-`HurstVpinDirectional::estimate_hurst`, inside the feature-gated examples.
+never feeds back into later fills. Three persistence tools now sit on the analysis surface
+(`Autocorrelation`, `VarianceRatio` and `RescaledRange`, W3.1); unit-root tooling is still absent,
+and the only other Hurst estimator is `HurstVpinDirectional::estimate_hurst`, inside the
+feature-gated examples.
 
 **Work.**
 
-- W3.1 Add autocorrelation, variance-ratio and rescaled-range tools to the analysis surface, and
-  expose them, so a claim about persistence is testable rather than asserted.
+- W3.1 (done at revision 6) Three statistics join the analysis surface, each exposed to Python and
+  registered like `CalmarRatio` rather than reported by default: `Autocorrelation` (lag, default 1,
+  the full-series mean with the overlapping-pair numerator), `VarianceRatio` (aggregation period,
+  default 2, overlapping sums with population variances throughout) and `RescaledRange` (no
+  arguments, the Hurst slope from the least-squares fit of log R/S against log window size over a
+  powers-of-two ladder). Each returns nothing rather than a number when the series cannot support
+  it. All three read the daily-binned returns the crate's other statistics read, so the aggregation
+  period counts days and not raw observations.
 - W3.2 Make the linear model's failure mode observable: a test and a documented scenario in which
   a persistent synthetic flow plus linear impact yields a variance ratio above one, so the
   artifact is named rather than mistaken for a result.
@@ -466,10 +473,11 @@ that is admissible per strategy but not in aggregate.
 
 ## 8. Revision history
 
-| Revision | Date       | Change                                                                                                                                                                                                                                                                                                                                                                                             |
-| -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | 2026-10-05 | First plan, from the ten findings in `README.md` and a symbol-level survey of this repository.                                                                                                                                                                                                                                                                                                     |
-| 2        | 2026-10-05 | W1.3 done: `PeriodAccounting.fees` and `.slippage` are deleted. T1's Today line and the 2.2 net-of-cost row are rechecked against the tree.                                                                                                                                                                                                                                                        |
-| 3        | 2026-10-05 | W1.4 done: the deflated Sharpe is a portfolio statistic, so a run's report carries the row. T1's W1.4 text records the premises that did not hold (no gross-return artifact exists, and the metric vocabulary has no count unit) and the contract minimums that make a short run report the row as unavailable.                                                                                    |
-| 4        | 2026-10-05 | W7.1 done: `BacktestEngineConfig.random_seed` seeds every built-in fill model that declares no seed, venue-level and per-instrument, so a run is reproducible end to end. The engine-level seed row moves from 2.3 absent to 2.2 partial, with the limits stated: a foreign fill model and the latency and slippage models are not seeded from it.                                                 |
-| 5        | 2026-10-05 | W7.4 done: the synthetic flow generator ships with the Hurst and impact-exponent calibration, the exponent refused above one half, exposed to Python and deterministic under its seed. The synthetic-flow row moves from 2.3 absent to 2.2 partial, and T7's Today line is corrected: the engine seed exists as of revision 4 and the generator ships now, while neither is yet consumed by a run. |
+| Revision | Date       | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | 2026-10-05 | First plan, from the ten findings in `README.md` and a symbol-level survey of this repository.                                                                                                                                                                                                                                                                                                                                                        |
+| 2        | 2026-10-05 | W1.3 done: `PeriodAccounting.fees` and `.slippage` are deleted. T1's Today line and the 2.2 net-of-cost row are rechecked against the tree.                                                                                                                                                                                                                                                                                                           |
+| 3        | 2026-10-05 | W1.4 done: the deflated Sharpe is a portfolio statistic, so a run's report carries the row. T1's W1.4 text records the premises that did not hold (no gross-return artifact exists, and the metric vocabulary has no count unit) and the contract minimums that make a short run report the row as unavailable.                                                                                                                                       |
+| 4        | 2026-10-05 | W7.1 done: `BacktestEngineConfig.random_seed` seeds every built-in fill model that declares no seed, venue-level and per-instrument, so a run is reproducible end to end. The engine-level seed row moves from 2.3 absent to 2.2 partial, with the limits stated: a foreign fill model and the latency and slippage models are not seeded from it.                                                                                                    |
+| 5        | 2026-10-05 | W7.4 done: the synthetic flow generator ships with the Hurst and impact-exponent calibration, the exponent refused above one half, exposed to Python and deterministic under its seed. The synthetic-flow row moves from 2.3 absent to 2.2 partial, and T7's Today line is corrected: the engine seed exists as of revision 4 and the generator ships now, while neither is yet consumed by a run.                                                    |
+| 6        | 2026-10-05 | W3.1 done: autocorrelation, variance-ratio and rescaled-range statistics exist on the analysis surface and are callable from Python, reading the same daily-binned returns as the other statistics. The interval-memory row moves from 2.3 absent to 2.2 partial and T3's Today line is corrected. P0 is complete; the acceptance that compares a linear and a concave impact run on one flow stays with W3.2, which needs the concave model of W2.1. |

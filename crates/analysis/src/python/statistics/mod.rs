@@ -16,6 +16,7 @@
 //! Python bindings for trading performance statistics.
 
 pub mod alpha;
+pub mod autocorrelation;
 pub mod beta_ratio;
 pub mod cagr;
 pub mod calmar_ratio;
@@ -32,6 +33,7 @@ pub mod max_drawdown;
 pub mod max_drawdown_duration;
 pub mod omega_ratio;
 pub mod profit_factor;
+pub mod rescaled_range;
 pub mod returns_avg;
 pub mod returns_avg_loss;
 pub mod returns_avg_win;
@@ -49,6 +51,7 @@ pub mod treynor_ratio;
 pub mod ulcer_index;
 pub mod up_capture_ratio;
 pub mod value_at_risk;
+pub mod variance_ratio;
 pub mod win_rate;
 pub mod winner_avg;
 pub mod winner_max;

@@ -54,6 +54,7 @@ from nautilus_trader.analysis.themes import register_theme as register_theme
 __all__ = [
     "CAGR",
     "Alpha",
+    "Autocorrelation",
     "AvgLoser",
     "AvgWinner",
     "BetaRatio",
@@ -91,6 +92,7 @@ __all__ = [
     "PortfolioAnalyzer",
     "PortfolioStatistics",
     "ProfitFactor",
+    "RescaledRange",
     "ReturnsAverage",
     "ReturnsAverageLoss",
     "ReturnsAverageWin",
@@ -108,6 +110,7 @@ __all__ = [
     "UlcerIndex",
     "UpCaptureRatio",
     "ValueAtRisk",
+    "VarianceRatio",
     "WinRate",
 ]
 
@@ -125,6 +128,19 @@ class Alpha:
     ) -> float | None: ...
     def calculate_from_returns_with_benchmark(
         self, returns: typing.Mapping[int, float], benchmark: typing.Mapping[int, float]
+    ) -> float | None: ...
+
+@typing.final
+class Autocorrelation:
+    def __init__(self, lag: int | None = None) -> None: ...
+    @property
+    def name(self) -> str: ...
+    def calculate_from_returns(self, raw_returns: typing.Mapping[int, float]) -> float | None: ...
+    def calculate_from_realized_pnls(
+        self, _realized_pnls: typing.Sequence[float]
+    ) -> float | None: ...
+    def calculate_from_positions(
+        self, _positions: typing.Sequence[model.Position]
     ) -> float | None: ...
 
 @typing.final
@@ -537,6 +553,19 @@ class ProfitFactor:
     ) -> float | None: ...
 
 @typing.final
+class RescaledRange:
+    def __init__(self) -> None: ...
+    @property
+    def name(self) -> str: ...
+    def calculate_from_returns(self, raw_returns: typing.Mapping[int, float]) -> float | None: ...
+    def calculate_from_realized_pnls(
+        self, _realized_pnls: typing.Sequence[float]
+    ) -> float | None: ...
+    def calculate_from_positions(
+        self, _positions: typing.Sequence[model.Position]
+    ) -> float | None: ...
+
+@typing.final
 class ReturnsAverage:
     def __init__(self) -> None: ...
     @property
@@ -762,6 +791,19 @@ class UpCaptureRatio:
 @typing.final
 class ValueAtRisk:
     def __init__(self, confidence: float | None = None) -> None: ...
+    @property
+    def name(self) -> str: ...
+    def calculate_from_returns(self, raw_returns: typing.Mapping[int, float]) -> float | None: ...
+    def calculate_from_realized_pnls(
+        self, _realized_pnls: typing.Sequence[float]
+    ) -> float | None: ...
+    def calculate_from_positions(
+        self, _positions: typing.Sequence[model.Position]
+    ) -> float | None: ...
+
+@typing.final
+class VarianceRatio:
+    def __init__(self, period: int | None = None) -> None: ...
     @property
     def name(self) -> str: ...
     def calculate_from_returns(self, raw_returns: typing.Mapping[int, float]) -> float | None: ...
