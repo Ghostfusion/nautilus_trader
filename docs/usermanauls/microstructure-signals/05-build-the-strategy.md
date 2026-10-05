@@ -158,7 +158,7 @@ print("asks:", book.asks_to_dict())
 Run it from the repository root:
 
 ```bash
-uv run --project python --no-sync python D:/Users/you/scratch/build_book.py
+uv run --project python --no-sync python <temp-dir>/scratch/build_book.py
 ```
 
 Real output:

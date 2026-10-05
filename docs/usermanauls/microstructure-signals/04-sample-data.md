@@ -72,7 +72,7 @@ print("rows where amount is zero:", sum(r["amount"] == "0.0" for r in rows))
 Run it from the repository root:
 
 ```bash
-uv run --project python --no-sync python D:/Users/you/scratch/inspect.py
+uv run --project python --no-sync python <temp-dir>/scratch/inspect.py
 ```
 
 Real output:

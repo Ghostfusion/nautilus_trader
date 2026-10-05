@@ -30,7 +30,7 @@ If your paths differ, substitute your own `uv` location. The important part is t
 Do not install anything else to follow this manual.
 
 Write your programs in a folder **outside** the repository, for example
-`D:/Users/you/scratch/first_book.py`. The manual never adds `.py` files under `docs/`.
+`<temp-dir>/scratch/first_book.py`. The manual never adds `.py` files under `docs/`.
 
 ## 2. The smallest complete program
 
@@ -103,7 +103,7 @@ print("asks:", book.asks_to_dict())
 Run it from the repository root:
 
 ```bash
-uv run --project python --no-sync python D:/Users/you/scratch/first_book.py
+uv run --project python --no-sync python <temp-dir>/scratch/first_book.py
 ```
 
 ## 3. The real output
