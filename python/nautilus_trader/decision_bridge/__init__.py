@@ -105,6 +105,7 @@ from nautilus_trader.decision_bridge.ledger import UNATTRIBUTED as UNATTRIBUTED
 from nautilus_trader.decision_bridge.ledger import AdmissionLedger as AdmissionLedger
 from nautilus_trader.decision_bridge.ledger import DecisionRecord as DecisionRecord
 from nautilus_trader.decision_bridge.ledger import DuplicateArrival as DuplicateArrival
+from nautilus_trader.decision_bridge.news import NewsItem as NewsItem
 from nautilus_trader.decision_bridge.numeric import DEFAULT_SCALES as DEFAULT_SCALES
 from nautilus_trader.decision_bridge.numeric import DeclaredScales as DeclaredScales
 from nautilus_trader.decision_bridge.numeric import allocation_fraction as allocation_fraction
@@ -167,6 +168,7 @@ __all__ = [
     "GateResolution",
     "JsonCalendarView",
     "KnowledgeCounts",
+    "NewsItem",
     "OrderIdentity",
     "OrderRole",
     "Outcome",
