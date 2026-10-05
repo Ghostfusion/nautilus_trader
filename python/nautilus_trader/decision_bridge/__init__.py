@@ -95,6 +95,10 @@ from nautilus_trader.decision_bridge.identity import OrderRole as OrderRole
 from nautilus_trader.decision_bridge.identity import encode_order_id as encode_order_id
 from nautilus_trader.decision_bridge.identity import is_bridge_order_id as is_bridge_order_id
 from nautilus_trader.decision_bridge.identity import order_identity as order_identity
+from nautilus_trader.decision_bridge.knowledge import KNOWLEDGE_DATE_FIELD as KNOWLEDGE_DATE_FIELD
+from nautilus_trader.decision_bridge.knowledge import KnowledgeCounts as KnowledgeCounts
+from nautilus_trader.decision_bridge.knowledge import admitted_at as admitted_at
+from nautilus_trader.decision_bridge.knowledge import knowledge_date_of as knowledge_date_of
 from nautilus_trader.decision_bridge.ledger import ADMISSION_RESULTS as ADMISSION_RESULTS
 from nautilus_trader.decision_bridge.ledger import EXPOSURE_STAGES as EXPOSURE_STAGES
 from nautilus_trader.decision_bridge.ledger import UNATTRIBUTED as UNATTRIBUTED
@@ -142,6 +146,7 @@ __all__ = [
     "DENIAL_CODES",
     "EXPOSURE_STAGES",
     "GATE_SEVERITY_MAPPING",
+    "KNOWLEDGE_DATE_FIELD",
     "KNOWN_FIELDS",
     "ORDER_ID_MAX_LENGTH",
     "ORDER_SCHEME",
@@ -161,6 +166,7 @@ __all__ = [
     "DuplicateArrival",
     "GateResolution",
     "JsonCalendarView",
+    "KnowledgeCounts",
     "OrderIdentity",
     "OrderRole",
     "Outcome",
@@ -186,6 +192,7 @@ __all__ = [
     "Tradability",
     "TradabilityTracker",
     "admit",
+    "admitted_at",
     "allocation_fraction",
     "artifact_digest",
     "build_risk_engine_config",
@@ -198,6 +205,7 @@ __all__ = [
     "is_bridge_order_id",
     "is_policy_total",
     "iso_to_unix_nanos",
+    "knowledge_date_of",
     "leading_denial_code",
     "most_restrictive",
     "order_identity",

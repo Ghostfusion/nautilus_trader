@@ -32,6 +32,10 @@ are this implementation's, and each answers a case the closed set otherwise cann
 producer's contract declares `produced_at` nullable, so an artifact can be schema-valid while
 carrying no instant to resolve availability from, and a key with no bundled calendar is not the same
 case as a calendar that does not cover the instant.
+
+`PUBLISHED_AFTER_DECISION` and `MISSING_KNOWLEDGE_DATE` are the data path's own additions (W8.2),
+marked as such below: they name a datum that cannot be shown to have been knowable at the decision
+time, because its publication instant is later than the decision or is not carried at all.
 """
 
 from __future__ import annotations
@@ -94,6 +98,11 @@ class RefusalCode(Enum):
     CALENDAR_UNCOVERED = "CALENDAR_UNCOVERED"
     ARTIFACT_EXPIRED = "ARTIFACT_EXPIRED"
     ACTIONABILITY_INVALID = "ACTIONABILITY_INVALID"
+    # Additions: the data path's knowledge date (W8.2). A record whose knowledge date is absent, or
+    # later than the decision time, cannot be shown to have been knowable when the decision was
+    # made, so it is excluded rather than assumed fresh.
+    PUBLISHED_AFTER_DECISION = "PUBLISHED_AFTER_DECISION"
+    MISSING_KNOWLEDGE_DATE = "MISSING_KNOWLEDGE_DATE"
 
     # Tradability
     TRADABILITY_UNKNOWN = "TRADABILITY_UNKNOWN"
@@ -127,6 +136,8 @@ _CODE_STAGES: dict[RefusalCode, Stage] = {
     RefusalCode.CALENDAR_UNCOVERED: Stage.AVAILABILITY,
     RefusalCode.ARTIFACT_EXPIRED: Stage.AVAILABILITY,
     RefusalCode.ACTIONABILITY_INVALID: Stage.AVAILABILITY,
+    RefusalCode.PUBLISHED_AFTER_DECISION: Stage.AVAILABILITY,
+    RefusalCode.MISSING_KNOWLEDGE_DATE: Stage.AVAILABILITY,
     RefusalCode.TRADABILITY_UNKNOWN: Stage.TRADABILITY,
     RefusalCode.TRADABILITY_REJECTED: Stage.TRADABILITY,
     RefusalCode.RISK_GATE_REJECT: Stage.ELIGIBILITY,

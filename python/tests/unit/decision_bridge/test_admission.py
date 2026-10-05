@@ -50,6 +50,8 @@ DECLARED_CODES = {
     "CALENDAR_UNCOVERED",
     "ARTIFACT_EXPIRED",
     "ACTIONABILITY_INVALID",
+    "PUBLISHED_AFTER_DECISION",
+    "MISSING_KNOWLEDGE_DATE",
     "TRADABILITY_UNKNOWN",
     "TRADABILITY_REJECTED",
     "RISK_GATE_REJECT",
@@ -309,7 +311,9 @@ def test_the_identity_distinguishes_a_revision_from_the_decision_it_revises() ->
     Test that two documents sharing a date and instrument get distinct decision identities.
     """
     first = admit_document(canonical_artifact())
-    second = admit_document(canonical_artifact(idempotency_key="8b1c9a3e-2f4d-4a77-9f6e-6c1b6a2d5e10"))
+    second = admit_document(
+        canonical_artifact(idempotency_key="8b1c9a3e-2f4d-4a77-9f6e-6c1b6a2d5e10")
+    )
 
     assert isinstance(first, ResearchDecision)
     assert isinstance(second, ResearchDecision)

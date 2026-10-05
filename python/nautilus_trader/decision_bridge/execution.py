@@ -93,6 +93,10 @@ RISK_LIMIT_MARKERS: tuple[str, ...] = ("notional", "risk limit", "denied")
 # doc states the leading token is the canonical code and that a consumer must not recover
 # classification from the diagnostic suffix, so a leading token outside this set yields no code at
 # all rather than a guess.
+#
+# `MISSING_KNOWLEDGE_DATE` and `PUBLISHED_AFTER_DECISION` are the bridge's own additions (W8.2), not
+# the engine's: the knowledge-date gate names its exclusions in the same closed vocabulary so a
+# leading token it renders is recognisable as a code.
 DENIAL_CODES: frozenset[str] = frozenset(
     {
         "ACTIVE_ORDER_LIMIT_REACHED",
@@ -110,6 +114,7 @@ DENIAL_CODES: frozenset[str] = frozenset(
         "INVALID_POSITION_ID",
         "MARKET_PRICE_UNAVAILABLE",
         "MISSING_EXPIRE_TIME",
+        "MISSING_KNOWLEDGE_DATE",
         "MISSING_TRAILING_OFFSET",
         "MISSING_TRAILING_OFFSET_TYPE",
         "MISSING_TRIGGER_TYPE",
@@ -125,6 +130,7 @@ DENIAL_CODES: frozenset[str] = frozenset(
         "POSITION_NOT_FOUND",
         "PRICE_NOT_POSITIVE",
         "PRICE_PRECISION_EXCEEDS_MAXIMUM",
+        "PUBLISHED_AFTER_DECISION",
         "QUANTITY_BELOW_MINIMUM",
         "QUANTITY_CONVERSION_FAILED",
         "QUANTITY_EXCEEDS_MAXIMUM",
