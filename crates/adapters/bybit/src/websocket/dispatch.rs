@@ -22,7 +22,7 @@
 
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use ahash::AHashMap;
@@ -130,6 +130,7 @@ pub struct WsDispatchState {
     spot_repay_fills: DashMap<ClientOrderId, SpotRepayFill>,
     repay_tx: ArcSwapOption<tokio::sync::mpsc::UnboundedSender<RepayRequest>>,
     clearing: AtomicBool,
+    timestamp_substitutions: AtomicUsize,
 }
 
 impl Default for WsDispatchState {
@@ -144,11 +145,18 @@ impl Default for WsDispatchState {
             spot_repay_fills: DashMap::new(),
             repay_tx: ArcSwapOption::empty(),
             clearing: AtomicBool::new(false),
+            timestamp_substitutions: AtomicUsize::new(0),
         }
     }
 }
 
 impl WsDispatchState {
+    /// Returns the number of records whose venue timestamp could not be read, so their `ts_event`
+    /// was the local clock instead.
+    pub fn timestamp_substitutions(&self) -> usize {
+        self.timestamp_substitutions.load(Ordering::Relaxed)
+    }
+
     fn evict_if_full(&self, set: &DashSet<ClientOrderId>) {
         if set.len() >= DEDUP_CAPACITY
             && self
@@ -248,7 +256,14 @@ pub fn dispatch_ws_message(
             let ts_init = clock.get_time_ns();
             let ts_event = parse_millis_i64(msg.creation_time, "wallet.creation_time")
                 .unwrap_or_else(|e| {
-                    log::warn!("Failed to parse wallet creation_time, using ts_init: {e}");
+                    let substitutions = state
+                        .timestamp_substitutions
+                        .fetch_add(1, Ordering::Relaxed)
+                        + 1;
+                    log::warn!(
+                        "Failed to parse wallet creation_time, using ts_init \
+                         (substitutions so far: {substitutions}): {e}"
+                    );
                     ts_init
                 });
 
@@ -1912,6 +1927,43 @@ mod tests {
 
         let event = rx.try_recv().unwrap();
         assert!(matches!(event, ExecutionEvent::Account(_)));
+    }
+
+    #[rstest]
+    fn test_wallet_timestamp_substitution_is_counted() {
+        let instruments = AHashMap::new();
+        let (emitter, mut rx) = create_emitter();
+        let clock = get_atomic_clock_realtime();
+        let state = WsDispatchState::default();
+
+        let json = load_test_json("ws_account_wallet.json");
+        let mut msg: crate::websocket::messages::BybitWsAccountWalletMsg =
+            serde_json::from_str(&json).unwrap();
+
+        // The venue timestamp parses, so nothing is substituted.
+        dispatch_ws_message(
+            &BybitWsMessage::AccountWallet(msg.clone()),
+            &emitter,
+            &state,
+            test_account_id(),
+            &instruments,
+            clock,
+        );
+        assert_eq!(state.timestamp_substitutions(), 0);
+        assert!(matches!(rx.try_recv().unwrap(), ExecutionEvent::Account(_)));
+
+        // A creation_time that cannot be a timestamp falls back to the local clock, and is counted.
+        msg.creation_time = -1;
+        dispatch_ws_message(
+            &BybitWsMessage::AccountWallet(msg),
+            &emitter,
+            &state,
+            test_account_id(),
+            &instruments,
+            clock,
+        );
+        assert_eq!(state.timestamp_substitutions(), 1);
+        assert!(matches!(rx.try_recv().unwrap(), ExecutionEvent::Account(_)));
     }
 
     #[rstest]

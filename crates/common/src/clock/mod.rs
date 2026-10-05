@@ -20,6 +20,7 @@
 //! support virtual and live clock implementations.
 
 mod api;
+mod offset;
 #[path = "virtual.rs"]
 mod virtual_clock;
 
@@ -36,6 +37,8 @@ use nautilus_core::{
     correctness::{check_positive_u64, check_valid_string_utf8},
     datetime::try_datetime_to_unix_nanos,
 };
+pub use offset::{ClockOffsetEstimate, ClockOffsetEstimator}; // Re-export
+pub use offset::{DEFAULT_BUCKET_SAMPLES, MIN_BUCKETS}; // Re-export
 use ustr::Ustr;
 pub use virtual_clock::VirtualClock; // Re-export
 
