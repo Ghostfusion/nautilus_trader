@@ -40,7 +40,10 @@
 use nautilus_core::capability::Capability;
 use std::{collections::BTreeMap, fmt::Display};
 
-/// The unit a metric value is expressed in.
+/// The number of basis points in one unit of the ratio a basis-point value is measured against.
+pub(crate) const BASIS_POINTS_PER_UNIT: f64 = 10_000.0;
+
+/// The units a metric value is expressed in.
 ///
 /// The set is closed and deliberately small: a dimensionless metric is either bounded to the
 /// unit interval (`Fraction`) or not (`Ratio`), and a metric with a denomination is money
@@ -69,11 +72,19 @@ pub enum MetricUnits {
     Fraction,
     /// A money amount, e.g. an expectancy per trade.
     Currency,
+    /// A value quoted in basis points, one ten-thousandth of the ratio it is measured against,
+    /// e.g. an all-in cost of 5 for five basis points.
+    BasisPoints,
 }
 
 impl MetricUnits {
     /// All variants of the closed vocabulary.
-    pub const ALL: &'static [Self] = &[Self::Ratio, Self::Fraction, Self::Currency];
+    pub const ALL: &'static [Self] = &[
+        Self::Ratio,
+        Self::Fraction,
+        Self::Currency,
+        Self::BasisPoints,
+    ];
 
     /// Returns the stable string for this unit.
     #[must_use]
@@ -82,6 +93,7 @@ impl MetricUnits {
             Self::Ratio => "ratio",
             Self::Fraction => "fraction",
             Self::Currency => "currency",
+            Self::BasisPoints => "basis_points",
         }
     }
 }
@@ -824,7 +836,7 @@ mod tests {
     fn test_vocabularies_are_closed_and_stably_named() {
         // Exhaustive matches above are the closure guarantee; these assertions pin the strings
         // a report consumer sees, and that every variant is in ALL.
-        assert_eq!(MetricUnits::ALL.len(), 3);
+        assert_eq!(MetricUnits::ALL.len(), 4);
         for unit in MetricUnits::ALL {
             assert!(!unit.as_str().is_empty());
             assert_eq!(unit.to_string(), unit.as_str());

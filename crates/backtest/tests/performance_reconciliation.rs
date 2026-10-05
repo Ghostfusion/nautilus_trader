@@ -35,15 +35,19 @@
 
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
-use nautilus_analysis::period::{
-    CurrencyTotals, PerformancePeriod, PerformancePeriodReducer, PeriodKind, PeriodObservation,
+use nautilus_analysis::{
+    analyzer::PortfolioAnalyzer,
+    metric::MetricStatus,
+    period::{
+        CurrencyTotals, PerformancePeriod, PerformancePeriodReducer, PeriodKind, PeriodObservation,
+    },
 };
 use nautilus_backtest::{
     config::{BacktestEngineConfig, SimulatedVenueConfig},
     engine::BacktestEngine,
 };
 use nautilus_common::actor::DataActor;
-use nautilus_core::UnixNanos;
+use nautilus_core::{UnixNanos, approx_eq};
 use nautilus_execution::models::fee::{FeeModelAny, MakerTakerFeeModel};
 use nautilus_model::{
     data::{Data, QuoteTick},
@@ -324,14 +328,29 @@ impl DataActor for PeriodReconciler {
     }
 }
 
-/// Runs one backtest and reduces the portfolio's own accounting into period rows.
-///
-/// The reducer is driven by the observations captured from the portfolio during the run, closing
-/// on the portfolio's end-of-run snapshot.
+/// Runs one backtest with a zero fee model and reduces the portfolio's own accounting into rows.
 fn run_scenario(
     instrument: CryptoPerpetual,
     quotes: Vec<Data>,
     plan: Vec<(u64, OrderSide)>,
+) -> Scenario {
+    run_scenario_with_fee(
+        instrument,
+        quotes,
+        plan,
+        FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()),
+    )
+}
+
+/// Runs one backtest and reduces the portfolio's own accounting into period rows.
+///
+/// The reducer is driven by the observations captured from the portfolio during the run, closing
+/// on the portfolio's end-of-run snapshot.
+fn run_scenario_with_fee(
+    instrument: CryptoPerpetual,
+    quotes: Vec<Data>,
+    plan: Vec<(u64, OrderSide)>,
+    fee_model: FeeModelAny,
 ) -> Scenario {
     let instrument_id = instrument.id();
     let venue = instrument_id.venue;
@@ -345,7 +364,7 @@ fn run_scenario(
                 .account_type(AccountType::Margin)
                 .book_type(BookType::L1_MBP)
                 .starting_balances(vec![Money::from("1_000_000 USDT")])
-                .fee_model(FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into())
+                .fee_model(fee_model.into())
                 .build()
                 .unwrap(),
         )
@@ -548,4 +567,80 @@ fn test_open_run_reconciles_nonzero_unrealized(crypto_perpetual_ethusdt: CryptoP
         amount(&collapse(&scenario.closing.realized_pnls), "USDT").is_zero(),
         "an open run must not realise PnL",
     );
+}
+
+#[rstest]
+fn test_cost_row_separates_the_cost_from_the_result(crypto_perpetual_ethusdt: CryptoPerpetual) {
+    /// Reads one cost-row metric from the default analyzer over a scenario's frame.
+    fn row(scenario: &Scenario, id: &str) -> f64 {
+        let analyzer = PortfolioAnalyzer::default();
+        let report = analyzer.report_period_metrics(&[id], &scenario.rows);
+        let result = report.get(id).unwrap();
+        assert_eq!(result.status(), MetricStatus::Computed, "{id}");
+        result.value().unwrap()
+    }
+
+    let instrument_id = crypto_perpetual_ethusdt.id();
+
+    // Day 0 opens a long at 1000, day 1 marks it at 1200 and day 2 closes it at 1200, so the run
+    // ends flat at a profit. The strategy's trade size is fixed, so both runs fill identically.
+    let quotes = || {
+        let mut quotes = day_quotes(instrument_id, 0, 1000.0);
+        quotes.extend(day_quotes(instrument_id, 1, 1200.0));
+        quotes.extend(day_quotes(instrument_id, 2, 1200.0));
+        quotes.extend(day_quotes(instrument_id, 3, 1200.0));
+        quotes
+    };
+    let plan = vec![(1, OrderSide::Buy), (7, OrderSide::Sell)];
+
+    // Ten basis points on both legs, then the same run with both rates set to zero.
+    let charged = run_scenario_with_fee(
+        crypto_perpetual_ethusdt.clone(),
+        quotes(),
+        plan.clone(),
+        FeeModelAny::MakerTaker(MakerTakerFeeModel::new(
+            Decimal::new(1, 3),
+            Decimal::new(1, 3),
+        )),
+    );
+    let free = run_scenario_with_fee(
+        crypto_perpetual_ethusdt,
+        quotes(),
+        plan,
+        FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()),
+    );
+
+    // The default analyzer carries the cost row, so the report reads it without the caller
+    // registering anything.
+    let charged_gross = row(&charged, "gross_return");
+    let charged_net = row(&charged, "net_return");
+    let charged_cost = row(&charged, "cost_basis_points");
+    let charged_breakeven = row(&charged, "breakeven_cost");
+
+    // Both legs paid ten basis points, so the reported cost rate is ten basis points of turnover.
+    assert!(
+        (9.5..=10.5).contains(&charged_cost),
+        "expected a cost rate near ten basis points, got {charged_cost}"
+    );
+
+    // The fees put the result and its cost apart, and the edge the run earned was worth more than
+    // the cost it paid, so the breakeven rate sits above the charged rate.
+    assert!(
+        charged_gross > charged_net,
+        "gross must sit above net when fees are charged, got {charged_gross} and {charged_net}"
+    );
+    assert!(
+        charged_breakeven > charged_cost,
+        "the edge per unit traded must exceed the cost per unit traded, got {charged_breakeven}"
+    );
+
+    // With both rates set to zero the net return moves onto the gross return, and the gross
+    // return is unchanged: the same fills produce the same result before costs.
+    let free_gross = row(&free, "gross_return");
+    let free_net = row(&free, "net_return");
+
+    assert!(approx_eq!(f64, free_gross, charged_gross, epsilon = 1e-12));
+    assert!(approx_eq!(f64, free_net, free_gross, epsilon = 1e-12));
+    assert_eq!(row(&free, "cost_basis_points"), 0.0);
+    assert_eq!(row(&free, "total_commissions"), 0.0);
 }

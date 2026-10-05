@@ -28,11 +28,14 @@ from nautilus_trader.analysis import Autocorrelation
 from nautilus_trader.analysis import AvgLoser
 from nautilus_trader.analysis import AvgWinner
 from nautilus_trader.analysis import BetaRatio
+from nautilus_trader.analysis import BreakevenCost
 from nautilus_trader.analysis import CalmarRatio
+from nautilus_trader.analysis import CostBasisPoints
 from nautilus_trader.analysis import DownCaptureRatio
 from nautilus_trader.analysis import Expectancy
 from nautilus_trader.analysis import ExpectedShortfall
 from nautilus_trader.analysis import ExponentiallyWeightedSharpe
+from nautilus_trader.analysis import GrossReturn
 from nautilus_trader.analysis import InformationRatio
 from nautilus_trader.analysis import LongRatio
 from nautilus_trader.analysis import MaxDrawdown
@@ -41,6 +44,7 @@ from nautilus_trader.analysis import MaxLoser
 from nautilus_trader.analysis import MaxWinner
 from nautilus_trader.analysis import MinLoser
 from nautilus_trader.analysis import MinWinner
+from nautilus_trader.analysis import NetReturn
 from nautilus_trader.analysis import OmegaRatio
 from nautilus_trader.analysis import PortfolioAnalyzer
 from nautilus_trader.analysis import PortfolioStatistic
@@ -76,7 +80,10 @@ from tests.unit.model.factories import make_position_fill
 NO_ARG_STATISTICS = [
     (AvgLoser, "Avg Loser"),
     (AvgWinner, "Avg Winner"),
+    (BreakevenCost, "Breakeven Cost"),
+    (CostBasisPoints, "Cost (basis points"),
     (Expectancy, "Expectancy"),
+    (GrossReturn, "Gross Return"),
     (LongRatio, "Long Ratio"),
     (MaxDrawdown, "Max Drawdown"),
     (MaxDrawdownDuration, "Max Drawdown Duration"),
@@ -84,6 +91,7 @@ NO_ARG_STATISTICS = [
     (MaxWinner, "Max Winner"),
     (MinLoser, "Min Loser"),
     (MinWinner, "Min Winner"),
+    (NetReturn, "Net Return"),
     (ProfitFactor, "Profit Factor"),
     (ReturnsAverage, "Average (Return"),
     (ReturnsAverageLoss, "Average Loss (Return"),

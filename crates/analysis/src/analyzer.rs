@@ -36,12 +36,14 @@ use crate::{
     snapshot::PortfolioStatistics,
     statistic::PortfolioStatistic,
     statistics::{
-        expectancy::Expectancy, long_ratio::LongRatio, loser_avg::AvgLoser, loser_max::MaxLoser,
-        loser_min::MinLoser, profit_factor::ProfitFactor, returns_avg::ReturnsAverage,
-        returns_avg_loss::ReturnsAverageLoss, returns_avg_win::ReturnsAverageWin,
-        returns_kurtosis::ReturnsKurtosis, returns_skewness::ReturnsSkewness,
-        returns_volatility::ReturnsVolatility, risk_return_ratio::RiskReturnRatio,
-        sharpe_ratio::SharpeRatio, sortino_ratio::SortinoRatio, tail_ratio::TailRatio,
+        breakeven_cost::BreakevenCost, cost_basis_points::CostBasisPoints, expectancy::Expectancy,
+        gross_return::GrossReturn, long_ratio::LongRatio, loser_avg::AvgLoser, loser_max::MaxLoser,
+        loser_min::MinLoser, net_return::NetReturn, profit_factor::ProfitFactor,
+        returns_avg::ReturnsAverage, returns_avg_loss::ReturnsAverageLoss,
+        returns_avg_win::ReturnsAverageWin, returns_kurtosis::ReturnsKurtosis,
+        returns_skewness::ReturnsSkewness, returns_volatility::ReturnsVolatility,
+        risk_return_ratio::RiskReturnRatio, sharpe_ratio::SharpeRatio, sortino_ratio::SortinoRatio,
+        tail_ratio::TailRatio, total_commissions::TotalCommissions, total_turnover::TotalTurnover,
         win_rate::WinRate, winner_avg::AvgWinner, winner_max::MaxWinner, winner_min::MinWinner,
     },
 };
@@ -100,6 +102,16 @@ impl Default for PortfolioAnalyzer {
         analyzer.register_statistic(Arc::new(ProfitFactor {}));
         analyzer.register_statistic(Arc::new(RiskReturnRatio {}));
         analyzer.register_statistic(Arc::new(LongRatio::new(None)));
+        // The cost row: the frame's own cost and return figures, so a report can read what the
+        // result cost beside the result itself. The cost rate and the breakeven rate are both
+        // quoted per unit of turnover, and the gross and net returns per unit of starting equity,
+        // so each pair is read against the other.
+        analyzer.register_statistic(Arc::new(BreakevenCost::new()));
+        analyzer.register_statistic(Arc::new(CostBasisPoints::new()));
+        analyzer.register_statistic(Arc::new(GrossReturn::new()));
+        analyzer.register_statistic(Arc::new(NetReturn::new()));
+        analyzer.register_statistic(Arc::new(TotalCommissions::new()));
+        analyzer.register_statistic(Arc::new(TotalTurnover::new()));
         analyzer
     }
 }
@@ -3013,6 +3025,6 @@ mod tests {
         let count = ids.len();
         ids.dedup();
         assert_eq!(ids.len(), count);
-        assert_eq!(count, 38);
+        assert_eq!(count, 42);
     }
 }

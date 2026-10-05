@@ -85,11 +85,17 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::statistics::expected_shortfall::ExpectedShortfall>()?;
     m.add_class::<crate::statistics::exponentially_weighted_sharpe::ExponentiallyWeightedSharpe>()?;
     m.add_class::<crate::statistics::max_drawdown_duration::MaxDrawdownDuration>()?;
-    m.add_class::<crate::statistics::total_commissions::TotalCommissions>()?;
-    m.add_class::<crate::statistics::total_turnover::TotalTurnover>()?;
     m.add_class::<crate::statistics::autocorrelation::Autocorrelation>()?;
     m.add_class::<crate::statistics::variance_ratio::VarianceRatio>()?;
     m.add_class::<crate::statistics::rescaled_range::RescaledRange>()?;
+
+    // Statistics - Frame-based
+    m.add_class::<crate::statistics::breakeven_cost::BreakevenCost>()?;
+    m.add_class::<crate::statistics::cost_basis_points::CostBasisPoints>()?;
+    m.add_class::<crate::statistics::gross_return::GrossReturn>()?;
+    m.add_class::<crate::statistics::net_return::NetReturn>()?;
+    m.add_class::<crate::statistics::total_commissions::TotalCommissions>()?;
+    m.add_class::<crate::statistics::total_turnover::TotalTurnover>()?;
 
     // Statistics - PnL-based
     m.add_class::<crate::statistics::expectancy::Expectancy>()?;

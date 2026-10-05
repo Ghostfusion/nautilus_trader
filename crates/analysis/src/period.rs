@@ -669,6 +669,70 @@ fn single_currency_ratio(whole: &CurrencyTotals, part: &CurrencyTotals) -> Optio
     (part_money.as_decimal() / whole_value).to_f64()
 }
 
+/// Returns `part / whole`, treating a part with no amounts recorded as a genuine zero.
+///
+/// An empty part is what a frame that recorded no amount of that kind looks like, and the sum of
+/// nothing is zero rather than an absence, the same rule the frame totals follow. The whole still
+/// has to resolve to one currency and be non-zero, so a rate over no turnover stays undefined.
+pub(crate) fn single_currency_share(whole: &CurrencyTotals, part: &CurrencyTotals) -> Option<f64> {
+    if part.is_empty() {
+        let whole_money = whole.as_single_currency()?;
+        return (!whole_money.as_decimal().is_zero()).then_some(0.0);
+    }
+
+    single_currency_ratio(whole, part)
+}
+
+/// The frame-level totals that a cost or return statistic reduces a performance-period frame to.
+///
+/// The frame is summed once here rather than per statistic, so each statistic composes
+/// [`single_currency_share`] over the totals instead of re-deriving the frame's currency
+/// resolution. Only an empty frame is undefined at this point: a frame whose equity, PnL,
+/// commission or turnover spans more than one currency is summed as it stands, and the ratio a
+/// statistic composes is the step that reports it as undefined.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PeriodFrameTotals {
+    /// The starting equity of the first period.
+    pub starting_equity: CurrencyTotals,
+    /// The net PnL accrued over every period.
+    pub net_pnl: CurrencyTotals,
+    /// The net PnL with the commission added back, i.e. the frame's gross PnL.
+    pub gross_pnl: CurrencyTotals,
+    /// The commission paid over every period.
+    pub commission: CurrencyTotals,
+    /// The notional turnover over every period.
+    pub turnover: CurrencyTotals,
+}
+
+impl PeriodFrameTotals {
+    /// Returns the frame totals, or `None` when the frame is empty.
+    pub(crate) fn from_periods(periods: &[PerformancePeriod]) -> Option<Self> {
+        let first = periods.first()?;
+
+        let mut net_pnl = CurrencyTotals::new();
+        let mut commission = CurrencyTotals::new();
+        let mut turnover = CurrencyTotals::new();
+
+        for period in periods {
+            net_pnl.add_totals(&period.performance.net_pnl);
+            commission.add_totals(&period.accounting.commission);
+            turnover.add_totals(&period.activity.turnover);
+        }
+
+        // Equity carries the commission drag, so adding the commission back leaves the gross PnL.
+        let mut gross_pnl = net_pnl.clone();
+        gross_pnl.add_totals(&commission);
+
+        Some(Self {
+            starting_equity: first.accounting.starting_equity.clone(),
+            net_pnl,
+            gross_pnl,
+            commission,
+            turnover,
+        })
+    }
+}
+
 /// Returns the exclusive end of the period that begins at the boundary at or before `start`.
 fn next_boundary(start: u64, kind: PeriodKind) -> u64 {
     let day = start / NANOS_PER_DAY;

@@ -31,9 +31,10 @@ use nautilus_analysis::{
     },
     statistic::PortfolioStatistic,
     statistics::{
-        exponentially_weighted_sharpe::ExponentiallyWeightedSharpe,
-        max_drawdown_duration::MaxDrawdownDuration, total_commissions::TotalCommissions,
-        total_turnover::TotalTurnover,
+        breakeven_cost::BreakevenCost, cost_basis_points::CostBasisPoints,
+        exponentially_weighted_sharpe::ExponentiallyWeightedSharpe, gross_return::GrossReturn,
+        max_drawdown_duration::MaxDrawdownDuration, net_return::NetReturn,
+        total_commissions::TotalCommissions, total_turnover::TotalTurnover,
     },
 };
 use nautilus_core::{UnixNanos, approx_eq};
@@ -392,15 +393,92 @@ fn test_cost_totals_match_hand_computation() {
 }
 
 #[test]
+fn test_cost_row_matches_hand_computation() {
+    let periods = run();
+
+    // The frame opens and closes at 1000 USD equity, pays 10 USD of commission over 2010 USD of
+    // turnover, and trades 10 at 100 then 10 at 101.
+    let net = NetReturn::new().calculate_from_periods(&periods).unwrap();
+    assert!(approx_eq!(f64, net, 0.0, epsilon = 1e-12));
+
+    let gross = GrossReturn::new().calculate_from_periods(&periods).unwrap();
+    assert!(approx_eq!(f64, gross, 0.01, epsilon = 1e-12));
+
+    let cost = CostBasisPoints::new()
+        .calculate_from_periods(&periods)
+        .unwrap();
+    assert!(approx_eq!(
+        f64,
+        cost,
+        10.0 / 2010.0 * 10_000.0,
+        epsilon = 1e-9
+    ));
+
+    // The frame's gross PnL is exactly its commission, so the rate it could have paid equals the
+    // rate it paid; the two rows are the same number here and different in general.
+    let breakeven = BreakevenCost::new()
+        .calculate_from_periods(&periods)
+        .unwrap();
+    assert!(approx_eq!(f64, breakeven, cost, epsilon = 1e-9));
+
+    // An empty frame defines none of the four.
+    assert_eq!(NetReturn::new().calculate_from_periods(&[]), None);
+    assert_eq!(GrossReturn::new().calculate_from_periods(&[]), None);
+    assert_eq!(CostBasisPoints::new().calculate_from_periods(&[]), None);
+    assert_eq!(BreakevenCost::new().calculate_from_periods(&[]), None);
+}
+
+#[test]
+fn test_cost_row_is_in_the_default_report_beside_the_returns_metrics() {
+    let periods = run();
+    let analyzer = PortfolioAnalyzer::default();
+
+    // None of the cost row is registered by the caller: the default analyzer carries it.
+    let report = analyzer.report_period_metrics(
+        &[
+            "sharpe_ratio",
+            "gross_return",
+            "net_return",
+            "cost_basis_points",
+            "breakeven_cost",
+            "total_commissions",
+            "total_turnover",
+        ],
+        &periods,
+    );
+
+    for id in [
+        "gross_return",
+        "net_return",
+        "cost_basis_points",
+        "breakeven_cost",
+        "total_commissions",
+        "total_turnover",
+    ] {
+        let result = report.get(id).unwrap();
+        assert_eq!(result.status(), MetricStatus::Computed, "{id}");
+        assert!(result.value().is_some(), "{id}");
+    }
+
+    // A returns-based metric is not defined over the frame and is reported, not dropped.
+    let sharpe = report.get("sharpe_ratio").unwrap();
+    assert_eq!(sharpe.status(), MetricStatus::Unavailable);
+    assert_eq!(sharpe.reason(), Some(MetricReason::UnsupportedInput));
+
+    // The gross and net rows stay apart, and their difference is the cost the frame paid.
+    let gross = report.get("gross_return").unwrap().value().unwrap();
+    let net = report.get("net_return").unwrap().value().unwrap();
+    assert!(approx_eq!(f64, gross - net, 0.01, epsilon = 1e-12));
+}
+
+#[test]
 fn test_analyzer_report_classifies_period_metrics() {
     let periods = run();
     let mut analyzer = PortfolioAnalyzer::default();
 
-    // The default analyzer carries the returns/PnL/position statistics; the frame statistics are
-    // registered explicitly, exactly as a caller would to add a metric to a report.
+    // The default analyzer carries the frame statistics, so only the duration statistic needs
+    // registering, exactly as a caller would to add a metric to a report.
     analyzer.register_statistic(std::sync::Arc::new(MaxDrawdownDuration::new()));
-    analyzer.register_statistic(std::sync::Arc::new(TotalCommissions::new()));
-    analyzer.register_statistic(std::sync::Arc::new(TotalTurnover::new()));
 
     let report = analyzer.report_period_metrics(
         &["max_drawdown_duration", "total_commissions", "sharpe_ratio"],

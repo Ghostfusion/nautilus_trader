@@ -330,6 +330,26 @@ pub const RESEARCH_KERNELS: &[KernelClassification] = &[
         class: KernelClass::Normalization,
         source: "statistics/win_rate.rs",
     },
+    KernelClassification {
+        identity: "breakeven_cost",
+        class: KernelClass::Normalization,
+        source: "statistics/breakeven_cost.rs",
+    },
+    KernelClassification {
+        identity: "cost_basis_points",
+        class: KernelClass::Normalization,
+        source: "statistics/cost_basis_points.rs",
+    },
+    KernelClassification {
+        identity: "gross_return",
+        class: KernelClass::Normalization,
+        source: "statistics/gross_return.rs",
+    },
+    KernelClassification {
+        identity: "net_return",
+        class: KernelClass::Normalization,
+        source: "statistics/net_return.rs",
+    },
     // Statistical estimators: a distribution parameter estimated from the series.
     KernelClassification {
         identity: "alpha",
