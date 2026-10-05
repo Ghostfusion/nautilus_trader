@@ -89,8 +89,8 @@ Python builtin option strategy in the backtest register.
    `crates/model/tests/option_pricing.rs` documents the identities and the reference values,
    and it is the shortest way to understand what the tree guarantees.
 5. **Study the risk limits.** Read `crates/risk/src/python/config.rs` and
-   `crates/risk/src/config.rs` and decide which caps your strategy needs. Remember the
-   pre-trade count caps are Rust only.
+   `crates/risk/src/engine/config.rs` and decide which caps your strategy needs. The
+   pre-trade count caps are `RiskEngineConfig.count_caps`, taken from Python as `RiskCap` values.
 
 ## Closing note
 

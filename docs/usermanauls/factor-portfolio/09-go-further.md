@@ -23,9 +23,6 @@ These are real limitations of the code as it stands, not things the manual forgo
   membership, and the statement is auditable but not enforced." The Rust `MembershipSeries` is a
   stored series; the Python identity is a declaration.
 
-- **The count caps are Rust only.** `RiskEngineConfig.count_caps` cannot be set from Python. See
-  [07](07-risks-and-limits.md).
-
 - **Some label kinds are not built.** The concept page says: "Extrema and trend-state labels are not
   built: they need the dataset contract of the earlier review, and neither it nor a stored
   point-in-time membership exists."

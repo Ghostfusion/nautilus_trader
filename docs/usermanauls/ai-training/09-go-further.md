@@ -25,9 +25,6 @@ plainly so you do not discover them by surprise.
   router (`crates/common/src/notification`), and option pricing
   (`crates/model/src/data/pricing.rs`). Do not look for a Python API for them; exercise a Rust-only
   subsystem through its own crate tests.
-- **The pre-trade send, cancel and fill count caps are Rust-only** (`crates/risk/src/config.rs`), so a
-  Python user cannot set one. The Python risk surface is `max_order_submit_rate`,
-  `max_order_modify_rate` and `max_notional_per_order` (`crates/risk/src/python/config.rs`).
 
 ## The concept pages to read
 

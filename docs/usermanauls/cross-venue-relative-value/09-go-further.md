@@ -63,7 +63,7 @@ with the Python backtest in this manual.
 
 ## 4. Rust-only machinery you will meet
 
-Not everything in the repository has a Python binding. Two subsystems are relevant to this style:
+Not everything in the repository has a Python binding. One subsystem is relevant to this style:
 
 **Execution analytics**, in `crates/trading/src/analytics`, has no Python bindings. It computes
 implementation shortfall against a decision price (the metric constant
@@ -90,14 +90,6 @@ The seven analytics tests all pass:
         PASS [   0.092s] (7/7) nautilus-trading analytics::tests::undefined_metric_is_not_available_never_zero
      Summary [   0.097s] 7 tests run: 7 passed, 962 skipped
 ```
-
-**Pre-trade count caps**, described in [`../../concepts/execution/index.md`](../../concepts/execution/index.md)
-under "Pre-trade count caps", exist in the Rust configuration as `RiskEngineConfig.count_caps` in
-`crates/risk/src/engine/config.rs`. The Python `RiskEngineConfig` in
-`crates/risk/src/python/config.rs` does not expose them; it offers `bypass`,
-`max_order_submit_rate`, `max_order_modify_rate`, `max_notional_per_order`,
-`full_position_exit_venues` and `debug`. An order-count limit for a cross-venue strategy must
-therefore be configured on a Rust node, or counted in your own strategy code.
 
 If you need a capability that is Rust-only, the pattern is: confirm it in `crates/<crate>/src/`,
 confirm the absence of a binding in `crates/<crate>/src/python/`, and then either configure it in

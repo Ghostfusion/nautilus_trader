@@ -21,11 +21,13 @@ and emits a versioned decision artifact. The engine half exists in this reposito
 desired exposure and then into the minimal order set. What does not exist is the join: nothing reads
 one and produces the other. This record specifies that join, and nothing else.
 
-| Revision | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | Initial record. Read-only against both trees; the engine-side stages were found already implemented and the design was reduced to the projection itself                                                                                                                                                                                                                                                                                                       |
-| 2        | Owner disposition of all eight decisions recorded, with D3, D5 and D7 modified and D6, I2 and the allocation rule strengthened; the policies, the lifecycle and the refusal vocabulary added; `actionable_at` resolved from the bundled `TradingCalendar`                                                                                                                                                                                                     |
-| 3        | Boundary semantics closed: deterministic gate precedence (I15), rating-to-signal semantics made total including `HOLD` and `SELL`, receipt time added and retroactive action forbidden, expiry made exclusive, the allocation domain validated, order identity made immutable after a venue rejection, producer authorization separated from identity, bridge attribution added, and the acceptance matrix expanded. Provenance narrative moved to Appendix A |
+| Revision | Change                                                                                                                                                                                                                                                    |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Initial record. Read-only against both trees; the engine-side stages were found already implemented and the design was reduced to the projection itself                                                                                                   |
+| 2        | Owner disposition of all eight decisions recorded, with D3, D5 and D7 modified and D6, I2 and the allocation rule strengthened; the policies, the lifecycle and the refusal vocabulary added; `actionable_at` resolved from the bundled `TradingCalendar` |
+boundary semantics closed: deterministic gate precedence (I15), rating-to-signal semantics made total including `HOLD` and `SELL`, receipt time added and retroactive action forbidden, expiry made exclusive, the allocation domain validated, order identity made immutable after a venue rejection, producer authorization separated from identity, bridge attribution added, and the acceptance matrix expanded. Provenance narrative moved to Appendix A                                                                                                                                                                                                       |
+| 4        | The implementation gates spoke, and four of them returned negative. Gate 1: the execution status mapping does not positively identify tradability, so B7 waits on a route choice (`3.2`). Gate 2: the artifact carries one permission claim, not three, because two of the names revision 3 read are reserved by the artifact's own consumer (`2.1`, `3.2`). Gate 3: the rating table is not total over the producer's five-valued vocabulary (`3.6`). Gate 4: the temporal rule reads a nullable `produced_at` with no declared outcome (`3.6`, `5.2`). Findings recorded in `7.2` and Appendix A |
+| 5        | The four findings resolved and the record implemented. Route A chosen for B7 (`3.2`); the two weaker ratings given their directional family's row and a short position closed to no signal (`3.6`); two refusal codes added for the two absences the closed set could not name (`5.2`); I15 restated as one claim. Five further reachability facts recorded, each where its item is specified (`7.3`, Appendix A): the wire contract declares no horizon; the producer leaves the advisory allocation null in production; the bundled calendar's coverage ends in 2025; count caps are unreachable from Python; and two of the five attribution quantities cross no boundary back to the bridge |
 
 ## 1. Purpose and scope
 
@@ -96,7 +98,10 @@ statement is reasoning rather than a citation, it is marked as inference at the 
 - A decision contract with a recomputable hash, an idempotency key, a producer identity, an
   `effective_date`, a `produced_at`, an `expires_at`, and a `risk_gate` carrying a verdict and its
   reasons. The risk gate's own vocabulary is PASS, WARN and REJECT, per the research project's own
-  tool documentation; its permission fields carry a two-value allowed or blocked form.
+  tool documentation. The contract declares `risk_gate` as an open object and declares no permission
+  field at all; the two names revision 3 read as producer-side permission claims are reserved by the
+  artifact's own named consumer, and a producer-set value is refused by the producer's own validator
+  (appendix A, revision 4).
 - Its own deterministic guard, which can only weaken a decision and never strengthen it. Its own
   README describes `strategies/decision_guardrail.py` capping a Buy or Overweight at Hold and capping
   confidence on non-fresh data, "downgrade-only by construction"; the earlier review records the same
@@ -159,15 +164,15 @@ sides already state and neither side currently checks across the boundary.
 The requested chain, mapped onto what exists. "Projection" means a pure function with a typed error;
 no stage here reads a clock or a global.
 
-| Stage                  | Research artifact                               | Engine side                           | Status                                                  |
-| ---------------------- | ----------------------------------------------- | ------------------------------------- | ------------------------------------------------------- |
-| Decision context       | the decision document                           | a `TradingSignal`                     | to project                                              |
-| Strategy eligibility   | `risk_gate`, `trade_permission`, `binding_gate` | admission gate plus instrument status | to build, plus one prerequisite                         |
-| Position target        | `recommended_allocation_pct`                    | `TargetConstruction`                  | exists; the artifact may only cap                       |
-| Portfolio construction | (none)                                          | `TargetReconciler`                    | exists; per instrument, not a cross-sectional optimiser |
-| Risk                   | advisory gate verdict                           | `RiskEngineConfig` limits             | exists; to configure                                    |
-| Execution and orders   | (none)                                          | `Strategy.submit_signals`             | exists; to make idempotent                              |
-| Fills                  | (none)                                          | execution and matching engines        | exists                                                  |
+| Stage                  | Research artifact            | Engine side                           | Status                                                  |
+| ---------------------- | ---------------------------- | ------------------------------------- | ------------------------------------------------------- |
+| Decision context       | the decision document        | a `TradingSignal`                     | to project                                              |
+| Strategy eligibility   | `risk_gate.verdict`          | admission gate plus instrument status | to build, plus one prerequisite                         |
+| Position target        | `recommended_allocation_pct` | `TargetConstruction`                  | exists; the artifact may only cap                       |
+| Portfolio construction | (none)                       | `TargetReconciler`                    | exists; per instrument, not a cross-sectional optimiser |
+| Risk                   | advisory gate verdict        | `RiskEngineConfig` limits             | exists; to configure                                    |
+| Execution and orders   | (none)                       | `Strategy.submit_signals`             | exists; to make idempotent                              |
+| Fills                  | (none)                       | execution and matching engines        | exists                                                  |
 
 Sections 3.6 to 3.8 are the policies the projection needs; they are not extra stages.
 
@@ -216,9 +221,24 @@ deterministic function of the artifact rather than of an implementation's evalua
 
 A `TradingSignal` carries exactly a statement of view: instrument, direction, horizon, magnitude,
 source, expiry and provenance
-(`crates/model/src/signal.rs`). The decision document carries a ticker, a direction or rating, a
-confidence, a horizon, a producer, an expiry and a run identity. The projection is close to total,
-and each field that does not map directly is settled in section 7 rather than defaulted here.
+(`crates/model/src/signal.rs`). The decision document carries a ticker, a rating, a confidence, a
+producer, an instant it existed and an instant it expires; it carries no horizon, no direction and no
+allocation it always fills. The projection is close to total, and each field that does not map
+directly is settled in section 7 rather than defaulted here.
+
+**Revision 5 recorded three of those absences as facts rather than as readings.** The wire contract
+declares no horizon field at all, so the horizon is the bridge's own configuration: a horizon is
+semantic, the artifact carries none, and deriving one from the operational expiry would let an
+operational instant decide a semantic quantity in reverse. The contract declares the `direction` field
+as the consumer's own slot, and the producer leaves it null because the rating resolves the action, so
+the bridge derives direction from the rating alone and records a producer-set direction as evidence
+rather than honouring it as an instruction. And the advisory allocation the producer actually
+computes is published as `position.size_pct_book`, whose domain the contract does not declare, while
+`recommended_allocation_pct` -- the field this design's ceiling reads, and the field whose domain it
+validates -- is written as null in production. The ceiling is therefore implemented, tested and
+inactive until the producer publishes a measured allocation in the declared domain; reading the other
+field instead would mean adopting an undeclared domain and inventing a bound, which is exactly what
+I13 forbids.
 
 One property of the projection is a rule rather than a mapping: the research decision is **necessary
 in this strategy but never sufficient by itself**. A signal exists only when the artifact is valid,
@@ -233,8 +253,11 @@ Eligibility asks whether this instrument, now, may be acted on at all. It has th
 1. **Engine facts, authoritative.** Instrument status and tradability (`MarketStatusAction` and
    `InstrumentStatus`, `crates/model/src/enums.rs:978`, `crates/model/src/data/status.rs`), the
    instrument definition, and portfolio state.
-2. **The artifact's own claims.** `risk_gate.verdict`, `trade_permission`, `binding_gate`, which are
-   advisory by the producer's own statement.
+2. **The artifact's own claim.** `risk_gate.verdict` alone, which is advisory by the producer's own
+   statement. The names `trade_permission` and `binding_gate` are reserved by the artifact's own
+   named consumer: the producer's validator refuses a non-empty value with
+   `producer_set_reserved_field`, and the producer's advisory counterpart is `binding_constraint`,
+   which names the constraint that bound and is not a permission at all (appendix A, revision 4).
 3. **The regime reading.** Either the research half's own regime score, or the measured regime from
    `implementation/sector-regime-engine/`, which carries a pre-registered decision rule and
    therefore a falsifiable null.
@@ -248,24 +271,59 @@ recognise is exactly the case that must not reach construction. The requirement 
 strategy: a multi-leg instrument's every leg is established separately, because a spread whose second
 leg cannot trade is not tradable (I14).
 
-#### The three research-side gates resolve deterministically
+**Revision 4.** The first implementation gate established that the current execution status mapping
+does not satisfy I14. The one status-to-action funnel opens the market on a `Trading` or `PreOpen`
+action and drops every other action through a wildcard arm, `NotAvailableForTrading` among them; the
+initial and reset state is `Open`, so an instrument that never receives a status is tradable by
+default; the state that would mean "not available" is unreachable in an engine, because the field is
+assigned only `Open`, `Paused`, `Suspended` and `Closed`, and the only conversion that produces it
+outside the enum's own declaration has no call site outside a unit test; and
+`InstrumentStatus.is_trading` is populated by the venue adapters and read by no engine, risk or
+strategy path (appendix A). Two routes remain, and the owner has not chosen:
 
-The artifact carries three fields that each claim something about permission, and they can
-contradict each other. Two implementations reading the same artifact must not reach different
-answers, so the aggregation is a declared rule rather than an implementation's judgement.
+- **Route A, narrow.** The bridge keeps its own positive, three-valued, per-leg tradability state
+  from `InstrumentStatus` events, reads `is_trading`, treats `None` as not tradable, and resolves by
+  `instrument_id`. No platform behaviour changes.
+- **Route B, wide.** The execution engine's own status mapping learns `NotAvailableForTrading` and
+  consumes `is_trading`. That changes behaviour for every strategy in the repository.
 
-Each field is mapped to one of three severities by a declared, closed mapping:
+Route A is the recommendation, because it is the only one that leaves section 8's "no change to
+either half's internals" true. B7 does not start until the owner picks one.
+
+**Revision 5 chose route A, and implemented it.** The bridge keeps its own positive, three-valued,
+per-leg tradability state from `InstrumentStatus` events, in
+`python/nautilus_trader/decision_bridge/tradability.py`. It reads the venue's own `is_trading` flag
+first and then a declared, closed mapping over the status action, in which only a trading action
+positively establishes that trading is open; every other unmapped action establishes nothing and
+therefore resolves to unknown. Unknown is not tradable, a refusal anywhere in a multi-leg instrument
+refuses the whole instrument, and a status whose event time is older than the newest one already
+observed never replaces it, because a replay can deliver statuses out of order. Nothing in the
+execution engine, the risk engine or any existing strategy changes: the state lives beside the
+decision it guards, and an instrument that never reports a status can never be acted on. Route B --
+teaching the execution engine's own status mapping and consuming `is_trading` there -- is recorded
+here as the alternative that was not taken, because it would change behaviour for every strategy in
+the repository to answer a question only this bridge asks.
+
+#### The research-side permission claim resolves deterministically
+
+The artifact carries one field that claims something about permission, `risk_gate.verdict`, and it
+can contradict the engine's own eligibility. Revision 3 recorded three fields here; revision 4 found
+that two of them are names the producer is refused permission to set (appendix A). Two
+implementations reading the same artifact must not reach different answers, so the aggregation is a
+declared rule rather than an implementation's judgement.
+
+Each value of the claim is mapped to one of three severities by a declared, closed mapping:
 
 | Severity    | Meaning for the bridge                       |
 | ----------- | -------------------------------------------- |
-| `PERMIT`    | the field raises no objection                |
-| `UNCERTAIN` | the field permits the action at reduced risk |
-| `RESTRICT`  | the field refuses the action                 |
+| `PERMIT`    | the claim raises no objection                |
+| `UNCERTAIN` | the claim permits the action at reduced risk |
+| `RESTRICT`  | the claim refuses the action                 |
 
 The rule is then:
 
 ```text
-research_severity  = the most restrictive severity of the three fields
+research_severity  = the most restrictive severity of the mapped claim
 effective_gate     = min(research_severity, engine_eligibility)      # engine wins
 ```
 
@@ -275,8 +333,10 @@ that is not in the declared mapping resolves to `RESTRICT`, because the safe dir
 value is closed. And engine eligibility is evaluated separately and cannot be raised by anything
 research-side, so a research `PERMIT` beside an engine refusal still produces no signal.
 
-A disagreement among the three fields is recorded as the diagnostic `GATE_CONFLICT`, with the fields
-and their values, while the effective gate remains the most restrictive resolution. A conflict is a
+A disagreement between the artifact's claim and the engine's eligibility, or between two artifact
+fields whose policies of section 3.6 resolve restrictively, is recorded as the diagnostic
+`GATE_CONFLICT`, with the fields and their values, while the effective gate remains the most
+restrictive resolution. A conflict is a
 diagnostic attribute rather than a terminal state, because the restrictive resolution is already a
 correct answer and the conflict is information about the producer rather than a reason to stop. The
 same diagnostic is recorded when two artifact fields disagree in any other way that the policies of
@@ -342,6 +402,12 @@ These are the stages this repository already owns and the reasons this half of t
 having. The bridge's only obligations are to configure the risk engine so that a decision cannot
 exceed a limit, to make submission idempotent, and to keep the audit chain from a decision to a fill.
 
+**Revision 6.** Every limit this section names is settable from Python and present on both paths:
+count caps join the per-instrument notional caps and the two rate limits as `RiskCap` values over the
+engine's own vocabulary, and the live configuration carries the same caps through the same validation
+rather than hardcoding them away. The implementation record's B8 item has the per-file detail; `7.4`
+carries the finding.
+
 ### 3.6 The actionability policy: a rating is not a direction, and a date is not an instant
 
 Two distinct policies live here, and both exist because the artifact and the engine answer different
@@ -354,14 +420,29 @@ interpretation of a view depends on the position that already exists. The policy
 rating vocabulary, closed on an unknown rating, and it states its output for every row rather than
 leaving an implementer to invent one:
 
-| Research view | Position | Engine result                                                                                       |
-| ------------- | -------- | --------------------------------------------------------------------------------------------------- |
-| `BUY`         | flat     | a `LONG` signal, with the artifact's allocation as the ceiling                                      |
-| `BUY`         | long     | a `LONG` signal, with the same ceiling; the reconciler emits the delta only if exposure is below it |
-| `HOLD`        | flat     | no signal, recorded as `NO_SIGNAL`: the artifact states no view and there is nothing to maintain    |
-| `HOLD`        | long     | no signal, recorded as `NO_SIGNAL`: the engine's own reconciliation already maintains an exposure   |
-| `SELL`        | long     | a flat signal, meaning a target of zero exposure; the reconciler emits the minimal reduction        |
-| `SELL`        | flat     | no signal, recorded as `NO_SIGNAL`: revision 1 is long-only                                         |
+| Research view   | Position | Engine result                                                                                               |
+| --------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `BUY`           | flat     | a `LONG` signal, with the artifact's allocation as the ceiling                                              |
+| `BUY`           | long     | a `LONG` signal, with the same ceiling; the reconciler emits the delta only if exposure is below it         |
+| `OVERWEIGHT`    | flat     | the same row as `BUY`: a positive view resolves to a `LONG` signal                                          |
+| `OVERWEIGHT`    | long     | the same row as `BUY`: a positive view keeps the ceiling                                                    |
+| `HOLD`          | flat     | no signal, recorded as `NO_SIGNAL`: the artifact states no view and there is nothing to maintain            |
+| `HOLD`          | long     | no signal, recorded as `NO_SIGNAL`: the engine's own reconciliation already maintains an exposure           |
+| `UNDERWEIGHT`   | long     | the same row as `SELL`: a negative view on a long position resolves to a zero target                        |
+| `UNDERWEIGHT`   | flat     | no signal, recorded as `NO_SIGNAL`: revision 1 is long-only                                                 |
+| `SELL`          | long     | a flat signal, meaning a target of zero exposure; the reconciler emits the minimal reduction                |
+| `SELL`          | flat     | no signal, recorded as `NO_SIGNAL`: revision 1 is long-only                                                 |
+| any of the five | short    | no signal, recorded as `NO_SIGNAL`: revision 1 is long-only, so the bridge does not act on a short position |
+
+**Revision 4.** The third implementation gate found the totality claim above is not yet true. The
+producer's rating vocabulary is five-valued -- `Buy`, `Overweight`, `Hold`, `Underweight`, `Sell`
+(`tradingagents/agents/schemas.py`, `PortfolioRating`) -- while the wire contract declares `rating` as
+a plain string with no enum, and this table states an engine result for three of the five.
+`Overweight` and `Underweight` have no row, so the only outcomes available to an implementer are to
+refuse two of five legitimate producer ratings as `RATING_UNKNOWN`, or to invent their direction,
+which this section and I2 forbid. Section 2.1 already records the producer's own guardrail capping "a
+Buy or Overweight at Hold", so the producer treats the two values as distinct from `Buy`. The owner
+states their rows; nothing else in the table changes.
 
 Three consequences are deliberate. `HOLD` produces no signal at all rather than a directional signal
 carrying a "maintain" flag, because this repository's `TradingSignal` has no such flag and inventing
@@ -441,6 +522,30 @@ calendar module's own division of responsibility is preserved: it states that in
 belongs to the instrument and that "a calendar only answers whether an instant is tradeable, and when
 the sessions are".
 
+**Revision 4.** The fourth implementation gate found the rule above is not total over the fields it
+consumes. The producer's contract declares `produced_at` as nullable at every schema version -- its
+`x-required-when` block requires `expires_at`, `idempotency_key`, `producer` and `artifact_sha256`,
+and not `produced_at` -- while steps 1, 3 and 4 all read it. An artifact whose `produced_at` is absent
+is therefore schema-valid and unhandled: `SCHEMA_INVALID` would be false, and the closed vocabulary of
+section 5.2 has no member for it. A smaller gap is that a bundled calendar absent for the instrument's
+key is not the same case as a calendar that does not cover the instant, and the vocabulary carries
+only `CALENDAR_UNCOVERED`. Both need the owner's statement: a new refusal code, or a declared mapping
+onto an existing one.
+
+**Revision 6.** Two limits this section recorded as facts about the data are resolved. The bundled
+`XNYS.EQUITY` document carries the 2026 holidays and the two 2026 early closes and declares coverage
+to 2026-12-31, taken from the exchange's published calendar and cross-checked against a second
+source, with the provenance recorded in the document's own `source` field; step 1 therefore stops
+refusing an artifact produced after 2025-12-31. And a calendar no longer has to be bundled to be
+usable: `JsonCalendarView` loads a directory of `nautilus-trading-calendar/v1` documents once, at
+construction, and resolves them by the calendar's own key, so an instrument whose calendar the bundle
+does not carry - or an instant past the bundle's coverage - is served by a document the operator
+supplies. The view reads only its directory and never the bundle, so it cannot mask a bundled calendar
+silently: a caller that wants a directory entry to take precedence composes the two explicitly, and
+two documents that declare one key are a configuration error that raises rather than a silent choice.
+A document that cannot be parsed is treated as an absent calendar, which the rule already reports as
+`CALENDAR_MISSING`. The rule itself is unchanged; only its sources are.
+
 ### 3.7 The advisory allocation is a ceiling, not an instruction, and it is validated
 
 The artifact's `recommended_allocation_pct` is an opinion about how much exposure a view deserves. It
@@ -484,6 +589,17 @@ An allocation of zero beside a directional rating resolves to no signal rather t
 because zero is inside the domain: the artifact sanctions no exposure, and there is nothing to
 construct. The contradiction between a direction and a zero ceiling is recorded under the
 `GATE_CONFLICT` diagnostic.
+
+**Revision 6.** The producer publishes the allocation this section treats as a ceiling, so the
+ceiling is active rather than dormant. The published value is the run's own measured book size,
+converted from the fraction the producer computes to the percent this field declares, and it is
+published only when it is measurable and inside the declared domain: an absent size, or one outside
+zero to one hundred, still publishes null, because a mis-scaled ceiling is worse than none and the
+consumer fails closed on a value it cannot validate. No bridge rule changed - admission validated
+this field from the start, and the ceiling was implemented and tested while the field was null - so
+what changed is that a real artifact exercises the path. The producer's contract declares the same
+domain on the field, which is the statement this section was reading when it said the domain is the
+producer's to declare.
 
 ### 3.8 Strength carries the bridge's policy magnitude, never the model's confidence
 
@@ -609,9 +725,9 @@ the engine has positively answered that it is tradeable. The answer is three-val
 tradable, and every leg of a multi-leg instrument is established separately. An unknown or unmapped
 status produces a typed refusal (section 3.2).
 
-**I15. Gate aggregation is deterministic and restrictive.** The artifact's permission fields resolve
+**I15. Gate aggregation is deterministic and restrictive.** The artifact's permission claim resolves
 to one severity through a declared, closed mapping; the most restrictive value wins; a permissive
-field never overrides a stricter field; a value outside the mapping resolves to rejection; and engine
+value never overrides a stricter one; a value outside the mapping resolves to rejection; and engine
 eligibility is evaluated independently and cannot be raised by anything research-side (section 3.2).
 
 ## 5. Failure modes, and which invariant answers each
@@ -621,7 +737,7 @@ eligibility is evaluated independently and cannot be raised by anything research
 | The same ticker is analysed twice and both records are admitted   | Retry artifacts for the same symbol exist beside the originals in the research checkout                                                          | I9              |
 | A backtest reads a decision before it existed                     | `effective_date` is a date; production is a timestamp; the two differ by hours                                                                   | I3, I4          |
 | A signal is actioned before the engine received it                | A retroactively resolved instant is executable unless receipt bounds it                                                                          | I3, step 5      |
-| Two permission fields disagree and two readers differ             | Three advisory fields with independent vocabularies                                                                                              | I15             |
+| Two artifact fields disagree and two readers differ               | The artifact's verdict and the engine's eligibility are produced independently                                                                   | I15             |
 | A gate verdict is quoted instead of enforced                      | PASS can coexist with a block on new risk in the same record                                                                                     | I2, I5          |
 | An unsizeable view becomes a flat target                          | Documented as the reason the construction stage reports typed errors                                                                             | I6              |
 | An unknown market status reads as permission                      | The status vocabulary is wider than any reader's match arms                                                                                      | I14             |
@@ -702,6 +818,8 @@ the order they can occur in.
 | Admission    | `ALLOCATION_INVALID`            |
 | Admission    | `DUPLICATE`                     |
 | Availability | `MISSING_EXPIRY`                |
+| Availability | `PRODUCED_AT_ABSENT` (addition) |
+| Availability | `CALENDAR_MISSING` (addition)   |
 | Availability | `ARTIFACT_EXPIRED`              |
 | Availability | `ACTIONABILITY_INVALID`         |
 | Availability | `CALENDAR_UNCOVERED` (addition) |
@@ -727,6 +845,12 @@ restrictive resolution and the diagnostic is information about the producer or t
 than a reason to stop. `CALENDAR_UNCOVERED` and `RATING_UNKNOWN` are additions to the owner's set,
 each marked, and each required by a resolution rule that can fail on its own: a finite calendar can
 fail to cover an instant, and a closed rating vocabulary can receive a value outside it.
+`PRODUCED_AT_ABSENT` and `CALENDAR_MISSING` are revision 5's additions, marked the same way, and each
+names a case the closed set otherwise cannot distinguish: the producer's contract declares
+`produced_at` nullable, so an artifact can be schema-valid while carrying no instant to resolve
+availability from, and a key with no calendar at all is not the same absence as a calendar that does
+not cover the instant -- the first is a configuration or coverage fact about this bridge, the second
+is a fact about the instrument's session data.
 
 ## 6. Measurement is the other half of the join
 
@@ -796,13 +920,15 @@ risk approved allocation
 actually filled allocation
 ```
 
-Worked example:
+Worked example. The approved step has two outcomes rather than one, because this engine denies an
+order that would break a limit instead of sizing it down:
 
 ```text
 research requested   8.0%
-bridge capped        8.0%
+bridge capped        8.0%     the ceiling did not bind here
 engine constructed   5.0%     engine sizing
-risk approved        3.0%     risk constraint
+risk approved        5.0%     the engine admitted the order as constructed
+                     0.0%     or it refused the order; no value in between exists
 actually filled      2.7%     execution realization
 ```
 
@@ -813,6 +939,23 @@ from a fill shortfall.
 An `Label` and a `Panel` are enough for the signal-quality measurements; the attribution quantities
 are the audit record's own fields. Nothing in this section requires a new mechanism, which is why it
 is in the design and not in the implementation plan beyond the wiring.
+
+**Revision 6.** The two quantities revision 5 could not observe are observed, and one expectation in
+the worked example is corrected. The engine-constructed quantity is read from the target the
+pipeline's construction stage produced, and the risk stage's answer is read from the engine's own
+order events: an order the engine put on its submission path records the constructed allocation as
+approved, and an order the engine refused records a measured zero, because a denial is this engine's
+form of a risk constraint - it does not resize the order, so an intermediate "risk approved" value
+cannot occur here and the example's `risk approved 3.0%` step is a shape this engine does not
+produce. Whether an order was denied is read from the event and never from classifying its message,
+so a denial the bridge cannot name is still a denial. All five quantities are recorded in the
+artifact's percent units, so the differences between them are directly comparable. Two consequences
+are worth stating: the construction is recorded only when the engine's target carries a weight,
+because deriving an allocation from a quantity or a notional would repeat the engine's own sizing and
+price resolution, which this design forbids everywhere else; and a decision that makes several
+attempts may have the risk stage revise its own earlier zero when a later attempt passes, a revision
+no other stage may make. Both observation points are bridge wiring rather than new engine behaviour,
+so no engine-side mechanism was added for either.
 
 ## 7. Owner decisions
 
@@ -854,6 +997,60 @@ assertable properties rather than as prose (I2), the float boundary is scoped to
 fields only so research metadata is not needlessly transformed (I7), and revision 1 is stated as
 long-only with the shorting branch closed rather than left to a flag (`3.6`, section 8).
 
+### 7.2 Findings applied in revision 4
+
+Revision 4 is the record's own implementation gates speaking rather than a review. Gates 1 and 2 were
+executed read-only and both returned negative. The findings are applied here, and the decisions they
+open are named with them.
+
+| Finding                                                                                                   | Where it landed                |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| The status mapping does not satisfy I14 (gate 1, negative)                                                | appendix A, `3.2`, `10`        |
+| The mapping's route is an owner decision, route A recommended                                             | `3.2`, `10`                    |
+| `trade_permission` and `binding_gate` are consumer-reserved names, not artifact fields (gate 2, negative) | `2.1`, `3.2`, appendix A, `10` |
+| The I15 aggregation's artifact-side domain is one field, not three                                        | `3.2`, `9`, appendix A         |
+| Engine eligibility stays the independent, authoritative side of the aggregation                           | unchanged, **I15**             |
+| The rating table is not total over the five-valued producer vocabulary (gate 3, negative)                 | `3.6`, `5.2`, appendix A       |
+| The temporal rule consumes a nullable field with no declared outcome (gate 4, negative)                   | `3.6`, `5.2`, appendix A       |
+
+All four of those were resolved in revision 5, which is what section 7.3 records.
+
+### 7.3 Findings applied in revision 5
+
+Revision 5 is the record implemented. The four decisions `7.2` left open were taken, and five further
+reachability facts were found while the code was written. Each is a fact about the boundary rather
+than a gap in the design, and each is recorded where the item it affects is specified so that a reader
+of that item meets it there.
+
+| Finding                                                                                      | Resolution                                                                                                                                                                                            | Where it landed |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| The status mapping does not satisfy I14 (gate 1)                                             | Route A chosen and implemented: the bridge keeps its own positive, three-valued, per-leg state from `InstrumentStatus` events                                                                         | `3.2`           |
+| The rating table is not total over the producer's five-valued vocabulary (gate 3)            | `Overweight` takes `BUY`'s row and `Underweight` takes `SELL`'s, and a short position closes to no signal for every rating                                                                            | `3.6`           |
+| The temporal rule reads a nullable `produced_at` (gate 4)                                    | `PRODUCED_AT_ABSENT` declared for the absent instant, and `CALENDAR_MISSING` for the absent key                                                                                                       | `3.6`, `5.2`    |
+| I15 read as "fields" beside one claim                                                        | Restated as one permission claim, with the aggregation unchanged over that domain                                                                                                                     | **I15**         |
+| The wire contract declares no horizon                                                        | The horizon is bridge configuration, refused at construction when it is not a positive duration                                                                                                       | `3.1`, `3.8`    |
+| The producer leaves the advisory allocation null in production                               | The ceiling is implemented and tested, and inactive until the producer publishes a measured allocation in the declared domain; `position.size_pct_book` is not read, because its domain is undeclared | `3.1`, `3.7`    |
+| The bundled calendar's coverage ends 2025-12-31                                              | Step 1 refuses every artifact produced after it, by design, until the calendar data is refreshed: a data task, not a code change                                                                      | `3.6`, `10`     |
+| `RiskEngineConfig.count_caps` has no Python binding, and the live runtime hardcodes it empty | Per-instrument notional caps and both rate limits are configured and proven; count caps are recorded as unreachable rather than emulated                                                              | `3.5`           |
+| Two of the five attribution quantities do not cross back to the bridge                       | `submit_signals` returns client order ids only, so the constructed target and the risk engine's own decision are recorded as not reached and observed as engine events                                | `6.5`           |
+
+### 7.4 Findings applied in revision 6
+
+Revision 6 closes the gaps revision 5 recorded as reachability limits, and it is the first revision in
+which the research half's own artifact changes too. A binding, a calendar document and the producer's
+contract were each the reason a rule above could not act; each is resolved here and recorded where
+the rule it serves is specified. One finding corrects this document rather than a gap in it, and it is
+stated first because a reader of the worked example would otherwise carry the wrong expectation.
+
+| Finding                                                                                                                  | Resolution                                                                                                                                                                                                                      | Where it landed         |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| The worked example in `6.5` assumes the risk engine sizes an order down                                                  | This engine denies rather than resizes, so the approved exposure is either the constructed allocation or zero and never an intermediate value                                                                                   | `6.5`                   |
+| Two of the five attribution quantities do not cross back to the bridge                                                   | Both are observed now: the risk stage reads the engine's own order events, and the construction stage reads the target the pipeline constructed                                                                                 | `6.5`                   |
+| The bundled XNYS equity calendar's coverage ended 2025-12-31                                                             | The document carries the 2026 holidays and the two 2026 early closes and declares coverage to 2026-12-31, with its provenance recorded in the document itself                                                                   | `3.6`, `10`, Appendix A |
+| A calendar outside the bundled set could not be served, so an instant past the bundle's data had no remedy but a rebuild | `JsonCalendarView` loads a directory of `nautilus-trading-calendar/v1` documents once and resolves them by the calendar's own key; it never consults the bundle, so a caller composes the two explicitly and a collision raises | `3.6`                   |
+| The producer leaves the advisory allocation null in production                                                           | The producer publishes its measured book size in the declared 0..100 domain and its contract declares that domain, so the ceiling is active with no bridge change                                                               | `3.1`, `3.7`            |
+| `RiskEngineConfig.count_caps` has no Python binding and the live runtime hardcodes it empty                              | Count caps are Python classes over the engine's own vocabulary, `RiskEngineConfig` takes them, and the live configuration carries the same caps through the same validation path                                                | `3.5`                   |
+
 ## 8. Non-goals
 
 - No change to either half's internals. The research project is not asked to change its contract, and
@@ -879,33 +1076,37 @@ long-only with the shorting branch closed rather than left to a flag (`3.6`, sec
 
 Each test corresponds to an invariant rather than to a feature.
 
-| Test                                                    | Expected                                                                                                    |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Re-pushed duplicate                                     | no second order, `DUPLICATE` recorded                                                                       |
-| `expires_at == actionable_at`                           | refused, `ARTIFACT_EXPIRED`                                                                                 |
-| `produced_at > expires_at`                              | refused, `ARTIFACT_EXPIRED`                                                                                 |
-| `received_at > expires_at`                              | refused, `ARTIFACT_EXPIRED`                                                                                 |
-| `actionable_at < received_at`                           | clamped to receipt, `ACTIONABILITY_PAST` recorded                                                           |
-| Calendar does not cover the instant                     | refused, `CALENDAR_UNCOVERED`                                                                               |
-| Missing expiry                                          | refused, `MISSING_EXPIRY`                                                                                   |
-| Gate fields disagree (`PASS` beside a restriction)      | deterministic restrictive result, `GATE_CONFLICT` recorded                                                  |
-| Unmapped gate value                                     | refused, restrictive resolution                                                                             |
-| Engine eligibility refuses while research permits       | no order                                                                                                    |
-| `BUY` with allocation `0`                               | no signal, recorded                                                                                         |
-| Allocation negative, above the maximum, or not a number | refused, `ALLOCATION_INVALID`                                                                               |
-| `HOLD` on a long position                               | no signal, `NO_SIGNAL` recorded, exposure unchanged                                                         |
-| `SELL` on a long position                               | target zero, reconciler emits the minimal reduction                                                         |
-| `SELL` on a flat position                               | no signal, recorded                                                                                         |
-| Unrecognised rating                                     | refused, `RATING_UNKNOWN`                                                                                   |
-| Unsizeable view                                         | named refusal, not a flat target                                                                            |
-| Tradability unknown, or a second leg unknown            | no order, typed refusal                                                                                     |
-| Venue rejects an order, then the artifact is replayed   | no second order                                                                                             |
-| Two orders differing only by role, or by instrument     | different ids, same scheme version                                                                          |
-| `BUY` above the current exposure                        | minimal delta to the engine target, never the advised amount                                                |
-| Attribution chain                                       | five exposures recorded per decision, differences localised                                                 |
-| Fill resolution                                         | every fill resolves to one decision id                                                                      |
-| Panel with a future-dated feature                       | cannot be constructed                                                                                       |
-| Measurement                                             | information coefficient with uncertainty, calibration by bucket, and the reduction factor's measured effect |
+| Test                                                                                   | Expected                                                                                                      |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Re-pushed duplicate                                                                    | no second order, `DUPLICATE` recorded                                                                         |
+| `expires_at == actionable_at`                                                          | refused, `ARTIFACT_EXPIRED`                                                                                   |
+| `produced_at > expires_at`                                                             | refused, `ARTIFACT_EXPIRED`                                                                                   |
+| `received_at > expires_at`                                                             | refused, `ARTIFACT_EXPIRED`                                                                                   |
+| `actionable_at < received_at`                                                          | clamped to receipt, `ACTIONABILITY_PAST` recorded                                                             |
+| Calendar does not cover the instant                                                    | refused, `CALENDAR_UNCOVERED`                                                                                 |
+| Missing expiry                                                                         | refused, `MISSING_EXPIRY`                                                                                     |
+| Artifact fields disagree restrictively (a `PASS` verdict beside a closing disposition) | deterministic restrictive result, `GATE_CONFLICT` recorded                                                    |
+| Unmapped gate value                                                                    | refused, restrictive resolution                                                                               |
+| Engine eligibility refuses while research permits                                      | no order                                                                                                      |
+| `BUY` with allocation `0`                                                              | no signal, recorded                                                                                           |
+| Allocation negative, above the maximum, or not a number                                | refused, `ALLOCATION_INVALID`                                                                                 |
+| `HOLD` on a long position                                                              | no signal, `NO_SIGNAL` recorded, exposure unchanged                                                           |
+| `SELL` on a long position                                                              | target zero, reconciler emits the minimal reduction                                                           |
+| `SELL` on a flat position                                                              | no signal, recorded                                                                                           |
+| Unrecognised rating                                                                    | refused, `RATING_UNKNOWN`                                                                                     |
+| Unsizeable view                                                                        | named refusal, not a flat target                                                                              |
+| Tradability unknown, or a second leg unknown                                           | no order, typed refusal                                                                                       |
+| Venue rejects an order, then the artifact is replayed                                  | no second order                                                                                               |
+| Two orders differing only by role, or by instrument                                    | different ids, same scheme version                                                                            |
+| `BUY` above the current exposure                                                       | minimal delta to the engine target, never the advised amount                                                  |
+| Attribution chain                                                                      | five exposures recorded per decision, differences localised                                                   |
+| Fill resolution                                                                        | every fill resolves to one decision id                                                                        |
+| Panel with a future-dated feature                                                      | cannot be constructed                                                                                         |
+| Measurement                                                                            | information coefficient with uncertainty, calibration by bucket, and the reduction factor's measured effect   |
+| A count cap is declared and reached                                                    | the submission over the limit is denied, `ORDER_COUNT_LIMIT_REACHED`, and a cancellation is still not refused |
+| A retryable denial, then a permitted retry                                             | a fresh attempt with the engine's new order id; an unpermitted or stale permission submits nothing            |
+| No calendar resolves for the key, but a document does                                  | `CALENDAR_MISSING` when none resolves; a supplied document serves a key, or an instant, the bundle cannot     |
+| A shortfall between the construction and the fill                                      | the constructed, approved and filled quantities each recorded, so the difference localises the stage          |
 
 ## 10. Implementation gates
 
@@ -938,6 +1139,32 @@ The first gate is the only one that is not a test of new code: whether the curre
 mapping positively identifies tradability, per leg, is an open prerequisite recorded in Appendix A,
 and an implementer must establish it before relying on I14.
 
+Four gates have now been executed or are determinable read-only, and all four returned negative.
+**Gate 1** established that the current status mapping does not satisfy I14, so B7 waits on the route
+decision recorded in `3.2`. **Gate 2** established that its subject does not exist as specified: the
+artifact carries one permission claim, not three, because two of the three names are reserved by the
+artifact's own consumer (appendix A); the aggregation is therefore over `risk_gate.verdict` and the
+engine's own eligibility, with I15's rule unchanged. **Gate 3** established that the rating table is
+not total over the producer's five-valued rating vocabulary, so two ratings need the owner's rows
+(`3.6`). **Gate 4** established that the temporal rule consumes a field the contract leaves nullable,
+with no declared outcome and no code in the vocabulary (`3.6`, `5.2`). **Gate 5 is the only one that is
+purely a test of new code**: the identity scheme is specified by D7 and I9, and a replay cannot be
+exercised until idempotent submission exists. That is what the first sentence of this section means by
+"not ready to code without further decisions".
+
+**Revision 5 executed gate 5, and it passes.** All five gates are now closed. The replay evidence is a
+backtest against the real engine
+(`python/tests/integration/test_decision_bridge_execution.py`): one canonical artifact produces exactly
+one order set; a second delivery of the same artifact returns `DUPLICATE` and produces no second order,
+with the ledger still holding one order id and one fill; the same artifact re-delivered after the risk
+engine has refused the order set also produces no second order, because a rejection does not free the
+identity; every fill resolves to exactly one decision id; and an order placed by the strategy's own
+direct path is reported as unattributed rather than assigned to the nearest decision. The identity
+scheme itself is pinned by `python/tests/unit/decision_bridge/test_identity.py`, which asserts that two
+orders differing only by role, or only by instrument, or only by leg, have different identifiers, that
+the scheme version is part of the derivation, and that a deliberate retry under an explicit attempt
+identity is distinguishable from its original.
+
 ## Appendix A. Provenance of this record
 
 Revision 1 was written read-only against both trees, and reduced the design to the projection after
@@ -957,6 +1184,92 @@ research project records an item, its L9, in which an unmapped market status is 
 read of that item's cited match block did not reproduce the claim. Revision 3's D6 disposition settles
 the *requirement* and does not adjudicate the *prerequisite*, which is why section 10 makes it the
 first implementation gate rather than an assumption.
+
+Revision 4 resolves that prerequisite, and the answer is negative. The one status-to-action funnel
+matches `Trading | PreOpen` and `Halt | Close` and drops every other action through a wildcard arm,
+so `NotAvailableForTrading` changes nothing; the initial and reset state is `Open`, so an instrument
+that never receives a status is tradable by default; the state that would mean "not available" is
+unreachable in an engine, because the only producers of `MarketStatus::NotAvailable` are its
+declaration (`crates/model/src/enums.rs:941`), a serialization test literal (`:2707`) and one `From`
+conversion in the betfair adapter (`crates/adapters/betfair/src/common/enums.rs:1158`, written under
+the alias `NautilusMarketStatus`) that has no call site outside its own unit test, while the engine's
+own field is assigned only `Open`, `Paused`, `Suspended` and `Closed`
+(`crates/execution/src/matching_engine/mod.rs:326,2579-2590,2675`); and
+`InstrumentStatus.is_trading` is populated by the venue adapters -- binance, bybit, betfair,
+coinbase, deribit, dydx, lighter and databento set it at a named assignment, and okx and
+architect_ax assert emitted values in their own test modules -- and is read by no engine, risk or
+strategy path (`crates/model/src/data/status.rs`, `crates/backtest/src/exchange.rs`,
+`crates/adapters/sandbox/src/execution.rs`). A search for the literal `MarketStatus::NotAvailable`
+misses the betfair producer, because that file imports the enum under an alias; revision 4 therefore
+records the producer list rather than an absence. Three of I14's four clauses fail on the current
+mapping: it is not positive, not three-valued, and not per leg; only the per-instrument carrier
+holds. The earlier review's L9 claim is not reproduced. The route that follows is the owner's
+(`3.2`).
+
+Revision 4 also records gate 2's finding, which is about provenance rather than behaviour. The
+artifact's contract declares `risk_gate` as an open object and declares no permission property; the
+two names this record previously read as further permission claims are reserved by the artifact's own
+named consumer, and the producer's validator refuses a non-empty value with
+`producer_set_reserved_field` (`contracts/research_decision.v1.schema.json`,
+`tradingagents/execution_contract.py`, `tradingagents/reporting.py` in the research project). The
+producer's advisory label is `binding_constraint`, over the four values that name which constraint
+bound, and it is not a permission. The I15 aggregation is therefore over one artifact field and the
+engine's independent eligibility, and nothing in either half changes.
+
+Gates 3 and 4 add incompleteness findings rather than provenance ones, both recorded at `3.6`: the
+rating table is not total over the producer's five-valued vocabulary, and the temporal rule consumes a
+nullable `produced_at` with no declared outcome and no code in the closed vocabulary.
+
+Revision 4's own provenance: like revisions 1 to 3 it was written read-only against both trees, and
+it adds the first executions of the implementation gates that revision 3 declared. No process was run
+against either tree, no engine was instantiated, and nothing was measured.
+
+Revision 5 is the first revision that is implementation rather than record. It changed this repository
+only, and it kept the licence boundary of section 1.3 intact: no source file, test, fixture, prompt
+text or copied documentation from the research project entered this repository, and the wire contract
+is described by its field names, which is interface fact. The artifact's hash recipe is the one place
+where the two sides must agree mechanically, and it is implemented independently on this side from the
+published description -- SHA-256 over the body, sorted keys, default string fallback -- with the
+test's own second implementation of the same recipe checking it, so the check is not the thing being
+checked.
+
+The bridge lives in `python/nautilus_trader/decision_bridge/`, a hand-written pure-Python package
+beside the existing pure-Python research layer. Revision 5 added no crate, no PyO3 binding and no
+generated stub: every surface it needed was already reachable from Python, and where one was not, the
+item was recorded as unreachable rather than given a binding to make it look reachable. Revision 6
+changed that for exactly the two surfaces revision 5 recorded as absent - the risk engine's count caps
+and the target the construction stage produces - and extended the live risk configuration so that a
+cap declared for a live node is carried to the engine rather than dropped. The evidence that was
+executed:
+
+```text
+python/.venv/Scripts/python.exe -m pytest tests/unit/decision_bridge/ -q
+    136 passed (105 at revision 5; revision 6's own run is in the implementation record's section 5)
+python/.venv/Scripts/python.exe -m pytest tests/integration/test_decision_bridge_execution.py -q
+    5 passed
+python/.venv/Scripts/python.exe -m pytest tests/unit/decision_bridge/test_risk_config.py -q
+    5 passed
+cargo test -p nautilus-research
+    the measurement module's own tests, recorded in the implementation record
+```
+
+Four runtime facts were established by execution rather than by reading, and each is load-bearing for
+a rule above. The bundled `XNYS.EQUITY` calendar covered 2024-01-01 to 2025-12-31, so step 1 of the
+temporal rule refused every artifact produced after that window until the calendar data was refreshed;
+that was the designed answer to "the calendar cannot say", and the remedy was data rather than code,
+which revision 6 applied: the document now carries the 2026 holidays and the two 2026 early closes and
+declares coverage to 2026-12-31 (`3.6`). `is_tradeable` and `next_open` extrapolate the weekly session
+pattern outside that window while `covers` does not, which is exactly why coverage is asked about
+separately from tradeability. The engine's per-instrument notional cap refuses with
+`NOTIONAL_EXCEEDS_MAX_PER_ORDER: max=100.00000000 USDT, notional=200.00500000 USDT`, which is the typed
+denial naming the cap that B8 requires. And `submit_signals` returns the client order ids even when the
+risk engine subsequently denies the order, so on that path the bridge's outcome is "submitted" and the
+denial arrives as an engine event rather than as a return value; revision 6 records the risk stage's
+answer from that event, which is what closes the exposure quantities revision 5 could only report as
+not reached (`6.5`).
+
+Five gates are now closed. Gates 1 to 4 were executed read-only in revision 4 and all four returned
+negative; gate 5 was executed against the real engine in revision 5 and passes.
 
 Three items are deferred rather than forgotten, each with the condition for admitting it: the bounded
 stop-tightening policy (section 3.3), the calibrated confidence-to-size function (section 3.8), and

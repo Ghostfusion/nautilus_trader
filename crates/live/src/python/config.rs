@@ -43,7 +43,7 @@ use crate::config::{
     DataClientConfig, ExecutionClientConfig, InstrumentProviderConfig, LiveDataEngineConfig,
     LiveExecutionEngineConfig, LiveNodeConfig, LiveRiskEngineConfig, PluginConfig,
     QueueMonitorConfig, RoutingConfig, SubmissionRecoveryPolicy, duration_from_secs_f64,
-    parse_rate_limit, validate_max_notional_per_order,
+    parse_rate_limit, validate_count_caps, validate_max_notional_per_order,
 };
 
 // Coerces a PyO3 input into `BarIntervalType`, accepting both the enum (modern Rust
@@ -319,7 +319,7 @@ impl LiveDataEngineConfig {
 impl LiveRiskEngineConfig {
     /// Configuration for live risk engines.
     #[new]
-    #[pyo3(signature = (bypass=None, max_order_submit_rate=None, max_order_modify_rate=None, max_notional_per_order=None, full_position_exit_venues=None, debug=None))]
+    #[pyo3(signature = (bypass=None, max_order_submit_rate=None, max_order_modify_rate=None, max_notional_per_order=None, full_position_exit_venues=None, debug=None, count_caps=None))]
     fn py_new(
         bypass: Option<bool>,
         max_order_submit_rate: Option<String>,
@@ -327,6 +327,7 @@ impl LiveRiskEngineConfig {
         max_notional_per_order: Option<HashMap<String, Py<PyAny>>>,
         full_position_exit_venues: Option<Vec<Venue>>,
         debug: Option<bool>,
+        count_caps: Option<Vec<String>>,
     ) -> PyResult<Self> {
         let default = Self::default();
         let max_order_submit_rate =
@@ -340,6 +341,7 @@ impl LiveRiskEngineConfig {
         };
 
         let full_position_exit_venues = full_position_exit_venues.unwrap_or_default();
+        let count_caps = count_caps.unwrap_or_default();
 
         parse_rate_limit(
             "LiveRiskEngineConfig.max_order_submit_rate",
@@ -356,12 +358,14 @@ impl LiveRiskEngineConfig {
             &max_notional_per_order,
         )
         .map_err(config_error_to_pyvalue_err)?;
+        validate_count_caps(&count_caps).map_err(config_error_to_pyvalue_err)?;
 
         Ok(Self {
             bypass: bypass.unwrap_or(default.bypass),
             max_order_submit_rate,
             max_order_modify_rate,
             max_notional_per_order,
+            count_caps,
             full_position_exit_venues,
             debug: debug.unwrap_or(default.debug),
             qsize: default.qsize,
@@ -390,6 +394,12 @@ impl LiveRiskEngineConfig {
     #[pyo3(name = "max_notional_per_order")]
     fn py_max_notional_per_order(&self) -> HashMap<String, String> {
         self.max_notional_per_order.clone()
+    }
+
+    #[getter]
+    #[pyo3(name = "count_caps")]
+    fn py_count_caps(&self) -> Vec<String> {
+        self.count_caps.clone()
     }
 
     #[getter]

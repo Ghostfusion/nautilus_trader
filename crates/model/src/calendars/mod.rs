@@ -815,11 +815,31 @@ mod tests {
 
         assert_eq!(calendar.key().to_string(), "XNYS.EQUITY");
         assert_eq!(calendar.valid_from(), date(2024, 1, 1));
-        assert_eq!(calendar.valid_until(), Some(date(2025, 12, 31)));
+        assert_eq!(calendar.valid_until(), Some(date(2026, 12, 31)));
 
         // Thanksgiving 2024 and Christmas Day 2025 are closures.
         assert!(calendar.is_holiday(date(2024, 11, 28)));
         assert!(calendar.is_holiday(date(2025, 12, 25)));
+        // The coverage extends through 2026. Thanksgiving and Christmas Day are closures, the
+        // day after Thanksgiving and Christmas Eve are half days, and Independence Day is
+        // observed on the Friday, which is a closure and not a fixed-date rule.
+        assert!(calendar.is_holiday(date(2026, 7, 3)));
+        assert!(calendar.is_holiday(date(2026, 11, 26)));
+        assert!(calendar.is_holiday(date(2026, 12, 25)));
+        assert_eq!(
+            calendar.sessions_on(date(2026, 11, 27)),
+            vec![TradingSession::new(
+                Time::constant(9, 30, 0, 0),
+                Time::constant(13, 0, 0, 0)
+            )]
+        );
+        assert_eq!(
+            calendar.sessions_on(date(2026, 12, 24)),
+            vec![TradingSession::new(
+                Time::constant(9, 30, 0, 0),
+                Time::constant(13, 0, 0, 0)
+            )]
+        );
         // 2025-01-09 was a one-off national day of mourning, not a recurring holiday rule.
         assert!(calendar.is_holiday(date(2025, 1, 9)));
 

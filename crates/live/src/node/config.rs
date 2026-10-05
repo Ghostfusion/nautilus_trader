@@ -38,9 +38,10 @@ use nautilus_execution::{
 use nautilus_model::{
     enums::{BarAggregation, BarIntervalType},
     identifiers::{ClientId, ClientOrderId, InstrumentId, TraderId, Venue},
+    risk::{RiskCapMetric, RiskCapScope},
 };
 use nautilus_portfolio::config::PortfolioConfig;
-use nautilus_risk::engine::config::RiskEngineConfig;
+use nautilus_risk::{engine::cap::RiskCap, engine::config::RiskEngineConfig};
 #[cfg(feature = "streaming")]
 use nautilus_system::config::{DataCatalogConfig, StreamingConfig};
 use nautilus_system::{config::NautilusKernelConfig, event_store::EventStoreConfig};
@@ -56,6 +57,8 @@ pub use crate::execution::submission::SubmissionRecoveryPolicy;
 const DEFAULT_ORDER_RATE_LIMIT: &str = "100/00:00:01";
 const RUST_RUNTIME_UNSUPPORTED: &str = "not supported by the Rust live runtime yet";
 const RATE_LIMIT_FORMAT: &str = "expected 'limit/HH:MM:SS'";
+const COUNT_CAP_FORMAT: &str = "expected 'METRIC/SCOPE/LIMIT[/WINDOW_NS]'";
+const LIVE_COUNT_CAP_FIELD: &str = "LiveRiskEngineConfig.count_caps";
 
 // Bound delays to keep both Duration conversion and Instant addition within range
 const DELAY_MAX_SECS: f64 = 86_400.0;
@@ -195,6 +198,15 @@ pub struct LiveRiskEngineConfig {
     /// Entries map instrument ID strings to decimal notional strings.
     #[builder(default)]
     pub max_notional_per_order: HashMap<String, String>,
+    /// Count caps, each encoded as `METRIC/SCOPE/LIMIT` or `METRIC/SCOPE/LIMIT/WINDOW_NS`.
+    ///
+    /// The metric and scope are the [`RiskCapMetric`] and [`RiskCapScope`] tokens, the window is a
+    /// whole number of nanoseconds, and the window component is omitted for an `ACTIVE` cap, which
+    /// counts the open order set and takes no window. The entries parse into [`RiskCap`] values
+    /// that [`RiskEngineConfig`] validates, so a cap the backtest configuration refuses is refused
+    /// live with the same rule.
+    #[builder(default)]
+    pub count_caps: Vec<String>,
     /// Venues whose execution clients enforce whole-position conditional exits.
     ///
     /// Validated exits skip bounds that apply only to their placeholder quantity and notional.
@@ -246,7 +258,8 @@ impl From<LiveRiskEngineConfig> for RiskEngineConfig {
             )
             .expect("validate_runtime_support must run before RiskEngineConfig conversion"),
             max_notional_per_order,
-            count_caps: Vec::new(),
+            count_caps: parse_count_caps(LIVE_COUNT_CAP_FIELD, &config.count_caps)
+                .expect("validate_runtime_support must run before RiskEngineConfig conversion"),
             full_position_exit_venues,
             debug: config.debug,
         }
@@ -295,6 +308,95 @@ pub(crate) fn parse_rate_limit(field: impl Into<String>, input: &str) -> ConfigR
         .map_err(|e| ConfigError::range(field.clone(), e.to_string()))?;
 
     RateLimit::new_checked(limit, interval_ns).map_err(|e| ConfigError::range(field, e.to_string()))
+}
+
+/// Parses `count_caps` entries into [`RiskCap`] values.
+///
+/// # Errors
+///
+/// Returns a [`ConfigError`] if an entry is not `METRIC/SCOPE/LIMIT` or
+/// `METRIC/SCOPE/LIMIT/WINDOW_NS`, or if a component does not parse.
+pub(crate) fn parse_count_caps(field: &str, values: &[String]) -> ConfigResult<Vec<RiskCap>> {
+    let mut caps = Vec::with_capacity(values.len());
+
+    for (index, value) in values.iter().enumerate() {
+        let entry = format!("{field}[{index}]");
+        let parts: Vec<&str> = value.split('/').collect();
+
+        if parts.len() != 3 && parts.len() != 4 {
+            return Err(ConfigError::invalid_format(entry, COUNT_CAP_FORMAT));
+        }
+
+        let metric = parts[0]
+            .parse::<RiskCapMetric>()
+            .map_err(|e| ConfigError::invalid_value(entry.clone(), format!("metric: {e}")))?;
+        let scope = parts[1]
+            .parse::<RiskCapScope>()
+            .map_err(|e| ConfigError::invalid_value(entry.clone(), format!("scope: {e}")))?;
+        let limit = parts[2]
+            .parse::<u32>()
+            .map_err(|e| ConfigError::invalid_value(entry.clone(), format!("limit: {e}")))?;
+        let window = match parts.get(3) {
+            Some(raw) => {
+                let nanos = raw.parse::<u64>().map_err(|e| {
+                    ConfigError::invalid_value(entry.clone(), format!("window: {e}"))
+                })?;
+                Some(DurationNanos::new(nanos))
+            }
+            None => None,
+        };
+
+        caps.push(RiskCap::new(metric, scope, limit, window));
+    }
+
+    Ok(caps)
+}
+
+/// Validates `count_caps` through the [`RiskEngineConfig`] builder.
+///
+/// The entries parse into [`RiskCap`] values and the builder runs the crate's validation, so the
+/// live configuration is refused by the same rule as the backtest configuration rather than by a
+/// second implementation.
+pub(crate) fn validate_count_caps(values: &[String]) -> ConfigResult<()> {
+    let caps = parse_count_caps(LIVE_COUNT_CAP_FIELD, values)?;
+
+    RiskEngineConfig::builder()
+        .count_caps(caps)
+        .build()
+        .map(|_| ())
+        .map_err(with_live_count_cap_field)
+}
+
+/// Rewrites a cap validation error's field to the live configuration's name.
+fn with_live_count_cap_field(error: ConfigError) -> ConfigError {
+    match error {
+        ConfigError::Range { field, reason } if field == "count_caps" => ConfigError::Range {
+            field: LIVE_COUNT_CAP_FIELD.to_string(),
+            reason,
+        },
+        ConfigError::InvalidValue { field, reason } if field == "count_caps" => {
+            ConfigError::InvalidValue {
+                field: LIVE_COUNT_CAP_FIELD.to_string(),
+                reason,
+            }
+        }
+        ConfigError::InvalidFormat { field, expected } if field == "count_caps" => {
+            ConfigError::InvalidFormat {
+                field: LIVE_COUNT_CAP_FIELD.to_string(),
+                expected,
+            }
+        }
+        ConfigError::Duplicate { field, value } if field == "count_caps" => {
+            ConfigError::Duplicate {
+                field: LIVE_COUNT_CAP_FIELD.to_string(),
+                value,
+            }
+        }
+        ConfigError::Multiple { errors } => ConfigError::Multiple {
+            errors: errors.into_iter().map(with_live_count_cap_field).collect(),
+        },
+        other => other,
+    }
 }
 
 pub(crate) fn validate_max_notional_per_order(
@@ -966,6 +1068,7 @@ impl LiveRiskEngineConfig {
             "LiveRiskEngineConfig.max_notional_per_order",
             &self.max_notional_per_order,
         ));
+        collector.collect(validate_count_caps(&self.count_caps));
 
         let default = Self::default();
         collector.collect(check_supported_field(
@@ -1600,6 +1703,92 @@ mean_dispatch_ns_clear = 700
             [Venue::from("BINANCE")].into_iter().collect(),
         );
         assert!(converted.debug);
+    }
+
+    #[rstest]
+    fn test_live_risk_engine_config_converts_count_caps() {
+        let config = LiveRiskEngineConfig {
+            count_caps: vec![
+                "SUBMIT/GLOBAL/20000/60000000000".to_string(),
+                "ACTIVE/INSTRUMENT/50".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        let converted: RiskEngineConfig = config.into();
+
+        assert_eq!(converted.count_caps.len(), 2);
+        assert_eq!(
+            converted.count_caps[0],
+            RiskCap::new(
+                RiskCapMetric::Submit,
+                RiskCapScope::Global,
+                20_000,
+                Some(DurationNanos::from_secs(60)),
+            )
+        );
+        assert_eq!(
+            converted.count_caps[1],
+            RiskCap::new(RiskCapMetric::Active, RiskCapScope::Instrument, 50, None)
+        );
+    }
+
+    #[rstest]
+    fn test_validate_runtime_support_accepts_a_count_cap() {
+        let config = LiveNodeConfig {
+            risk_engine: LiveRiskEngineConfig {
+                count_caps: vec!["SUBMIT/GLOBAL/20000/60000000000".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(config.validate_runtime_support().is_ok());
+    }
+
+    #[rstest]
+    fn test_validate_runtime_support_rejects_a_malformed_count_cap() {
+        let config = LiveNodeConfig {
+            risk_engine: LiveRiskEngineConfig {
+                count_caps: vec!["SUBMIT/GLOBAL".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let error = config.validate_runtime_support().unwrap_err().to_string();
+
+        assert!(error.contains("LiveRiskEngineConfig.count_caps"));
+    }
+
+    #[rstest]
+    fn test_validate_runtime_support_rejects_an_invalid_count_cap() {
+        let config = LiveNodeConfig {
+            risk_engine: LiveRiskEngineConfig {
+                count_caps: vec!["SUBMIT/GLOBAL/0/60000000000".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let error = config.validate_runtime_support().unwrap_err().to_string();
+
+        assert!(error.contains("LiveRiskEngineConfig.count_caps"));
+    }
+
+    #[rstest]
+    fn test_validate_runtime_support_rejects_an_active_cap_with_a_window() {
+        let config = LiveNodeConfig {
+            risk_engine: LiveRiskEngineConfig {
+                count_caps: vec!["ACTIVE/GLOBAL/50/60000000000".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let error = config.validate_runtime_support().unwrap_err().to_string();
+
+        assert!(error.contains("LiveRiskEngineConfig.count_caps"));
     }
 
     #[rstest]

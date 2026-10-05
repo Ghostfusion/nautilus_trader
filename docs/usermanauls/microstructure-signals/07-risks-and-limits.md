@@ -122,11 +122,12 @@ do this for you.
 
 These are real pre-trade checks: an order that violates one is denied before it reaches the venue.
 
-**Layer 3: the Rust-only count caps.** The pre-trade send, cancel and fill count caps (decision D1)
-exist only in Rust, in `crates/risk/src/engine/config.rs` as `count_caps: Vec<RiskCap>`. There is
-**no Python binding**, so a Python user cannot set one. If you need a hard cap on how many messages
-a strategy may send in a window, it is not reachable from Python; use
-`max_order_submit_rate` and `max_order_modify_rate` instead, or run the Rust risk engine directly.
+**Layer 3: the count caps.** The pre-trade send, cancel and fill count caps (decision D1) are
+`count_caps: Vec<RiskCap>` in `crates/risk/src/engine/config.rs`, and the Python configuration takes
+them: a cap is a `RiskCap` naming a metric and a scope from `nautilus_trader.risk`, a limit, and a
+window in nanoseconds, which an `Active` cap omits. That is the tool for a hard cap on how many
+messages a strategy may send in a window; `max_order_submit_rate` and `max_order_modify_rate` remain
+the coarser rate limits beside it.
 
 Set fees explicitly. A backtest venue refuses to be added without a `fee_model`; pass an explicit
 zero-fee model if you truly want zero, rather than leaving it out. Fees are the term that turns a

@@ -288,9 +288,10 @@ same program places the grid normally. Two lessons:
   the run can do that.
 - **No volatility or news gate.** The grid quotes through anything, including the moment a central
   bank speaks.
-- **No kill switch in Python.** The pre-trade count caps described in
-  `docs/design/vnpy_lessons_implementation.md` (the D1 item) live only in Rust
-  (`crates/risk/src/config.rs`) and are not exposed to Python. A Python user cannot set one.
+- **No kill switch in Python.** Nothing in the shipped Python surface flattens and stops a run. The
+  pre-trade count caps described in `docs/design/vnpy_lessons_implementation.md` (the D1 item) are
+  `RiskEngineConfig.count_caps`, settable from Python as `RiskCap` values, and they cap message
+  counts rather than take you out of the market.
 
 The honest summary: the engine enforces per-order and per-rate limits well, and leaves portfolio
 survival to you.

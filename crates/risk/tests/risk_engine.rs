@@ -15259,3 +15259,74 @@ fn test_reset_clears_cap_counters_and_decisions(
         1
     );
 }
+
+#[rstest]
+fn test_builder_config_with_count_cap_reaches_the_engine(
+    process_order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    execute_order_event_handler: TypedIntoMessageSavingHandler<TradingCommand>,
+    trader_id: TraderId,
+    strategy_id_ema_cross: StrategyId,
+    client_id_binance: ClientId,
+    instrument_audusd: InstrumentAny,
+    cash_account_state_million_usd: AccountState,
+) {
+    // The `RiskEngineConfig` Python surface builds through the same constructor, so a cap declared
+    // there reaches the engine exactly as one built directly.
+    let cache = cap_cache(&instrument_audusd, cash_account_state_million_usd);
+    let config = RiskEngineConfig::builder()
+        .debug(true)
+        .bypass(false)
+        .max_order_submit(RateLimit::new(10, DurationNanos::new(1000)))
+        .max_order_modify(RateLimit::new(5, DurationNanos::new(1000)))
+        .count_caps(vec![RiskCap::new(
+            RiskCapMetric::Submit,
+            RiskCapScope::Global,
+            2,
+            Some(DurationNanos::from_secs(60)),
+        )])
+        .build()
+        .unwrap();
+
+    let clock = Rc::new(RefCell::new(VirtualClock::new()));
+    let mut engine = get_risk_engine(
+        Some(Rc::clone(&cache)),
+        Some(config),
+        Some(Rc::clone(&clock)),
+        false,
+    );
+
+    let orders: Vec<OrderAny> = ["O-001", "O-002", "O-003"]
+        .into_iter()
+        .map(|id| cap_limit_order(instrument_audusd.id(), id, strategy_id_ema_cross))
+        .collect();
+
+    for order in &orders {
+        cap_add_order(&cache, order);
+    }
+
+    for order in &orders {
+        cap_submit(&mut engine, order, trader_id, client_id_binance);
+    }
+
+    let denied = get_process_order_event_handler_messages(&process_order_event_handler);
+    assert_eq!(denied.len(), 1);
+    assert_eq!(denied[0].event_type(), OrderEventType::Denied);
+    assert_eq!(denied[0].client_order_id(), orders[2].client_order_id());
+    assert_eq!(
+        denied[0].message(),
+        Some(Ustr::from(
+            &OrderDeniedReason::OrderCountLimitReached {
+                metric: RiskCapMetric::Submit,
+                scope: RiskCapScope::Global,
+                observed: 2,
+                limit: 2,
+                window_ns: 60_000_000_000,
+            }
+            .to_string()
+        ))
+    );
+
+    let executed = get_execute_order_event_handler_messages(&execute_order_event_handler);
+    assert_eq!(executed.len(), 2);
+    assert_eq!(engine.count_caps().len(), 1);
+}

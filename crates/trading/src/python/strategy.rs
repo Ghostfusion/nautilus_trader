@@ -87,6 +87,7 @@ use nautilus_model::{
         instruments::instrument_any_to_pyobject, orders::pyobject_to_order_any,
     },
     signal::TradingSignal,
+    target::Target,
     types::{Price, Quantity},
     universe::UniverseChange,
 };
@@ -2229,6 +2230,24 @@ impl PyStrategy {
     #[pyo3(name = "submit_signals")]
     fn py_submit_signals(&mut self, signals: Vec<TradingSignal>) -> PyResult<Vec<ClientOrderId>> {
         Strategy::submit_signals(self.inner_mut(), signals).map_err(to_pyruntime_err)
+    }
+
+    /// Returns the target the pipeline constructs for each signal, without reconciling.
+    ///
+    /// The returned targets are the exposure the construction stage states from the signals and
+    /// the account equity, before the reconciler nets them against the strategy's existing
+    /// positions and open orders. They are distinct from the orders `submit_signals` submits. The
+    /// pipeline must be enabled and the strategy registered, and the signals must name a single
+    /// venue with account equity, exactly as for `submit_signals`.
+    #[pyo3(name = "targets")]
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "PyO3 extracts a Python sequence into an owned Vec"
+    )]
+    fn py_targets(&self, signals: Vec<TradingSignal>) -> PyResult<Vec<Target>> {
+        StrategyNative::strategy_core(self.inner())
+            .targets(&signals)
+            .map_err(to_pyruntime_err)
     }
 
     #[pyo3(name = "modify_order")]

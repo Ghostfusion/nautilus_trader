@@ -19,8 +19,6 @@ the engine in depth, and suggests what to learn next.
   spread capture, adverse selection, or the rest of the metrics list. This manual measured what
   Python can measure and showed how to run the Rust tests, but it did not build a Rust consumer of
   the analytics API.
-- **Count caps are Rust only.** The pre-trade count caps in `crates/risk/src/config.rs` cannot be set
-  from Python in this version.
 - **The sample data is synthetic.** It is a deterministic sine wave, not a market recording. A real
   study needs recorded data from a venue adapter or a data catalog.
 - **Quote-pegged was not run here.** Its behaviour was described from `quote_pegged.rs` and cited, but

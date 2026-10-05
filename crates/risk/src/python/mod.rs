@@ -28,6 +28,9 @@ use pyo3::prelude::*;
 #[pymodule]
 pub fn risk(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::engine::config::RiskEngineConfig>()?;
+    m.add_class::<crate::python::config::PyRiskCapMetric>()?;
+    m.add_class::<crate::python::config::PyRiskCapScope>()?;
+    m.add_class::<crate::python::config::PyRiskCap>()?;
     m.add_class::<crate::python::sizing::PositionSizer>()?;
     m.add_class::<crate::python::sizing::FixedRiskSizer>()?;
     Ok(())

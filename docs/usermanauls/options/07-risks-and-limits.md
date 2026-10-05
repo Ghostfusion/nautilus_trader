@@ -107,9 +107,9 @@ single order, configured in Python (`crates/risk/src/python/config.rs`):
 - `max_order_modify_rate`: the maximum rate of order modifications.
 - `max_notional_per_order`: a per-instrument ceiling on order notional.
 
-The pre-trade send, cancel, and fill count caps are a different mechanism and are Rust only:
-they live in `crates/risk/src/config.rs` and a Python user cannot set one. If you need those
-caps you must configure them at the Rust layer.
+The pre-trade send, cancel, and fill count caps are a different mechanism and are configurations of
+their own: they are `RiskEngineConfig.count_caps` in `crates/risk/src/engine/config.rs`, taken from
+Python as `RiskCap` values with the metric and scope vocabularies in `nautilus_trader.risk`.
 
 Live clients add reconciliation. The delta-neutral example runs with
 `with_reconciliation(true)`, which queries the venue at startup and hydrates the cache with

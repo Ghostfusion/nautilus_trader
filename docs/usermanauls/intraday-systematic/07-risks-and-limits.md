@@ -231,9 +231,6 @@ What the engine does not do:
 - It does not size your positions. `trade_size` is your number.
 - It does not know your account's real value in live trading unless you reconcile it.
 - It cannot simulate the intrabar path or a fill you did not get.
-- The pre-trade count caps on send, cancel and fill counts are Rust only (`count_caps` in
-  `crates/risk/src/engine/config.rs` and `crates/risk/src/engine/cap.rs`); a Python user cannot set
-  one.
 
 ## Look-ahead bias
 

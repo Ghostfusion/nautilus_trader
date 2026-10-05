@@ -31,7 +31,17 @@
     "2025-07-04",
     "2025-09-01",
     "2025-11-27",
-    "2025-12-25"
+    "2025-12-25",
+    "2026-01-01",
+    "2026-01-19",
+    "2026-02-16",
+    "2026-04-03",
+    "2026-05-25",
+    "2026-06-19",
+    "2026-07-03",
+    "2026-09-07",
+    "2026-11-26",
+    "2026-12-25"
   ],
   "early_closes": {
     "2024-07-03": "13:00:00",
@@ -39,9 +49,11 @@
     "2024-12-24": "13:00:00",
     "2025-07-03": "13:00:00",
     "2025-11-28": "13:00:00",
-    "2025-12-24": "13:00:00"
+    "2025-12-24": "13:00:00",
+    "2026-11-27": "13:00:00",
+    "2026-12-24": "13:00:00"
   },
   "valid_from": "2024-01-01",
-  "valid_until": "2025-12-31",
-  "source": "NYSE holidays and trading hours, cross-checked with Nasdaq; 2025-01-09 is a one-off national day of mourning"
+  "valid_until": "2026-12-31",
+  "source": "NYSE holidays and trading hours, cross-checked with Nasdaq; 2025-01-09 is a one-off national day of mourning; the 2026 holidays and the two 2026 early closes are from the NYSE holidays-and-trading-hours page, cross-checked with the Nasdaq Trader 2026 schedule"
 }

@@ -63,7 +63,7 @@ data file in this manual uses that unit so that a row can be replayed exactly.
 | Config                         | What it decides                                                                |
 | ------------------------------ | ------------------------------------------------------------------------------ |
 | `BacktestEngineConfig`         | Trader identity, logging, cache, risk engine, execution engine, state options. |
-| `RiskEngineConfig`             | Rate limits, per-order notional caps, and (Rust only) count caps.              |
+| `RiskEngineConfig`             | Rate limits, per-order notional caps, and count caps.                          |
 | `LiveRiskEngineConfig`         | The same surface for a live node, plus the live-only fields.                   |
 | `LiveNodeConfig`               | Node-level options such as the queue monitor and shutdown on error.            |
 | `LiveExecutionEngineConfig`    | Reconciliation lookback, snapshots, and continuous check intervals.            |
@@ -81,16 +81,18 @@ Python can set, on `nautilus_trader.risk.RiskEngineConfig`:
 - `max_order_submit_rate`
 - `max_order_modify_rate`
 - `max_notional_per_order`
+- `count_caps`
 - `full_position_exit_venues`
 - `debug`
 
 Evidence: `crates/risk/src/python/config.rs`, which exposes exactly these constructor arguments. The
-rate limits are strings of the form `limit/HH:MM:SS`, for example `2/00:00:01`.
+rate limits are strings of the form `limit/HH:MM:SS`, for example `2/00:00:01`. A count cap is a
+`RiskCap` naming a metric and a scope from `nautilus_trader.risk`, a limit, and a window in
+nanoseconds, which an `Active` cap omits.
 
-Rust can additionally set `count_caps`, a list of `RiskCap` rules. There is no Python binding for
-this field. Evidence: `crates/risk/src/engine/config.rs` declares `count_caps: Vec<RiskCap>`, and no
-PyO3 constructor argument maps to it. A Python user cannot set a send, cancel, or fill count cap;
-only a Rust caller can.
+Rust declares the same caps as a list of `RiskCap` rules. Evidence:
+`crates/risk/src/engine/config.rs` declares `count_caps: Vec<RiskCap>`, and the live
+`LiveRiskEngineConfig` carries them as `METRIC/SCOPE/LIMIT[/WINDOW_NS]` strings.
 
 The same split appears elsewhere:
 
@@ -98,7 +100,7 @@ The same split appears elsewhere:
 | ------------------------------------------------- | --------- | -------------------------------------------------------- |
 | Backtest engine, live node, strategies, adapters  | Python    | `crates/backtest/src/python/`, `crates/live/src/python/` |
 | Risk limits (`max_order_submit_rate` and friends) | Python    | `crates/risk/src/python/config.rs`                       |
-| Pre-trade count caps (`count_caps`)               | Rust only | `crates/risk/src/engine/config.rs`                       |
+| Pre-trade count caps (`count_caps`)               | Python    | `crates/risk/src/python/config.rs`                       |
 | Notification router and sinks                     | Rust only | `crates/common/src/notification/`                        |
 
 When a lecture reaches a Rust-only subsystem it says so, shows the crate path, and proves the

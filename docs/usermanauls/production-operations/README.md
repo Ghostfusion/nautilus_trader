@@ -23,7 +23,7 @@ have never started a NautilusTrader backtest, work through the
 | [02 - The engine view](02-the-engine-view.md)                             | The objects, config, and files NautilusTrader uses to run a strategy for real        | 25 min |
 | [03 - First run](03-first-run.md)                                         | Configure a risk engine from Python and watch it refuse a runaway order loop         | 45 min |
 | [04 - Sample data](04-sample-data.md)                                     | The three committed CSV files: quotes, a venue fill report, and state snapshots      | 30 min |
-| [05 - Build the operational harness](05-build-the-strategy.md)            | Rust-only count caps demonstrated by cargo test, then the sandbox client end to end  | 60 min |
+| [05 - Build the operational harness](05-build-the-strategy.md)            | The count caps demonstrated by cargo test, then the sandbox client end to end        | 60 min |
 | [06 - Measure and evaluate](06-measure-and-evaluate.md)                   | Reports, the alert event set, the drop counter, and why bodies must stay secret      | 45 min |
 | [07 - Risks and limits](07-risks-and-limits.md)                           | Restart recovery, the `on_save`/`on_load` contract, reconciliation, live vs backtest | 50 min |
 | [08 - Exercises](08-exercises.md)                                         | Six exercises with solutions and one "break it on purpose" exercise                  | 60 min |

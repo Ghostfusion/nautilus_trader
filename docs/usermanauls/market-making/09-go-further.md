@@ -83,12 +83,12 @@ against a decision price is `201` basis points and that arrival slippage against
 is the expected value (`crates/trading/src/analytics/mod.rs`). It is the closest thing in this
 repository to the "how good was that execution?" measurement a market maker needs.
 
-### Risk caps and notification sinks are Rust only
+### Notification sinks are Rust only
 
-Related gaps: the pre-trade send/cancel/fill count caps live only in Rust
-(`crates/risk/src/config.rs`), and the notification router and its sinks live only in Rust
-(`crates/common/src/notification`). Python users configure the risk caps that are exposed
-(`max_order_submit_rate`, `max_order_modify_rate`, `max_notional_per_order`) and nothing more.
+Related gaps: the notification router and its sinks live only in Rust
+(`crates/common/src/notification`). The pre-trade send/cancel/fill count caps are not in that
+category: `RiskEngineConfig.count_caps` takes `RiskCap` values from Python, beside
+`max_order_submit_rate`, `max_order_modify_rate` and `max_notional_per_order`.
 
 ### No full training of a market making strategy
 

@@ -314,7 +314,7 @@ The engine is a mechanical guard, not a risk manager. Know the difference.
 | Cash balance impact for non-margin accounts                   | That your account type matches your venue contract. |
 | Submit and modify rate limits                                 | Anything about strategy logic correctness.          |
 | Trading-state restrictions (`ACTIVE`, `HALTED`, `REDUCING`)   | Recovery from a worse position than you planned.    |
-| Count caps, when a Rust caller configures them                | A default cap value; none is shipped.               |
+| Count caps, when you configure them                           | A default cap value; none is shipped.               |
 
 If a submit-time check fails, the engine emits `OrderDenied`. If a modify-time check fails, it emits
 `OrderModifyRejected`. The engine never refuses a cancellation.

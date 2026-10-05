@@ -31,6 +31,9 @@
 //!   tree, with a canonical serialization that digests to a stable identifier, a declared side,
 //!   and provenance for every value it emits.
 //! - [`label`]: forward labels, each with a horizon and a stated terminal convention.
+//! - [`measurement`]: the measurement of an admitted decision stream, with the three experiments
+//!   of the research-to-execution bridge kept apart, coverage-aware signal quality, confidence
+//!   calibration, the reduction factor's effect, redundancy and regime conditioning.
 //!
 //! The compiled feature and label definitions implement the [`dataset::Feature`] and
 //! [`dataset::Label`] seams, so a dataset declaration consumes only their names and digests. The
@@ -48,6 +51,7 @@
 pub mod dataset;
 pub mod feature;
 pub mod label;
+pub mod measurement;
 pub mod membership;
 pub mod operators;
 pub mod panel;
@@ -60,6 +64,16 @@ pub use feature::{
     AttributedValue, Expr, ExprSource, Feature, FeatureError, ParseError, Provenance,
 };
 pub use label::{Label, LabelError, LabelKind};
+pub use measurement::{
+    AdmittedDecision, CONFIDENCE_BANDS, CVAR_TAIL_FRACTION, CalibrationGroup, CalibrationReport,
+    ConfidenceBand, Disposition, DispositionOutcome, EligibleSignal, Exclusions,
+    ExecutionRealizationReport, InformationCoefficient, InformationCoefficientPoint, Metric,
+    MetricComparison, MetricEstimate, PolicyEffectReport, ProducerIdentity,
+    REDUNDANCY_CORRELATION_THRESHOLD, Realization, ReductionEffectReport, RedundancyReport,
+    RiskDecision, ScoreCluster, ScoreCorrelation, ScoreObservation, SignalQualityReport,
+    confidence_calibration, execution_realization, policy_effect, reduction_effect, redundancy,
+    restrict_to_regime, signal_quality,
+};
 pub use membership::{MembershipInterval, MembershipRule, MembershipSeries, MembershipSpell};
 pub use operators::{
     Operator, TransformSide, cross_sectional_rank, cross_sectional_scale, cross_sectional_sum,

@@ -96,21 +96,21 @@ single net position. `OmsType.HEDGING` keeps long and short positions separately
 The rule the manual follows: if there is no PyO3 binding, the manual says so and does not show
 Python.
 
-| Subsystem                                                                  | Surface                                                                         |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Backtest engine, live node, strategies, adapters                           | Python (`crates/backtest/src/python/`, `crates/live/src/python/`)               |
-| Instruments, orders, bar and tick data, order books, analysis, persistence | Python (`crates/model/src/python/`, `crates/persistence/src/python/`)           |
-| Fill, slippage, fee and market impact models                               | Python (`crates/execution/src/python/`)                                         |
-| Risk config: submit rate, modify rate, notional cap, and order sizing      | Python (`crates/risk/src/python/config.rs`)                                     |
-| Portfolio statistics and analyzer                                          | Python (`crates/analysis/src/python/`)                                          |
-| The pre-trade send, cancel and fill count caps                             | Rust only (`crates/risk/src/engine/config.rs`, `crates/risk/src/engine/cap.rs`) |
-| Factor pipeline, membership, panel and dataset                             | Rust only (`crates/research`)                                                   |
-| Execution analytics such as implementation shortfall                       | Rust only (`crates/trading/src/analytics`)                                      |
-| Option pricing and volatility surfaces                                     | Rust only (`crates/model/src/data/`)                                            |
+| Subsystem                                                                  | Surface                                                               |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Backtest engine, live node, strategies, adapters                           | Python (`crates/backtest/src/python/`, `crates/live/src/python/`)     |
+| Instruments, orders, bar and tick data, order books, analysis, persistence | Python (`crates/model/src/python/`, `crates/persistence/src/python/`) |
+| Fill, slippage, fee and market impact models                               | Python (`crates/execution/src/python/`)                               |
+| Risk config: submit rate, modify rate, notional cap, and order sizing      | Python (`crates/risk/src/python/config.rs`)                           |
+| Portfolio statistics and analyzer                                          | Python (`crates/analysis/src/python/`)                                |
+| The pre-trade send, cancel and fill count caps                             | Python (`count_caps` in `crates/risk/src/python/config.rs`)           |
+| Factor pipeline, membership, panel and dataset                             | Rust only (`crates/research`)                                         |
+| Execution analytics such as implementation shortfall                       | Rust only (`crates/trading/src/analytics`)                            |
+| Option pricing and volatility surfaces                                     | Rust only (`crates/model/src/data/`)                                  |
 
-Two consequences for this style. First, the per-message count caps are not settable from Python;
-you configure `max_order_submit_rate`, `max_order_modify_rate` and `max_notional_per_order`, but the
-hard cap on send, cancel and fill counts lives in Rust. Second, execution analytics that measure
+Two consequences for this style. First, the per-message count caps are settable from Python, as
+`RiskCap` values on `RiskEngineConfig.count_caps` beside `max_order_submit_rate`,
+`max_order_modify_rate` and `max_notional_per_order`. Second, execution analytics that measure
 implementation shortfall are Rust only, so this manual does not show Python for them.
 
 ## Why session time matters

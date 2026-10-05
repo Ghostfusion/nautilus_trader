@@ -41,6 +41,7 @@ use nautilus_model::{
     orders::Order,
     position::fold_net_position,
     signal::TradingSignal,
+    target::Target,
     types::{Money, Price, Quantity},
 };
 use nautilus_portfolio::portfolio::Portfolio;
@@ -156,6 +157,16 @@ pub trait StrategyNative {
             .expect("Strategy not registered: Portfolio not initialized")
             .clone()
     }
+}
+
+/// The cache-and-portfolio snapshot a target pipeline run is built from.
+///
+/// The construction stage sizes from the equity and the prices; the reconciliation stage nets
+/// against the equity, the positions, and the open orders. Both contexts are assembled together so
+/// the two pipeline entry points cannot drift.
+struct TargetPipelineSnapshot {
+    construction: TargetConstructionContext,
+    reconcile: ReconcileContext,
 }
 
 impl StrategyCore {
@@ -420,7 +431,7 @@ impl StrategyCore {
         self.target_pipeline.as_ref()
     }
 
-    /// Builds the snapshot from the cache and the portfolio, then runs the pipeline.
+    /// Builds the snapshot from the cache and the portfolio for one signal batch.
     ///
     /// The snapshot is assembled from what the strategy already has access to: the equity comes
     /// from the portfolio, and the positions, open orders, prices, and instrument definitions come
@@ -435,18 +446,13 @@ impl StrategyCore {
     ///
     /// # Errors
     ///
-    /// Returns an error if the pipeline is not enabled, the strategy is not registered, the
-    /// signals name more than one venue, the account equity for the venue is absent or held in more
-    /// than one currency, or a signal cannot be constructed or reconciled.
-    pub fn target_orders(&self, signals: &[TradingSignal]) -> anyhow::Result<Vec<TargetOrder>> {
-        let Some(pipeline) = self.target_pipeline.as_ref() else {
-            anyhow::bail!("Target pipeline is not enabled");
-        };
-
-        if signals.is_empty() {
-            return Ok(Vec::new());
-        }
-
+    /// Returns an error if the strategy is not registered, the signals name more than one venue,
+    /// the account equity for the venue is absent or held in more than one currency, or the cache is
+    /// currently borrowed.
+    fn target_pipeline_snapshot(
+        &self,
+        signals: &[TradingSignal],
+    ) -> anyhow::Result<TargetPipelineSnapshot> {
         let strategy_id = self
             .strategy_id
             .ok_or_else(|| anyhow::anyhow!("Strategy is not registered"))?;
@@ -499,15 +505,13 @@ impl StrategyCore {
 
         let equity = self.target_pipeline_equity(venue)?;
 
-        let construction_context = TargetConstructionContext {
+        let construction = TargetConstructionContext {
             equity,
             instruments: instruments.clone(),
             prices: prices.clone(),
             positions: Vec::new(),
         };
-        let targets = pipeline.construct(signals, &construction_context)?;
-
-        let reconcile_context = ReconcileContext {
+        let reconcile = ReconcileContext {
             instruments,
             prices,
             equity,
@@ -515,7 +519,62 @@ impl StrategyCore {
             open_orders,
         };
 
-        Ok(pipeline.reconcile(&targets, &reconcile_context)?)
+        Ok(TargetPipelineSnapshot {
+            construction,
+            reconcile,
+        })
+    }
+
+    /// Constructs the target each signal resolves to, without reconciling against the cache.
+    ///
+    /// This is the exposure the construction stage states, before the reconciler nets it against
+    /// the strategy's existing positions and open orders. The result is what a caller records to
+    /// describe the exposure the engine was asked to construct, rather than the order the
+    /// reconciler derived from it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pipeline is not enabled, the strategy is not registered, the
+    /// signals name more than one venue, the account equity for the venue is absent or held in more
+    /// than one currency, or a signal cannot be constructed.
+    pub fn targets(&self, signals: &[TradingSignal]) -> anyhow::Result<Vec<Target>> {
+        let Some(pipeline) = self.target_pipeline.as_ref() else {
+            anyhow::bail!("Target pipeline is not enabled");
+        };
+
+        if signals.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let snapshot = self.target_pipeline_snapshot(signals)?;
+
+        Ok(pipeline.construct(signals, &snapshot.construction)?)
+    }
+
+    /// Builds the snapshot from the cache and the portfolio, then runs the pipeline.
+    ///
+    /// The pipeline constructs a target per signal and reconciles them against the snapshot into
+    /// the minimal order set. The returned orders are what the strategy submits; the constructed
+    /// targets are available separately through [`Self::targets`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pipeline is not enabled, the strategy is not registered, the
+    /// signals name more than one venue, the account equity for the venue is absent or held in more
+    /// than one currency, or a signal cannot be constructed or reconciled.
+    pub fn target_orders(&self, signals: &[TradingSignal]) -> anyhow::Result<Vec<TargetOrder>> {
+        let Some(pipeline) = self.target_pipeline.as_ref() else {
+            anyhow::bail!("Target pipeline is not enabled");
+        };
+
+        if signals.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let snapshot = self.target_pipeline_snapshot(signals)?;
+        let targets = pipeline.construct(signals, &snapshot.construction)?;
+
+        Ok(pipeline.reconcile(&targets, &snapshot.reconcile)?)
     }
 
     /// Returns the single-currency account equity for `venue` from the portfolio.
@@ -635,16 +694,24 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use nautilus_common::{cache::Cache, clock::VirtualClock};
-    use nautilus_core::UnixNanos;
+    use nautilus_core::{UUID4, UnixNanos};
     use nautilus_model::{
-        enums::{OrderSide, OrderType, TimeInForce, TrailingOffsetType, TriggerType},
+        accounts::{AccountAny, CashAccount},
+        data::QuoteTick,
+        enums::{AccountType, OrderSide, OrderType, TimeInForce, TrailingOffsetType, TriggerType},
+        events::account::state::AccountState,
         identifiers::{AccountId, InstrumentId, StrategyId, TraderId},
+        instruments::{InstrumentAny, stubs::equity_aapl},
         orders::Order,
-        types::{Price, Quantity},
+        signal::{SignalDirection, TradingSignal},
+        types::{AccountBalance, Currency, Money, Price, Quantity},
     };
     use nautilus_portfolio::portfolio::Portfolio;
     use rstest::rstest;
     use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+
+    use crate::target::TargetConstructionConfig;
 
     use super::*;
 
@@ -1448,5 +1515,123 @@ mod tests {
 
         core.register(trader_id, clock, cache, portfolio).unwrap();
         core
+    }
+
+    /// Builds a cash account on the XNAS venue so the portfolio has equity to size against.
+    fn xnas_cash_account_state() -> AccountState {
+        AccountState::new(
+            AccountId::from("XNAS-001"),
+            AccountType::Cash,
+            vec![AccountBalance::new(
+                Money::from("100000 USD"),
+                Money::from("0 USD"),
+                Money::from("100000 USD"),
+            )],
+            vec![],
+            true,
+            UUID4::new(),
+            0.into(),
+            0.into(),
+            Some(Currency::USD()),
+        )
+    }
+
+    /// Builds a registered core with one priced instrument, equity, and an enabled pipeline.
+    fn pipelined_test_core() -> StrategyCore {
+        let mut core = registered_test_core();
+        let instrument_id = InstrumentId::from("AAPL.XNAS");
+        let instrument = InstrumentAny::Equity(equity_aapl());
+
+        {
+            let cache_rc = core.cache_rc();
+            let mut cache = cache_rc.borrow_mut();
+            cache.add_instrument(instrument).unwrap();
+            cache
+                .add_account(AccountAny::Cash(CashAccount::new(
+                    xnas_cash_account_state(),
+                    true,
+                    false,
+                )))
+                .unwrap();
+            cache
+                .add_quote(QuoteTick::new(
+                    instrument_id,
+                    Price::from("100.00"),
+                    Price::from("100.00"),
+                    Quantity::from("1"),
+                    Quantity::from("1"),
+                    UnixNanos::default(),
+                    UnixNanos::default(),
+                ))
+                .unwrap();
+        }
+
+        // One per cent risk against a one per cent stop sizes a full-equity position, which the
+        // ceiling caps at half equity, so the constructed target is a weight target of 0.5.
+        let config = TargetPipelineConfig::new(
+            TargetConstructionConfig::new(dec!(0.01), 100, dec!(0.5), Decimal::ZERO).unwrap(),
+            Quantity::zero(0),
+        );
+        core.enable_target_pipeline(config).unwrap();
+        core
+    }
+
+    #[rstest]
+    fn test_targets_returns_constructed_weight_targets_while_target_orders_reconciles() {
+        let core = pipelined_test_core();
+        let instrument_id = InstrumentId::from("AAPL.XNAS");
+        let signals = vec![
+            TradingSignal::new(
+                instrument_id,
+                SignalDirection::Long,
+                None,
+                None,
+                None,
+                None,
+                None,
+                1_000.into(),
+                2_000.into(),
+            )
+            .unwrap(),
+        ];
+
+        let targets = core.targets(&signals).unwrap();
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].instrument_id(), instrument_id);
+        assert_eq!(targets[0].kind(), "WEIGHT");
+        assert_eq!(targets[0].value().weight(), Some(0.5));
+
+        // The reconciled order is a different quantity: it is derived from the target through the
+        // equity and price, and netted against the (empty) existing exposure.
+        let orders = core.target_orders(&signals).unwrap();
+
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].instrument_id, instrument_id);
+        assert_eq!(orders[0].side, OrderSide::Buy);
+        assert_eq!(orders[0].quantity, Quantity::from("500"));
+    }
+
+    #[rstest]
+    fn test_targets_requires_an_enabled_pipeline() {
+        let core = registered_test_core();
+        let signals = vec![
+            TradingSignal::new(
+                InstrumentId::from("AAPL.XNAS"),
+                SignalDirection::Long,
+                None,
+                None,
+                None,
+                None,
+                None,
+                1_000.into(),
+                2_000.into(),
+            )
+            .unwrap(),
+        ];
+
+        let error = core.targets(&signals).unwrap_err().to_string();
+
+        assert_eq!(error, "Target pipeline is not enabled");
     }
 }

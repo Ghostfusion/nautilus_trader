@@ -48,18 +48,19 @@
 
 ## The Rust-only parts
 
-If you need the pre-trade count caps or the execution analytics, you are leaving Python:
+If you need the execution analytics or another part below, you are leaving Python:
 
 - **Execution analytics** - `crates/trading/src/analytics/`. Read-only metrics with declared
   references. Documented in `docs/design/vnpy_lessons_implementation.md` section 4.13.
-- **Count caps (D1)** - `crates/risk/src/engine/config.rs`, `count_caps: Vec<RiskCap>`. Not
-  reachable from Python.
 - **Factor pipeline, membership, panel, dataset** - `crates/research`. Not used by this style, but
   relevant if you take a microstructure feature into a portfolio study.
 - **Notification router and sinks** - `crates/common/src/notification`.
 
 Each of these has its own Rust tests. The manual demonstrated the analytics one with `cargo
 nextest`; the same pattern works for the others.
+
+The pre-trade count caps are not on this list: the Python `RiskEngineConfig` takes them as `RiskCap`
+values (`crates/risk/src/engine/config.rs` for the Rust field).
 
 ## What to learn next, in order
 

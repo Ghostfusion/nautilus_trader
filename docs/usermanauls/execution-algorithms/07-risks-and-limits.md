@@ -123,8 +123,10 @@ precision, positive prices where the instrument allows them, quantity minimum an
 expiry, `reduce_only`, notional limits, cash balances for non-margin accounts, submit and modify
 rates, and the trading state. A failure produces a denial, not a silent skip.
 
-In Python you can set `max_order_submit_rate`, `max_order_modify_rate`, and
-`max_notional_per_order` on the risk configuration (`crates/risk/src/python/config.rs:104-106`).
+In Python you can set `max_order_submit_rate`, `max_order_modify_rate`, `max_notional_per_order` and
+`count_caps` on the risk configuration (`crates/risk/src/python/config.rs`). A cap is a
+`RiskCap(metric, scope, limit, window)`, with the metric and scope vocabularies in
+`nautilus_trader.risk`.
 
 ## What the engine does not enforce
 
@@ -135,8 +137,6 @@ In Python you can set `max_order_submit_rate`, `max_order_modify_rate`, and
   algorithm or slice manually.
 - **No slippage cap.** `max_slippage_bps` is likewise refused by all four.
 - **No urgency.** `urgency` is refused by all four.
-- **Pre-trade count caps are Rust only.** The `count_caps` mechanism in `crates/risk/src/config.rs`
-  cannot currently be configured from Python; a Python user cannot set one.
 - **The horizon is not a liquidation guarantee.** For TWAP the horizon is a schedule; for iceberg
   and sniper it is a deadline that cancels and stops. Neither guarantees the parent is fully filled
   by the horizon.

@@ -139,18 +139,20 @@ run live.
 | A resting stop-loss at `stop_loss_bps`                  | Yours           |
 | That your result will repeat                            | Nobody's        |
 
-### A Rust-only limit you cannot set from Python
+### A hard limit you can set from Python
 
 The risk engine also supports pre-trade **count caps**: windows over submitted, cancelled, and
 filled orders. They are configured as `RiskEngineConfig.count_caps` (a `Vec<RiskCap>`) at
 `crates/risk/src/engine/config.rs:71`, and the metrics are `Submit`, `Modify`, `Cancel`, `Fill`,
 `Active` and `RepeatedRequest` in `crates/model/src/risk.rs`.
 
-**This one is Rust only.** The Python `RiskEngineConfig` constructor
-(`crates/risk/src/python/config.rs`) accepts only `bypass`, `max_order_submit_rate`,
-`max_order_modify_rate`, `max_notional_per_order`, `full_position_exit_venues` and `debug`. There is
-no Python argument for `count_caps`, so a Python user cannot set one. If you need a hard cap on how
-many orders the engine will admit in a window, that is a Rust-level configuration in this release.
+**The Python constructor takes them.** `RiskEngineConfig` (`crates/risk/src/python/config.rs`)
+takes `count_caps` beside `bypass`, `max_order_submit_rate`, `max_order_modify_rate`,
+`max_notional_per_order`, `full_position_exit_venues` and `debug`. A cap is a `RiskCap` naming a
+metric and a scope from `nautilus_trader.risk`, a limit, and a window in nanoseconds, which an
+`Active` cap omits, so
+`RiskEngineConfig(count_caps=[RiskCap(RiskCapMetric.Submit, RiskCapScope.Instrument, 2_000, 60_000_000_000)])`
+declares a two-thousand-submit cap per instrument per minute.
 
 ## Paper, then live
 

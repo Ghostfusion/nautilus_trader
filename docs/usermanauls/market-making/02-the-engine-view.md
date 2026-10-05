@@ -197,8 +197,9 @@ here are:
 - Fill, slippage, fee, and execution-algorithm config (`crates/execution/src/python/`).
 - Portfolio statistics and the analyzer (`crates/analysis/src/python/`).
 
-The pre-trade send/cancel/fill count caps live only in Rust (`crates/risk/src/config.rs`) and a
-Python user cannot set them. Lecture `07` explains what that means for you.
+The pre-trade send/cancel/fill count caps are set on the risk engine as `RiskCap` values
+(`RiskEngineConfig(count_caps=...)`, with the metric and scope vocabularies in
+`nautilus_trader.risk`). Lecture `07` explains what that means for you.
 
 Continue to [03-first-run.md](03-first-run.md) to run your first market making backtest.
 

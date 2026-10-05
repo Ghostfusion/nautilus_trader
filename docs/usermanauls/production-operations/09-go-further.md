@@ -1,6 +1,6 @@
 # 09 - Go further
 
-You have configured a risk engine, watched it refuse a runaway loop, read the Rust-only count-cap
+You have configured a risk engine, watched it refuse a runaway loop, read the count-cap
 code, run the crate's own tests, traded in the sandbox against a live feed, and worked through the
 state and reconciliation contracts. This lecture says what the manual did not cover, and where to go
 next.
@@ -46,7 +46,7 @@ Each of these is a page in this repository. Read the first three whatever you do
 
 | Path                               | Why you would open it                                          |
 | ---------------------------------- | -------------------------------------------------------------- |
-| `crates/risk/src/engine/config.rs` | The `count_caps` field Python cannot set.                      |
+| `crates/risk/src/engine/config.rs` | The `count_caps` field and what a cap predicate holds.         |
 | `crates/risk/src/engine/cap.rs`    | Cap evaluation, the counter keys, and the refusal record.      |
 | `crates/model/src/risk.rs`         | `RiskCapScope`, `RiskCapMetric`, and `RiskRequestKey`.         |
 | `crates/risk/src/python/config.rs` | The exact Python surface of the risk engine.                   |
@@ -74,7 +74,7 @@ Each of these is a page in this repository. Read the first three whatever you do
 Before a strategy trades real money, every line below should have a yes.
 
 - A risk engine configuration exists, with a rate limit and a per-order notional cap you chose.
-- A count cap exists if you can configure it in Rust, derived from your venue's message limits.
+- A count cap exists if you configure it, derived from your venue's message limits.
 - Denials are logged and someone reads them.
 - A transport-state signal exists and reaches a human.
 - State is saved and loaded with a database backing, and you have tested a restart.

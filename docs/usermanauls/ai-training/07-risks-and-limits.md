@@ -78,8 +78,11 @@ The strategy decides position size. The risk engine can then refuse orders that 
 limit. From Python you can set `max_order_submit_rate`, `max_order_modify_rate` and
 `max_notional_per_order` on the risk engine configuration
 (`crates/risk/src/python/config.rs`; `docs/concepts/optimization.md` lists the Python surface). The
-pre-trade send, cancel and fill count caps are Rust-only in `crates/risk/src/config.rs`, and a Python
-user cannot set one. A search does nothing about any of this: the parameters you sweep are strategy
+pre-trade send, cancel and fill count caps are set the same way, as `RiskCap` values with the metric
+and scope vocabularies in `nautilus_trader.risk`:
+`RiskEngineConfig(count_caps=[RiskCap(RiskCapMetric.Submit, RiskCapScope.Instrument, 2_000, 60_000_000_000)])`.
+
+A search does nothing about any of this: the parameters you sweep are strategy
 parameters, and a parameter set that produces a large position is exactly as dangerous as the same
 parameters run once.
 

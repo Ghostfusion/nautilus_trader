@@ -1,23 +1,24 @@
 # 05 - Build the operational harness
 
-Lecture 03 configured the risk engine from Python. That is only half of the story: the strongest
-count-based limits have no Python binding at all. This lecture does two things.
+Lecture 03 configured the risk engine from Python. This lecture goes deeper on the strongest
+count-based limits, the count caps, and then runs the sandbox client. It does two things.
 
-1. It reads the Rust configuration to show exactly which limits Python cannot set, and proves the
+1. It reads the Rust configuration behind the caps, shows how to set one from Python, and proves the
    behavior by running the risk crate's own tests.
 2. It runs the sandbox execution client end to end against a live public data feed, and states what
    the sandbox does not simulate.
 
-## Part 1: the limits Python cannot set
+## Part 1: the count caps
 
 ### What Python can set
 
 `nautilus_trader.risk.RiskEngineConfig` accepts `bypass`, `max_order_submit_rate`,
-`max_order_modify_rate`, `max_notional_per_order`, `full_position_exit_venues`, and `debug`. That is
-the whole constructor, verified in `crates/risk/src/python/config.rs`. Rates are written
-`limit/HH:MM:SS`.
+`max_order_modify_rate`, `max_notional_per_order`, `count_caps`, `full_position_exit_venues`, and
+`debug`. That is the whole constructor, verified in `crates/risk/src/python/config.rs`. Rates are
+written `limit/HH:MM:SS`, and a cap is a `RiskCap` naming a metric and a scope from
+`nautilus_trader.risk`, a limit, and a window in nanoseconds.
 
-### What only Rust can set
+### The cap field in the Rust configuration
 
 Open `crates/risk/src/engine/config.rs`. The struct has one more field:
 
@@ -31,9 +32,9 @@ Open `crates/risk/src/engine/config.rs`. The struct has one more field:
     pub count_caps: Vec<RiskCap>,
 ```
 
-Because `crates/risk/src/python/config.rs` has no constructor argument for `count_caps`, a Python
-user cannot set one. There is no workaround and no hidden parameter: the field is reachable only
-from a Rust caller, or from a serialized configuration a Rust program loads.
+The Python constructor argument maps to this field: `RiskEngineConfig(count_caps=[RiskCap(...)])`
+sets the same `Vec<RiskCap>`, and a serialized live configuration carries it as
+`METRIC/SCOPE/LIMIT[/WINDOW_NS]` strings. The dimension names below are the same on every surface.
 
 ### The four dimensions of a cap
 

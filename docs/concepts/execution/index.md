@@ -253,17 +253,35 @@ judgement against its own venue message limits and order flow.
 The one measured configuration is the one the send-path benchmark used, and it is **not** a
 recommendation:
 
-| Scope                  | Metric  | Limit   |
-| ---------------------- | ------- | ------- |
-| Global                 | Submit  | 20,000  |
-| Global                 | Cancel  | 10,000  |
-| Global                 | Fill    | 10,000  |
-| Instrument             | Submit  | 2,000   |
-| Global                 | Active  | 50      |
+| Scope      | Metric | Limit  |
+| ---------- | ------ | ------ |
+| Global     | Submit | 20,000 |
+| Global     | Cancel | 10,000 |
+| Global     | Fill   | 10,000 |
+| Instrument | Submit | 2,000  |
+| Global     | Active | 50     |
 
 Those values were taken from the comparison reviewed in the design record as inputs to the
 benchmark only. A deployment should derive its own from its venue's message limits and its observed
 order flow, and record the window it chose rather than inheriting a duration.
+
+Both surfaces configure the same caps. The Python `RiskEngineConfig`
+(`crates/risk/src/python/config.rs`) takes `count_caps` as `RiskCap` values, naming the metric and
+the scope with the `RiskCapMetric` and `RiskCapScope` vocabularies in `nautilus_trader.risk`:
+
+```python
+RiskEngineConfig(
+    count_caps=[RiskCap(RiskCapMetric.Submit, RiskCapScope.Instrument, 2_000, 60_000_000_000)]
+)
+```
+
+`LiveRiskEngineConfig` carries the same caps, each entry encoded as `METRIC/SCOPE/LIMIT` or
+`METRIC/SCOPE/LIMIT/WINDOW_NS` with the window in nanoseconds:
+
+```toml
+[risk_engine]
+count_caps = ["SUBMIT/INSTRUMENT/2000/60000000000"]
+```
 
 ### Whole-position conditional exits
 
