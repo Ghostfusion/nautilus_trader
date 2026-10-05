@@ -5491,6 +5491,7 @@ dependencies = [
  "parking_lot",
  "pyo3",
  "pyo3-stub-gen",
+ "rand 0.10.3",
  "rstest",
  "rust_decimal",
  "rust_decimal_macros",

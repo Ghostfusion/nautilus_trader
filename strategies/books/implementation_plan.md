@@ -42,18 +42,19 @@ Every "Today" line names the file and symbol that owns the behaviour, checked ag
 
 ### 2.2 Partial
 
-| Capability            | Today                                                                                                                                                                                 | Missing                                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Market impact         | `MarketImpactModel` with one linear variant                                                                                                                                           | Concavity, prefactor calibration, a Python extension point                                       |
-| Passive fill realism  | Probabilistic fills; queue position and liquidity consumption exist but default false                                                                                                 | Adverse-selection and size conditioning                                                          |
-| Latency               | `StaticLatencyModel` over three order legs plus a base                                                                                                                                | Market-data latency, competitor rank, a Python extension point                                   |
-| Data quality          | Bar sequence validation (off by default); Python array monotonicity; adapters log and substitute `ts_init`                                                                            | Quote and trade validation, crossed-print checks, feed-identity checks, offset estimation        |
-| Point-in-time control | `crates/research` (`FeatureValue.as_of`, `Panel::check`, `AdmittedDecision.available_at`)                                                                                             | Any Python binding; the crate has no dependents                                                  |
-| Net-of-cost reporting | Commission netted into fills; `TotalCommissions` and `TotalTurnover` computable from the period frame but registered nowhere, so no cost row is reported                              | A cost report, breakeven cost, a visible fill assumption                                         |
-| Tick rules            | `price_increment` known and precision enforced; alignment checked only when an instrument is redefined or a fill is normalized                                                        | Alignment at submit                                                                              |
-| Trading state         | A halt denies new submits per instrument; global `TradingState` denies or restricts                                                                                                   | Cancel-on-halt; a Python setter for `TradingState`                                               |
-| Risk limits           | `RiskCap` (metric, scope, limit, window) plus per-order notional, quantity, price and margin checks                                                                                   | Participation-rate and inventory caps; cross-strategy enforcement; a coordinated de-risking path |
-| Simulation seeding    | `BacktestEngineConfig.random_seed` seeds every built-in fill model that declares no seed, all eleven of them, venue-level and per-instrument; a model declaring its own seed keeps it | Seeding a foreign (Python) fill model's own draws; seeding the latency and slippage models       |
+| Capability            | Today                                                                                                                                                                                                                 | Missing                                                                                                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Market impact         | `MarketImpactModel` with one linear variant                                                                                                                                                                           | Concavity, prefactor calibration, a Python extension point                                                                                                                 |
+| Passive fill realism  | Probabilistic fills; queue position and liquidity consumption exist but default false                                                                                                                                 | Adverse-selection and size conditioning                                                                                                                                    |
+| Latency               | `StaticLatencyModel` over three order legs plus a base                                                                                                                                                                | Market-data latency, competitor rank, a Python extension point                                                                                                             |
+| Data quality          | Bar sequence validation (off by default); Python array monotonicity; adapters log and substitute `ts_init`                                                                                                            | Quote and trade validation, crossed-print checks, feed-identity checks, offset estimation                                                                                  |
+| Point-in-time control | `crates/research` (`FeatureValue.as_of`, `Panel::check`, `AdmittedDecision.available_at`)                                                                                                                             | Any Python binding; the crate has no dependents                                                                                                                            |
+| Net-of-cost reporting | Commission netted into fills; `TotalCommissions` and `TotalTurnover` computable from the period frame but registered nowhere, so no cost row is reported                                                              | A cost report, breakeven cost, a visible fill assumption                                                                                                                   |
+| Tick rules            | `price_increment` known and precision enforced; alignment checked only when an instrument is redefined or a fill is normalized                                                                                        | Alignment at submit                                                                                                                                                        |
+| Trading state         | A halt denies new submits per instrument; global `TradingState` denies or restricts                                                                                                                                   | Cancel-on-halt; a Python setter for `TradingState`                                                                                                                         |
+| Risk limits           | `RiskCap` (metric, scope, limit, window) plus per-order notional, quantity, price and margin checks                                                                                                                   | Participation-rate and inventory caps; cross-strategy enforcement; a coordinated de-risking path                                                                           |
+| Simulation seeding    | `BacktestEngineConfig.random_seed` seeds every built-in fill model that declares no seed, all eleven of them, venue-level and per-instrument; a model declaring its own seed keeps it                                 | Seeding a foreign (Python) fill model's own draws; seeding the latency and slippage models                                                                                 |
+| Synthetic flow        | `crates/backtest/src/synthetic.rs` generates a persistent flow and its induced price path from a target Hurst exponent and an impact exponent bounded at one half, exposed to Python and deterministic under its seed | A bridge from a generated flow into a run's data; the null and robustness harnesses that consume it (W7.2, W7.3), and the scenario that reads a variance ratio back (W3.2) |
 
 ### 2.3 Absent
 
@@ -63,7 +64,6 @@ Every "Today" line names the file and symbol that owns the behaviour, checked ag
 | Feed-identity validation                         | Nothing checks reported volume against open interest or a settlement total             |
 | Cross-venue timestamp reconciliation             | Ordering is insertion order; `VirtualClock` monotonicity is per clock                  |
 | Null-model or reference-distribution validation  | Only determinism and accounting reconciliation exist                                   |
-| Shipped synthetic flow generator                 | Generators live inside examples and benches                                            |
 | Publication or knowledge date                    | `CustomData` carries `ts_init` only; `CorporateAction.effective_ns` is venue-effective |
 | News or sentiment data type                      | News reaches the system as adapter metadata only                                       |
 | Model-driven strategy example                    | No ML dependency and no serving hook                                                   |
@@ -289,9 +289,10 @@ and horizon robustness, and out-of-sample calibration.
 `python/tests/regression/` digests declared scenarios including the impact, slippage and composed
 execution-realism cases, and `crates/backtest/tests/performance_reconciliation.rs` checks the
 period frame against the portfolio authority. No null model, reference distribution, robustness
-sweep or out-of-sample calibration exists. There is no shipped synthetic data generator and no
-engine-level seed: the only seeded randomness is `FillModelConfig.random_seed`, and
-`use_random_ids` toggles unseeded UUIDs.
+sweep or out-of-sample calibration exists. A synthetic flow generator ships
+(`crates/backtest/src/synthetic.rs`, W7.4) and the engine-level seed exists
+(`BacktestEngineConfig.random_seed`, W7.1), but nothing yet feeds a generated flow into a run and
+nothing reports a distribution over seeds.
 
 **Work.**
 
@@ -307,8 +308,18 @@ engine-level seed: the only seeded randomness is `FillModelConfig.random_seed`, 
   a distribution rather than one number.
 - W7.3 Add a robustness runner that sweeps seeds and horizon rules, reports distributions, and
   flags parameter sets whose results are degenerate.
-- W7.4 Ship a synthetic flow generator calibrated to a target Hurst exponent and impact exponent,
-  which W3.3 and T3 depend on.
+- W7.4 (done at revision 5) `crates/backtest/src/synthetic.rs` ships the generator, exposed to
+  Python as `SyntheticFlowConfig` and `SyntheticFlow` in the backtest module. It takes a target
+  Hurst exponent and an impact exponent, both validated at construction: the Hurst must lie
+  strictly inside (0.5, 1.0) because 0.5 is the memoryless boundary, and the impact exponent
+  inside (0.0, 0.5], refused above one half with the diffusiveness reason, which is W3.3's
+  requirement. The flow is a truncated fractional moving average whose coefficients follow from
+  the Hurst exponent, drawn from a seeded `StdRng` and normalised so the marginal variance does
+  not depend on the target; the price path is the cumulative impact of each period's flow at the
+  declared exponent, with a unit impact coefficient. One test pins a variance ratio above one for
+  a generated persistent flow, another pins the price change as exactly the declared power of the
+  flow, and the rest pin the refusals and the seed's determinism. What does not ship is the bridge
+  into a run: nothing yet feeds a generated flow into a backtest's data.
 
 **Acceptance.** A run that matches a stylized fact but fails an interval-memory check is reported
 as failing. Two runs at the same seed fingerprint identically; two seeds produce different
@@ -455,9 +466,10 @@ that is admissible per strategy but not in aggregate.
 
 ## 8. Revision history
 
-| Revision | Date       | Change                                                                                                                                                                                                                                                                                                                                             |
-| -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | 2026-10-05 | First plan, from the ten findings in `README.md` and a symbol-level survey of this repository.                                                                                                                                                                                                                                                     |
-| 2        | 2026-10-05 | W1.3 done: `PeriodAccounting.fees` and `.slippage` are deleted. T1's Today line and the 2.2 net-of-cost row are rechecked against the tree.                                                                                                                                                                                                        |
-| 3        | 2026-10-05 | W1.4 done: the deflated Sharpe is a portfolio statistic, so a run's report carries the row. T1's W1.4 text records the premises that did not hold (no gross-return artifact exists, and the metric vocabulary has no count unit) and the contract minimums that make a short run report the row as unavailable.                                    |
-| 4        | 2026-10-05 | W7.1 done: `BacktestEngineConfig.random_seed` seeds every built-in fill model that declares no seed, venue-level and per-instrument, so a run is reproducible end to end. The engine-level seed row moves from 2.3 absent to 2.2 partial, with the limits stated: a foreign fill model and the latency and slippage models are not seeded from it. |
+| Revision | Date       | Change                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | 2026-10-05 | First plan, from the ten findings in `README.md` and a symbol-level survey of this repository.                                                                                                                                                                                                                                                                                                     |
+| 2        | 2026-10-05 | W1.3 done: `PeriodAccounting.fees` and `.slippage` are deleted. T1's Today line and the 2.2 net-of-cost row are rechecked against the tree.                                                                                                                                                                                                                                                        |
+| 3        | 2026-10-05 | W1.4 done: the deflated Sharpe is a portfolio statistic, so a run's report carries the row. T1's W1.4 text records the premises that did not hold (no gross-return artifact exists, and the metric vocabulary has no count unit) and the contract minimums that make a short run report the row as unavailable.                                                                                    |
+| 4        | 2026-10-05 | W7.1 done: `BacktestEngineConfig.random_seed` seeds every built-in fill model that declares no seed, venue-level and per-instrument, so a run is reproducible end to end. The engine-level seed row moves from 2.3 absent to 2.2 partial, with the limits stated: a foreign fill model and the latency and slippage models are not seeded from it.                                                 |
+| 5        | 2026-10-05 | W7.4 done: the synthetic flow generator ships with the Hurst and impact-exponent calibration, the exponent refused above one half, exposed to Python and deterministic under its seed. The synthetic-flow row moves from 2.3 absent to 2.2 partial, and T7's Today line is corrected: the engine seed exists as of revision 4 and the generator ships now, while neither is yet consumed by a run. |

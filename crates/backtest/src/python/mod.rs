@@ -20,6 +20,7 @@ pub mod engine;
 pub mod modules;
 pub mod node;
 pub mod result;
+pub mod synthetic;
 
 use pyo3::prelude::*;
 
@@ -47,5 +48,7 @@ pub fn backtest(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::modules::cfd_swap::CfdSwapModule>()?;
     m.add_class::<crate::modules::fx_rollover::InterestRateRecord>()?;
     m.add_class::<crate::modules::fx_rollover::FXRolloverInterestModule>()?;
+    m.add_class::<crate::synthetic::SyntheticFlowConfig>()?;
+    m.add_class::<crate::synthetic::SyntheticFlow>()?;
     Ok(())
 }
