@@ -45,6 +45,36 @@ fn unlimited_liquidity(precision: u8) -> Quantity {
     Quantity::from_mantissa_exponent(UNLIMITED_LIQUIDITY_UNITS, 0, precision)
 }
 
+/// Context for a passive (maker) fill decision.
+///
+/// A passive fill decision is made when a resting limit order is at the touch and the matching
+/// engine asks its fill model whether the order fills. The context carries only the signals the
+/// engine already tracks at that point: the order's own side and quantity, the quantity resting
+/// ahead of it at its price when queue position tracking is enabled, and a signed measure of
+/// recent trade-flow toxicity against the order's side.
+///
+/// A model that does not condition on the context implements nothing new: the default
+/// [`FillModel::is_limit_filled_with_context`] delegates to [`FillModel::is_limit_filled`], and
+/// the engine's decision is exactly what it was before the context existed.
+#[derive(Clone, Copy, Debug)]
+pub struct PassiveFillContext {
+    /// The side of the resting order seeking a passive fill.
+    pub order_side: OrderSide,
+    /// The quantity the order is seeking to fill.
+    pub order_quantity: Quantity,
+    /// The quantity resting ahead of the order at its price.
+    ///
+    /// Zero when queue position tracking is disabled or the order is not tracked.
+    pub queue_ahead: Quantity,
+    /// A signed measure of recent trade-flow toxicity, in `[-1, 1]`.
+    ///
+    /// Positive is adverse to the resting order (recent aggressive flow was on the opposite
+    /// side), zero is no signal, and negative is favourable flow on the order's own side. The
+    /// magnitude is the last trade's size as a fraction of the order's own quantity, capped at
+    /// one; the sign is the direction of that flow relative to the resting side.
+    pub toxicity: f64,
+}
+
 pub trait FillModel {
     /// Returns `true` if a limit order should be filled based on the model.
     ///
@@ -52,6 +82,22 @@ pub trait FillModel {
     ///
     /// Returns an error if the model cannot determine whether the order should fill.
     fn is_limit_filled(&mut self) -> anyhow::Result<bool>;
+
+    /// Returns `true` if a limit order should be filled, given passive fill `context`.
+    ///
+    /// The default delegates to [`FillModel::is_limit_filled`], so a model that does not
+    /// condition on the book or recent flow is unaffected and receives the same decision it made
+    /// before this method existed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model cannot determine whether the order should fill.
+    fn is_limit_filled_with_context(
+        &mut self,
+        _context: &PassiveFillContext,
+    ) -> anyhow::Result<bool> {
+        self.is_limit_filled()
+    }
 
     /// Returns `true` if an order fill should slip by one tick.
     ///
@@ -158,6 +204,13 @@ impl Debug for FillModelHandle {
 impl FillModel for FillModelHandle {
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         self.0.borrow_mut().is_limit_filled()
+    }
+
+    fn is_limit_filled_with_context(
+        &mut self,
+        context: &PassiveFillContext,
+    ) -> anyhow::Result<bool> {
+        self.0.borrow_mut().is_limit_filled_with_context(context)
     }
 
     fn is_slipped(&mut self) -> anyhow::Result<bool> {
@@ -1498,6 +1551,142 @@ impl FillModel for MarketHoursFillModel {
     }
 }
 
+/// Fill model whose passive fill probability falls with queue ahead and adverse flow.
+///
+/// A resting order fills less often when more quantity sits ahead of it at its price and when
+/// recent aggressive trade flow is against its side. The fill probability is
+///
+/// ```text
+/// p = prob_fill_on_limit
+///     * exp(-(queue_sensitivity * queue_ahead / (queue_ahead + order_quantity)
+///             + toxicity_sensitivity * max(toxicity, 0)))
+/// ```
+///
+/// so it equals `prob_fill_on_limit` with no queue ahead and no adverse flow, and falls
+/// monotonically as either signal turns against the order. The `queue_ahead / (queue_ahead +
+/// order_quantity)` ratio is in `[0, 1)` and measures the order's place in the queue relative to
+/// its own size; only adverse (positive) toxicity shortens the fill, while favourable flow leaves
+/// the base probability in place. Slippage draws at `prob_slippage`, as for the other
+/// probabilistic models.
+#[derive(Debug)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.execution", unsendable, from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.execution")
+)]
+pub struct AdverseSelectionFillModel {
+    state: ProbabilisticFillState,
+    queue_sensitivity: f64,
+    toxicity_sensitivity: f64,
+}
+
+impl AdverseSelectionFillModel {
+    /// Creates a new [`AdverseSelectionFillModel`] instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `prob_fill_on_limit` or `prob_slippage` is not in range `[0, 1]`, or
+    /// if `queue_sensitivity` or `toxicity_sensitivity` is not finite and non-negative.
+    pub fn new(
+        prob_fill_on_limit: f64,
+        prob_slippage: f64,
+        random_seed: Option<u64>,
+        queue_sensitivity: f64,
+        toxicity_sensitivity: f64,
+    ) -> anyhow::Result<Self> {
+        let state = ProbabilisticFillState::new(prob_fill_on_limit, prob_slippage, random_seed)?;
+        check_non_negative_f64(queue_sensitivity, "queue_sensitivity")?;
+        check_non_negative_f64(toxicity_sensitivity, "toxicity_sensitivity")?;
+
+        Ok(Self {
+            state,
+            queue_sensitivity,
+            toxicity_sensitivity,
+        })
+    }
+
+    /// Returns the passive fill probability for the given `context`.
+    ///
+    /// The value is `prob_fill_on_limit` when there is no queue ahead and no adverse flow, and
+    /// falls monotonically as either the queue ahead grows relative to the order's own quantity
+    /// or as the toxicity turns against the order's side. Non-finite sensitivity parameters are
+    /// rejected by the constructor, so the result is always finite and within `[0, 1]`.
+    #[must_use]
+    pub fn fill_probability(&self, context: &PassiveFillContext) -> f64 {
+        let queue_ahead = context.queue_ahead.as_f64();
+        let order_quantity = context.order_quantity.as_f64();
+        let total = queue_ahead + order_quantity;
+        let queue_ratio = if total > 0.0 {
+            queue_ahead / total
+        } else {
+            0.0
+        };
+        let adverse_toxicity = context.toxicity.max(0.0);
+        let decay = (-(self.queue_sensitivity * queue_ratio
+            + self.toxicity_sensitivity * adverse_toxicity))
+            .exp();
+
+        (self.state.prob_fill_on_limit * decay).clamp(0.0, 1.0)
+    }
+}
+
+impl Clone for AdverseSelectionFillModel {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            queue_sensitivity: self.queue_sensitivity,
+            toxicity_sensitivity: self.toxicity_sensitivity,
+        }
+    }
+}
+
+impl Default for AdverseSelectionFillModel {
+    fn default() -> Self {
+        Self::new(1.0, 0.0, None, 1.0, 1.0).unwrap()
+    }
+}
+
+impl FillModel for AdverseSelectionFillModel {
+    fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
+        Ok(self.state.is_limit_filled())
+    }
+
+    fn is_limit_filled_with_context(
+        &mut self,
+        context: &PassiveFillContext,
+    ) -> anyhow::Result<bool> {
+        let probability = self.fill_probability(context);
+        Ok(self.state.random_bool(probability))
+    }
+
+    fn is_slipped(&mut self) -> anyhow::Result<bool> {
+        Ok(self.state.is_slipped())
+    }
+
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
+    }
+
+    fn get_orderbook_for_fill_simulation(
+        &mut self,
+        _instrument: &InstrumentAny,
+        _order: &OrderAny,
+        _best_bid: Option<Price>,
+        _best_ask: Option<Price>,
+    ) -> anyhow::Result<Option<OrderBook>> {
+        Ok(None)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum FillModelAny {
     Default(DefaultFillModel),
@@ -1511,6 +1700,7 @@ pub enum FillModelAny {
     CompetitionAware(CompetitionAwareFillModel),
     VolumeSensitive(VolumeSensitiveFillModel),
     MarketHours(MarketHoursFillModel),
+    AdverseSelection(AdverseSelectionFillModel),
 }
 
 impl FillModel for FillModelAny {
@@ -1527,6 +1717,27 @@ impl FillModel for FillModelAny {
             Self::CompetitionAware(m) => m.is_limit_filled(),
             Self::VolumeSensitive(m) => m.is_limit_filled(),
             Self::MarketHours(m) => m.is_limit_filled(),
+            Self::AdverseSelection(m) => m.is_limit_filled(),
+        }
+    }
+
+    fn is_limit_filled_with_context(
+        &mut self,
+        context: &PassiveFillContext,
+    ) -> anyhow::Result<bool> {
+        match self {
+            Self::Default(m) => m.is_limit_filled_with_context(context),
+            Self::BestPrice(m) => m.is_limit_filled_with_context(context),
+            Self::OneTickSlippage(m) => m.is_limit_filled_with_context(context),
+            Self::Probabilistic(m) => m.is_limit_filled_with_context(context),
+            Self::TwoTier(m) => m.is_limit_filled_with_context(context),
+            Self::ThreeTier(m) => m.is_limit_filled_with_context(context),
+            Self::LimitOrderPartialFill(m) => m.is_limit_filled_with_context(context),
+            Self::SizeAware(m) => m.is_limit_filled_with_context(context),
+            Self::CompetitionAware(m) => m.is_limit_filled_with_context(context),
+            Self::VolumeSensitive(m) => m.is_limit_filled_with_context(context),
+            Self::MarketHours(m) => m.is_limit_filled_with_context(context),
+            Self::AdverseSelection(m) => m.is_limit_filled_with_context(context),
         }
     }
 
@@ -1543,6 +1754,7 @@ impl FillModel for FillModelAny {
             Self::CompetitionAware(m) => m.fill_limit_inside_spread(),
             Self::VolumeSensitive(m) => m.fill_limit_inside_spread(),
             Self::MarketHours(m) => m.fill_limit_inside_spread(),
+            Self::AdverseSelection(m) => m.fill_limit_inside_spread(),
         }
     }
 
@@ -1559,6 +1771,7 @@ impl FillModel for FillModelAny {
             Self::CompetitionAware(m) => m.random_seed(),
             Self::VolumeSensitive(m) => m.random_seed(),
             Self::MarketHours(m) => m.random_seed(),
+            Self::AdverseSelection(m) => m.random_seed(),
         }
     }
 
@@ -1575,6 +1788,7 @@ impl FillModel for FillModelAny {
             Self::CompetitionAware(m) => m.seed_if_unset(seed),
             Self::VolumeSensitive(m) => m.seed_if_unset(seed),
             Self::MarketHours(m) => m.seed_if_unset(seed),
+            Self::AdverseSelection(m) => m.seed_if_unset(seed),
         }
     }
 
@@ -1591,6 +1805,7 @@ impl FillModel for FillModelAny {
             Self::CompetitionAware(m) => m.is_slipped(),
             Self::VolumeSensitive(m) => m.is_slipped(),
             Self::MarketHours(m) => m.is_slipped(),
+            Self::AdverseSelection(m) => m.is_slipped(),
         }
     }
 
@@ -1614,6 +1829,7 @@ impl FillModel for FillModelAny {
             Self::CompetitionAware(m) => m.get_orderbook_for_fill_simulation(instrument, order, best_bid, best_ask),
             Self::VolumeSensitive(m) => m.get_orderbook_for_fill_simulation(instrument, order, best_bid, best_ask),
             Self::MarketHours(m) => m.get_orderbook_for_fill_simulation(instrument, order, best_bid, best_ask),
+            Self::AdverseSelection(m) => m.get_orderbook_for_fill_simulation(instrument, order, best_bid, best_ask),
         }
     }
 }
@@ -1638,6 +1854,7 @@ impl Display for FillModelAny {
             Self::CompetitionAware(_) => write!(f, "CompetitionAwareFillModel"),
             Self::VolumeSensitive(_) => write!(f, "VolumeSensitiveFillModel"),
             Self::MarketHours(_) => write!(f, "MarketHoursFillModel"),
+            Self::AdverseSelection(_) => write!(f, "AdverseSelectionFillModel"),
         }
     }
 }
@@ -1645,6 +1862,11 @@ impl Display for FillModelAny {
 // The `CompetitionAwareFillModel` default liquidity factor, applied when a fill model
 // configuration does not supply one.
 const DEFAULT_LIQUIDITY_FACTOR: f64 = 0.3;
+
+// The `AdverseSelectionFillModel` default sensitivities, applied when a fill model
+// configuration does not supply the sensitivities its constructor takes.
+const DEFAULT_QUEUE_SENSITIVITY: f64 = 1.0;
+const DEFAULT_TOXICITY_SENSITIVITY: f64 = 1.0;
 
 /// The built-in fill models selectable by configuration.
 ///
@@ -1688,6 +1910,10 @@ pub enum FillModelKind {
     VolumeSensitive,
     /// Uses a normal or one-tick-wider synthetic spread.
     MarketHours,
+    /// Reduces the passive fill probability with queue ahead and adverse trade flow.
+    ///
+    /// Resolves with the model's default queue and toxicity sensitivities.
+    AdverseSelection,
 }
 
 /// A configuration description of a built-in fill model.
@@ -1815,6 +2041,17 @@ impl FillModelConfig {
                 prob_slippage,
                 random_seed,
             )?),
+            FillModelKind::AdverseSelection => {
+                let model = AdverseSelectionFillModel::new(
+                    prob_fill_on_limit,
+                    prob_slippage,
+                    random_seed,
+                    DEFAULT_QUEUE_SENSITIVITY,
+                    DEFAULT_TOXICITY_SENSITIVITY,
+                )?;
+
+                FillModelAny::AdverseSelection(model)
+            }
         })
     }
 }
@@ -1833,6 +2070,7 @@ impl Display for FillModelKind {
             Self::CompetitionAware => write!(f, "CompetitionAwareFillModel"),
             Self::VolumeSensitive => write!(f, "VolumeSensitiveFillModel"),
             Self::MarketHours => write!(f, "MarketHoursFillModel"),
+            Self::AdverseSelection => write!(f, "AdverseSelectionFillModel"),
         }
     }
 }
@@ -2694,5 +2932,225 @@ mod tests {
         model.seed_if_unset(9);
 
         assert_eq!(model.random_seed(), Some(4));
+    }
+
+    fn passive_context(queue_ahead: Quantity, toxicity: f64) -> PassiveFillContext {
+        PassiveFillContext {
+            order_side: OrderSide::Buy,
+            order_quantity: Quantity::from(100),
+            queue_ahead,
+            toxicity,
+        }
+    }
+
+    #[rstest]
+    fn test_adverse_selection_fill_probability_equals_base_without_signals() {
+        let model = AdverseSelectionFillModel::new(0.5, 0.1, Some(42), 1.0, 1.0).unwrap();
+
+        assert_eq!(
+            model.fill_probability(&passive_context(Quantity::from(0), 0.0)),
+            model.state.prob_fill_on_limit
+        );
+    }
+
+    #[rstest]
+    fn test_adverse_selection_fill_probability_falls_monotonically_with_queue_ahead() {
+        let model = AdverseSelectionFillModel::new(1.0, 0.0, Some(42), 1.0, 4.0).unwrap();
+
+        let probabilities: Vec<f64> = [
+            Quantity::from(0),
+            Quantity::from(25),
+            Quantity::from(100),
+            Quantity::from(300),
+            Quantity::from(1_000),
+        ]
+        .iter()
+        .map(|queue_ahead| model.fill_probability(&passive_context(*queue_ahead, 0.0)))
+        .collect();
+
+        assert!(probabilities.windows(2).all(|window| window[0] > window[1]));
+    }
+
+    #[rstest]
+    fn test_adverse_selection_fill_probability_falls_monotonically_with_toxicity() {
+        let model = AdverseSelectionFillModel::new(1.0, 0.0, Some(42), 4.0, 1.0).unwrap();
+
+        let probabilities: Vec<f64> = [-1.0, 0.0, 0.25, 0.5, 1.0]
+            .iter()
+            .map(|toxicity| model.fill_probability(&passive_context(Quantity::from(0), *toxicity)))
+            .collect();
+
+        assert!(
+            probabilities
+                .windows(2)
+                .all(|window| window[0] >= window[1])
+        );
+        assert!(probabilities[1] > probabilities[4]);
+    }
+
+    #[rstest]
+    fn test_adverse_selection_favourable_flow_leaves_base_probability_in_place() {
+        let model = AdverseSelectionFillModel::new(0.5, 0.0, Some(42), 2.0, 2.0).unwrap();
+
+        assert_eq!(
+            model.fill_probability(&passive_context(Quantity::from(0), -1.0)),
+            model.fill_probability(&passive_context(Quantity::from(0), 0.0))
+        );
+    }
+
+    #[rstest]
+    fn test_a_model_that_ignores_the_context_falls_back_to_the_default_decision() {
+        // The trait default delegates to `is_limit_filled`, so a model that does not
+        // condition on the context makes the same draws as before.
+        let mut legacy = DefaultFillModel::new(0.5, 0.1, Some(42)).unwrap();
+        let mut contextual = DefaultFillModel::new(0.5, 0.1, Some(42)).unwrap();
+
+        for _ in 0..32 {
+            let expected = legacy.is_limit_filled().unwrap();
+            let result = contextual
+                .is_limit_filled_with_context(&passive_context(Quantity::from(250), 1.0))
+                .unwrap();
+
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[rstest]
+    fn test_adverse_selection_context_decisions_reproduce_with_the_same_seed() {
+        let mut first = AdverseSelectionFillModel::new(0.5, 0.1, Some(7), 1.0, 1.0).unwrap();
+        let mut second = AdverseSelectionFillModel::new(0.5, 0.1, Some(7), 1.0, 1.0).unwrap();
+        let context = passive_context(Quantity::from(150), 0.75);
+
+        for _ in 0..64 {
+            assert_eq!(
+                first.is_limit_filled_with_context(&context).unwrap(),
+                second.is_limit_filled_with_context(&context).unwrap()
+            );
+            assert_eq!(first.is_slipped().unwrap(), second.is_slipped().unwrap());
+        }
+    }
+
+    #[rstest]
+    fn test_adverse_selection_declaring_no_seed_stays_unseeded_until_seeded() {
+        let mut model = FillModelAny::AdverseSelection(
+            AdverseSelectionFillModel::new(0.5, 0.5, None, 1.0, 1.0).unwrap(),
+        );
+
+        assert_eq!(model.random_seed(), None);
+
+        model.seed_if_unset(11);
+
+        assert_eq!(model.random_seed(), Some(11));
+    }
+
+    #[rstest]
+    fn test_adverse_selection_fill_probability_falls_against_the_plain_model() {
+        let mut plain = ProbabilisticFillModel::new(0.5, 0.0, Some(42)).unwrap();
+        let mut neutral = AdverseSelectionFillModel::new(0.5, 0.0, Some(42), 1.0, 1.0).unwrap();
+        let mut adverse = AdverseSelectionFillModel::new(0.5, 0.0, Some(42), 1.0, 1.0).unwrap();
+        let neutral_context = passive_context(Quantity::from(0), 0.0);
+        let adverse_context = passive_context(Quantity::from(300), 1.0);
+
+        let mut plain_fills = 0;
+        let mut neutral_fills = 0;
+        let mut adverse_fills = 0;
+
+        for _ in 0..256 {
+            plain_fills += usize::from(plain.is_limit_filled().unwrap());
+            neutral_fills += usize::from(
+                neutral
+                    .is_limit_filled_with_context(&neutral_context)
+                    .unwrap(),
+            );
+            adverse_fills += usize::from(
+                adverse
+                    .is_limit_filled_with_context(&adverse_context)
+                    .unwrap(),
+            );
+        }
+
+        assert_eq!(neutral_fills, plain_fills);
+        assert!(adverse_fills < plain_fills);
+    }
+
+    #[rstest]
+    fn test_fill_model_handle_forwards_the_passive_context() {
+        let model = FillModelAny::AdverseSelection(
+            AdverseSelectionFillModel::new(1.0, 0.0, Some(3), 8.0, 8.0).unwrap(),
+        );
+        let mut handle = FillModelHandle::from(model);
+
+        assert!(
+            handle
+                .is_limit_filled_with_context(&passive_context(Quantity::from(0), 0.0))
+                .unwrap()
+        );
+    }
+
+    #[rstest]
+    fn test_adverse_selection_rejects_out_of_range_probability() {
+        let error = AdverseSelectionFillModel::new(1.1, 0.0, None, 1.0, 1.0)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "invalid f64 for 'prob_fill_on_limit' not in range [0, 1], was 1.1"
+        );
+    }
+
+    #[rstest]
+    #[case(f64::NAN, "NaN")]
+    #[case(f64::INFINITY, "inf")]
+    #[case(f64::NEG_INFINITY, "-inf")]
+    fn test_adverse_selection_rejects_non_finite_sensitivity(
+        #[case] value: f64,
+        #[case] expected_value: &str,
+    ) {
+        let error = AdverseSelectionFillModel::new(1.0, 0.0, None, value, 1.0).unwrap_err();
+
+        assert_eq!(
+            error.downcast_ref::<CorrectnessError>(),
+            Some(&CorrectnessError::InvalidValue {
+                param: "queue_sensitivity".to_string(),
+                value: expected_value.to_string(),
+                type_name: "f64",
+            })
+        );
+    }
+
+    #[rstest]
+    fn test_adverse_selection_rejects_negative_sensitivity() {
+        let error = AdverseSelectionFillModel::new(1.0, 0.0, None, 1.0, -0.5).unwrap_err();
+
+        assert_eq!(
+            error.downcast_ref::<CorrectnessError>(),
+            Some(&CorrectnessError::NegativeValue {
+                param: "toxicity_sensitivity".to_string(),
+                value: "-0.5".to_string(),
+                type_name: "f64",
+            })
+        );
+    }
+
+    #[rstest]
+    fn test_fill_model_config_resolves_the_adverse_selection_kind() {
+        let config = FillModelConfig {
+            kind: FillModelKind::AdverseSelection,
+            prob_fill_on_limit: 0.5,
+            ..Default::default()
+        };
+        let mut model = config.resolve().unwrap();
+
+        assert!(matches!(model, FillModelAny::AdverseSelection(_)));
+        assert_eq!(
+            format!("{model}"),
+            FillModelKind::AdverseSelection.to_string()
+        );
+        assert!(model.random_seed().is_none());
+
+        model.seed_if_unset(5);
+
+        assert_eq!(model.random_seed(), Some(5));
     }
 }

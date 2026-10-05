@@ -55,6 +55,7 @@ pub fn execution(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::models::fill::CompetitionAwareFillModel>()?;
     m.add_class::<crate::models::fill::VolumeSensitiveFillModel>()?;
     m.add_class::<crate::models::fill::MarketHoursFillModel>()?;
+    m.add_class::<crate::models::fill::AdverseSelectionFillModel>()?;
     m.add_class::<crate::models::latency::StaticLatencyModel>()?;
     m.add_class::<crate::models::slippage::ProbabilisticSlippageModel>()?;
     m.add_class::<crate::models::market_impact::LinearMarketImpactModel>()?;

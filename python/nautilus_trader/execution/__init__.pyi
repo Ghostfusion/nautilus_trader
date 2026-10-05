@@ -8,6 +8,7 @@ import typing
 from nautilus_trader import model
 
 __all__ = [
+    "AdverseSelectionFillModel",
     "BestPriceFillModel",
     "CappedOptionFeeModel",
     "CompetitionAwareFillModel",
@@ -41,6 +42,17 @@ __all__ = [
     "fit_prefactor_from_fills",
     "fit_prefactor_from_tape",
 ]
+
+@typing.final
+class AdverseSelectionFillModel:
+    def __init__(
+        self,
+        prob_fill_on_limit: float = 1.0,
+        prob_slippage: float = 0.0,
+        random_seed: int | None = None,
+        queue_sensitivity: float = 1.0,
+        toxicity_sensitivity: float = 1.0,
+    ) -> None: ...
 
 @typing.final
 class BestPriceFillModel:
@@ -402,6 +414,7 @@ class FillModelKind(enum.Enum):
     COMPETITION_AWARE = ...
     VOLUME_SENSITIVE = ...
     MARKET_HOURS = ...
+    ADVERSE_SELECTION = ...
 
 @typing.final
 class ImpactCalibrationSource(enum.Enum):

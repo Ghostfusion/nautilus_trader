@@ -26,10 +26,11 @@ use nautilus_model::{
 use pyo3::prelude::*;
 
 use crate::models::fill::{
-    BestPriceFillModel, CompetitionAwareFillModel, DefaultFillModel, FillModel, FillModelAny,
-    FillModelConfig, FillModelHandle, FillModelKind, LimitOrderPartialFillModel,
-    MarketHoursFillModel, OneTickSlippageFillModel, ProbabilisticFillModel, SizeAwareFillModel,
-    ThreeTierFillModel, TwoTierFillModel, VolumeSensitiveFillModel,
+    AdverseSelectionFillModel, BestPriceFillModel, CompetitionAwareFillModel, DefaultFillModel,
+    FillModel, FillModelAny, FillModelConfig, FillModelHandle, FillModelKind,
+    LimitOrderPartialFillModel, MarketHoursFillModel, OneTickSlippageFillModel,
+    ProbabilisticFillModel, SizeAwareFillModel, ThreeTierFillModel, TwoTierFillModel,
+    VolumeSensitiveFillModel,
 };
 
 #[pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.execution")]
@@ -203,6 +204,10 @@ pub fn pyobject_to_fill_model_any(obj: &Bound<'_, PyAny>) -> PyResult<FillModelA
         return Ok(FillModelAny::MarketHours(m));
     }
 
+    if let Ok(m) = obj.extract::<AdverseSelectionFillModel>() {
+        return Ok(FillModelAny::AdverseSelection(m));
+    }
+
     let type_name = obj.get_type().name()?;
     Err(to_pytype_err(format!(
         "Cannot convert {type_name} to FillModel"
@@ -251,6 +256,7 @@ pub fn fill_model_any_to_pyobject(py: Python<'_>, model: &FillModelAny) -> PyRes
         FillModelAny::CompetitionAware(model) => Ok(Py::new(py, model.clone())?.into_any()),
         FillModelAny::VolumeSensitive(model) => Ok(Py::new(py, model.clone())?.into_any()),
         FillModelAny::MarketHours(model) => Ok(Py::new(py, model.clone())?.into_any()),
+        FillModelAny::AdverseSelection(model) => Ok(Py::new(py, model.clone())?.into_any()),
     }
 }
 
@@ -309,6 +315,40 @@ impl CompetitionAwareFillModel {
             prob_slippage,
             random_seed,
             liquidity_factor,
+        )
+        .map_err(to_pyruntime_err)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[pymethods]
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+impl AdverseSelectionFillModel {
+    /// Fill model whose passive fill probability falls with queue ahead and adverse flow.
+    #[new]
+    #[pyo3(signature = (
+        prob_fill_on_limit=1.0,
+        prob_slippage=0.0,
+        random_seed=None,
+        queue_sensitivity=1.0,
+        toxicity_sensitivity=1.0,
+    ))]
+    fn py_new(
+        prob_fill_on_limit: f64,
+        prob_slippage: f64,
+        random_seed: Option<u64>,
+        queue_sensitivity: f64,
+        toxicity_sensitivity: f64,
+    ) -> PyResult<Self> {
+        Self::new(
+            prob_fill_on_limit,
+            prob_slippage,
+            random_seed,
+            queue_sensitivity,
+            toxicity_sensitivity,
         )
         .map_err(to_pyruntime_err)
     }

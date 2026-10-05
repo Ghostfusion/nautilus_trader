@@ -49,6 +49,14 @@ pub struct OrderMatchingEngineConfig {
     pub use_market_order_acks: bool,
     #[builder(default)]
     pub queue_position: bool,
+    /// Values a passive (maker) fill at the imbalance-adjusted microprice of the touch instead
+    /// of the order's own limit price.
+    ///
+    /// The microprice is bounded by the maker's limit, so a fill is never valued worse than the
+    /// limit. When the book has no two-sided size, or the flag is off, the limit price is kept
+    /// and behaviour is unchanged. Defaults to false.
+    #[builder(default)]
+    pub passive_fill_microprice: bool,
     #[builder(default)]
     pub oto_full_trigger: bool,
     #[builder(default)]
@@ -83,6 +91,7 @@ mod tests {
         assert!(config.use_reduce_only);
         assert!(!config.use_market_order_acks);
         assert!(!config.queue_position);
+        assert!(!config.passive_fill_microprice);
         assert!(!config.oto_full_trigger);
         assert!(!config.defer_option_settlement);
         assert_eq!(config.price_protection_points, None);

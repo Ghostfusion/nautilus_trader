@@ -82,7 +82,7 @@ use crate::{
     matching_core::{MatchAction, OrderMatchingCore, RestingOrder},
     models::{
         fee::{FeeModel, FeeModelHandle},
-        fill::{FillModel, FillModelHandle},
+        fill::{FillModel, FillModelHandle, PassiveFillContext},
         market_impact::{MarketImpactModel, MarketImpactModelHandle},
         slippage::{SlippageModel, SlippageModelHandle},
     },
@@ -133,6 +133,7 @@ pub struct OrderMatchingEngine {
     post_match_order_ids: IndexSet<ClientOrderId>,
     ids_generator: IdsGenerator,
     last_trade_size: Option<Quantity>,
+    last_trade_aggressor: Option<AggressorSide>,
     trade_consumption: QuantityRaw,
     bid_consumption: IndexMap<PriceRaw, (QuantityRaw, QuantityRaw)>,
     ask_consumption: IndexMap<PriceRaw, (QuantityRaw, QuantityRaw)>,
@@ -230,6 +231,7 @@ impl OrderMatchingEngine {
             post_match_order_ids: IndexSet::new(),
             ids_generator,
             last_trade_size: None,
+            last_trade_aggressor: None,
             trade_consumption: 0,
             bid_consumption: IndexMap::new(),
             ask_consumption: IndexMap::new(),
@@ -301,6 +303,7 @@ impl OrderMatchingEngine {
         self.target_ask = None;
         self.target_last = None;
         self.last_trade_size = None;
+        self.last_trade_aggressor = None;
         self.trade_consumption = 0;
         self.bid_consumption.clear();
         self.ask_consumption.clear();
@@ -571,6 +574,63 @@ impl OrderMatchingEngine {
     /// behavior.
     pub fn set_market_impact_model(&mut self, market_impact_model: MarketImpactModelHandle) {
         self.market_impact_model = Some(market_impact_model);
+    }
+
+    /// Builds the passive fill context for a resting `order` at the decision point.
+    ///
+    /// Queue ahead is read from the tracked queue position when queue position tracking is
+    /// enabled, and is zero otherwise. Toxicity is derived from the most recent trade, which is
+    /// tracked only while a trade tick is being processed; a fill decision driven by a quote or
+    /// an order event therefore carries no toxicity signal.
+    fn passive_fill_context(&self, order: &OrderAny) -> PassiveFillContext {
+        let size_precision = self.instrument.size_precision();
+        let queue_ahead = self
+            .queue_ahead_total
+            .get(&order.client_order_id())
+            .map_or_else(
+                || Quantity::zero(size_precision),
+                |(_, ahead_raw)| Quantity::from_raw(*ahead_raw, size_precision),
+            );
+
+        PassiveFillContext {
+            order_side: order.order_side(),
+            order_quantity: order.quantity(),
+            queue_ahead,
+            toxicity: self.trade_toxicity(order.order_side(), order.quantity()),
+        }
+    }
+
+    /// Returns the signed recent trade-flow toxicity against a resting order side.
+    ///
+    /// The sign is positive when the last trade's aggressor was on the opposite side of the
+    /// resting order (the flow that consumes resting orders adversely) and negative when the
+    /// aggressor was on the same side. The magnitude is the last trade's size as a fraction of
+    /// the order's own quantity, capped at one, so the value stays in `[-1, 1]`. A trade with no
+    /// aggressor, a missing last trade, or a non-positive order quantity yields zero.
+    fn trade_toxicity(&self, order_side: OrderSide, order_quantity: Quantity) -> f64 {
+        let (Some(trade_size), Some(aggressor_side)) =
+            (self.last_trade_size, self.last_trade_aggressor)
+        else {
+            return 0.0;
+        };
+
+        let adverse_side = match aggressor_side {
+            AggressorSide::Buy => OrderSide::Sell,
+            AggressorSide::Sell => OrderSide::Buy,
+            AggressorSide::NoAggressor => return 0.0,
+        };
+
+        let order_quantity = order_quantity.as_f64();
+        if order_quantity <= 0.0 {
+            return 0.0;
+        }
+
+        let magnitude = (trade_size.as_f64() / order_quantity).min(1.0);
+        if order_side == adverse_side {
+            magnitude
+        } else {
+            -magnitude
+        }
     }
 
     fn fill_limit_inside_spread_or_false(fill_model: &FillModelHandle) -> bool {
@@ -1381,6 +1441,59 @@ impl OrderMatchingEngine {
         self.last_quote_bid
             .or(self.last_quote_ask)
             .or(self.core.last)
+    }
+
+    /// Returns the imbalance-adjusted microprice of the order book's touch.
+    ///
+    /// The microprice weights each side of the touch by the size resting on the other side:
+    ///
+    /// ```text
+    /// microprice = (best_bid * ask_size + best_ask * bid_size) / (bid_size + ask_size)
+    /// ```
+    ///
+    /// A balanced touch reads the mid, and a heavier side pulls the price toward the touch that
+    /// side is expected to consume: a heavy bid pulls the microprice toward the ask, and a heavy
+    /// ask pulls it toward the bid. The opposite-side weighting is the standard order-book
+    /// pressure form: resting size is the supply or demand that the next aggressive trade
+    /// consumes, so the side that is about to be consumed prices the touch. Returns `None` when
+    /// either side of the touch is missing or both sizes are zero, which is the case a caller
+    /// keeps its existing price for.
+    #[must_use]
+    pub fn microprice(&self) -> Option<Price> {
+        let bid = self.book.best_bid_price()?;
+        let ask = self.book.best_ask_price()?;
+        let bid_size = self.book.best_bid_size()?.as_decimal();
+        let ask_size = self.book.best_ask_size()?.as_decimal();
+        let total = bid_size + ask_size;
+
+        if total.is_zero() {
+            return None;
+        }
+
+        let microprice = (bid.as_decimal() * ask_size + ask.as_decimal() * bid_size) / total;
+        Price::from_decimal_dp(microprice, bid.precision.max(ask.precision)).ok()
+    }
+
+    /// Values a passive (maker) fill at the imbalance-adjusted microprice, bounded by `limit_price`.
+    ///
+    /// With `OrderMatchingEngineConfig::passive_fill_microprice` set, a maker fill is valued at
+    /// the microprice of the touch rather than at the order's own limit price: a BUY never values
+    /// above its limit and a SELL never below, so the valuation cannot cross the order. When the
+    /// flag is off, or the microprice is unavailable because the book has no two-sided size, the
+    /// limit price is returned unchanged.
+    fn passive_fill_price(&self, order_side: OrderSide, limit_price: Price) -> Price {
+        if !self.config.passive_fill_microprice {
+            return limit_price;
+        }
+
+        let Some(microprice) = self.microprice() else {
+            return limit_price;
+        };
+
+        match order_side {
+            OrderSide::Buy => microprice.min(limit_price),
+            OrderSide::Sell => microprice.max(limit_price),
+        }
     }
 
     #[must_use]
@@ -2484,6 +2597,7 @@ impl OrderMatchingEngine {
         }
 
         self.last_trade_size = Some(trade.size);
+        self.last_trade_aggressor = Some(aggressor_side);
         self.trade_consumption = 0;
 
         if self.config.liquidity_consumption && self.book_type != BookType::L1_MBP {
@@ -2501,6 +2615,7 @@ impl OrderMatchingEngine {
         self.iterate(trade.ts_init, aggressor_side);
 
         self.last_trade_size = None;
+        self.last_trade_aggressor = None;
         self.trade_consumption = 0;
 
         // Restore the non-aggressor side after temporary trade price override.
@@ -4427,6 +4542,8 @@ impl OrderMatchingEngine {
                                 && order.liquidity_side() == Some(LiquiditySide::Taker)
                             {
                                 trade_price
+                            } else if order.liquidity_side() == Some(LiquiditySide::Maker) {
+                                self.passive_fill_price(order.order_side(), order_price)
                             } else {
                                 order_price
                             };
@@ -4490,6 +4607,8 @@ impl OrderMatchingEngine {
                             } else {
                                 order_price
                             };
+                            let valued_price =
+                                self.passive_fill_price(order.order_side(), target_price);
 
                             for fill in &mut fills {
                                 let last_px = fill.0;
@@ -4500,7 +4619,7 @@ impl OrderMatchingEngine {
                                     self.target_last = self.core.last;
                                     self.core.set_ask_raw(target_price);
                                     self.core.set_last_raw(target_price);
-                                    fill.0 = target_price;
+                                    fill.0 = valued_price;
                                 }
                             }
                         }
@@ -4513,6 +4632,8 @@ impl OrderMatchingEngine {
                             } else {
                                 order_price
                             };
+                            let valued_price =
+                                self.passive_fill_price(order.order_side(), target_price);
 
                             for fill in &mut fills {
                                 let last_px = fill.0;
@@ -4523,7 +4644,7 @@ impl OrderMatchingEngine {
                                     self.target_last = self.core.last;
                                     self.core.set_bid_raw(target_price);
                                     self.core.set_last_raw(target_price);
-                                    fill.0 = target_price;
+                                    fill.0 = valued_price;
                                 }
                             }
                         }
@@ -4858,16 +4979,18 @@ impl OrderMatchingEngine {
                     };
 
                     if at_limit {
-                        let is_limit_filled = match self.fill_model.is_limit_filled() {
-                            Ok(value) => value,
-                            Err(e) => {
-                                log::error!(
-                                    "Cannot fill limit order {}: fill model failed: {e}",
-                                    order.client_order_id()
-                                );
-                                return;
-                            }
-                        };
+                        let context = self.passive_fill_context(&order);
+                        let is_limit_filled =
+                            match self.fill_model.is_limit_filled_with_context(&context) {
+                                Ok(value) => value,
+                                Err(e) => {
+                                    log::error!(
+                                        "Cannot fill limit order {}: fill model failed: {e}",
+                                        order.client_order_id()
+                                    );
+                                    return;
+                                }
+                            };
 
                         if !is_limit_filled {
                             return; // Not filled (simulates queue position)
@@ -12256,5 +12379,211 @@ mod tests {
             l2, l2_unimpacted,
             "the model cannot move a fill it is not asked about"
         );
+    }
+
+    /// Builds an L1 engine with a single quote at the given touch and sizes.
+    fn engine_with_l1_quote(
+        bid: &str,
+        ask: &str,
+        bid_size: &str,
+        ask_size: &str,
+        passive_fill_microprice: bool,
+    ) -> OrderMatchingEngine {
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt());
+        let instrument_id = instrument.id();
+        let cache = Rc::new(RefCell::new(Cache::default()));
+        let config = OrderMatchingEngineConfig {
+            passive_fill_microprice,
+            ..Default::default()
+        };
+        let mut engine = OrderMatchingEngine::new(
+            instrument,
+            1,
+            FillModelHandle::default(),
+            FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into(),
+            BookType::L1_MBP,
+            OmsType::Netting,
+            AccountType::Margin,
+            Rc::new(RefCell::new(VirtualClock::new())),
+            Rc::clone(&cache),
+            config,
+        );
+
+        engine.process_quote_tick(&QuoteTick::new(
+            instrument_id,
+            Price::from(bid),
+            Price::from(ask),
+            Quantity::from(bid_size),
+            Quantity::from(ask_size),
+            UnixNanos::default(),
+            UnixNanos::default(),
+        ));
+
+        engine
+    }
+
+    #[rstest]
+    fn test_microprice_of_a_balanced_touch_is_the_mid() {
+        let engine = engine_with_l1_quote("1499.00", "1500.00", "50.000", "50.000", false);
+
+        assert_eq!(engine.microprice(), Some(Price::from("1499.50")));
+    }
+
+    #[rstest]
+    fn test_microprice_moves_toward_the_side_the_heavy_book_is_about_to_consume() {
+        let bid_heavy = engine_with_l1_quote("1499.00", "1500.00", "100.000", "10.000", false);
+        let ask_heavy = engine_with_l1_quote("1499.00", "1500.00", "10.000", "100.000", false);
+        let mid = Price::from("1499.50");
+
+        // A heavy bid is demand that the next aggressive trade lifts, so the microprice
+        // sits above the mid; a heavy ask pulls it below.
+        assert!(bid_heavy.microprice().unwrap() > mid);
+        assert!(ask_heavy.microprice().unwrap() < mid);
+    }
+
+    #[rstest]
+    fn test_microprice_is_unavailable_without_a_two_sided_book() {
+        let no_quote = engine_with_l1_quote("1499.00", "1500.00", "0.000", "0.000", false);
+        assert_eq!(no_quote.microprice(), None);
+
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt());
+        let cache = Rc::new(RefCell::new(Cache::default()));
+        let engine = OrderMatchingEngine::new(
+            instrument,
+            1,
+            FillModelHandle::default(),
+            FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into(),
+            BookType::L1_MBP,
+            OmsType::Netting,
+            AccountType::Margin,
+            Rc::new(RefCell::new(VirtualClock::new())),
+            Rc::clone(&cache),
+            OrderMatchingEngineConfig::default(),
+        );
+
+        assert_eq!(engine.microprice(), None);
+    }
+
+    #[rstest]
+    fn test_passive_fill_valuation_is_side_asymmetric_and_bounded_by_the_limit() {
+        let limit = Price::from("1499.50");
+
+        let ask_heavy = engine_with_l1_quote("1499.00", "1500.00", "10.000", "100.000", true);
+        assert_eq!(
+            ask_heavy.passive_fill_price(OrderSide::Buy, limit),
+            Price::from("1499.09")
+        );
+        assert_eq!(ask_heavy.passive_fill_price(OrderSide::Sell, limit), limit);
+
+        let bid_heavy = engine_with_l1_quote("1499.00", "1500.00", "100.000", "10.000", true);
+        assert_eq!(bid_heavy.passive_fill_price(OrderSide::Buy, limit), limit);
+        assert_eq!(
+            bid_heavy.passive_fill_price(OrderSide::Sell, limit),
+            Price::from("1499.91")
+        );
+    }
+
+    #[rstest]
+    fn test_passive_fill_valuation_is_unchanged_when_disabled_or_unavailable() {
+        let limit = Price::from("1499.50");
+
+        let disabled = engine_with_l1_quote("1499.00", "1500.00", "10.000", "100.000", false);
+        assert_eq!(disabled.passive_fill_price(OrderSide::Buy, limit), limit);
+        assert_eq!(disabled.passive_fill_price(OrderSide::Sell, limit), limit);
+
+        let unavailable = engine_with_l1_quote("1499.00", "1500.00", "0.000", "0.000", true);
+        assert_eq!(unavailable.passive_fill_price(OrderSide::Buy, limit), limit);
+        assert_eq!(
+            unavailable.passive_fill_price(OrderSide::Sell, limit),
+            limit
+        );
+    }
+
+    /// Rests a BUY limit inside an ask-heavy L2 spread, then prints a trade at its price.
+    ///
+    /// An L2 book keeps its own touch through the trade, so the microprice at the fill
+    /// decision reflects the resting imbalance rather than the trade price.
+    ///
+    /// Returns the fill price of the resulting `OrderFilled` event, if one occurred.
+    fn passive_maker_fill_price(passive_fill_microprice: bool) -> Option<Price> {
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt());
+        let instrument_id = instrument.id();
+        let cache = Rc::new(RefCell::new(Cache::default()));
+        let config = OrderMatchingEngineConfig {
+            passive_fill_microprice,
+            ..Default::default()
+        };
+        let mut engine = OrderMatchingEngine::new(
+            instrument,
+            1,
+            FillModelHandle::default(),
+            FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into(),
+            BookType::L2_MBP,
+            OmsType::Netting,
+            AccountType::Margin,
+            Rc::new(RefCell::new(VirtualClock::new())),
+            Rc::clone(&cache),
+            config,
+        );
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let events_handler = Rc::clone(&events);
+        engine.set_event_handler(Rc::new(move |event| {
+            events_handler.borrow_mut().push(event);
+        }));
+
+        let ts = UnixNanos::from(1);
+        for (id, side, price, size) in [
+            (1, OrderSide::Buy, "1499.00", "10.000"),
+            (2, OrderSide::Sell, "1500.00", "100.000"),
+        ] {
+            engine
+                .process_order_book_delta(&OrderBookDelta::new(
+                    instrument_id,
+                    BookAction::Add,
+                    BookOrder::new(side, Price::from(price), Quantity::from(size), id),
+                    0,
+                    id,
+                    ts,
+                    ts,
+                ))
+                .unwrap();
+        }
+
+        let mut order = OrderTestBuilder::new(OrderType::Limit)
+            .instrument_id(instrument_id)
+            .client_order_id(ClientOrderId::from("O-PASSIVE"))
+            .side(OrderSide::Buy)
+            .price(Price::from("1499.50"))
+            .quantity(Quantity::from("5.000"))
+            .submit(true)
+            .build();
+        process_cached_order(&mut engine, &mut order, AccountId::from("ACCOUNT-001"));
+
+        engine.process_trade_tick(&TradeTick::new(
+            instrument_id,
+            Price::from("1499.50"),
+            Quantity::from("5.000"),
+            AggressorSide::Sell,
+            TradeId::from("T-PASSIVE"),
+            UnixNanos::from(2),
+            UnixNanos::from(2),
+        ));
+
+        events.borrow().iter().find_map(|event| match event {
+            OrderEventAny::Filled(fill) => Some(fill.last_px),
+            _ => None,
+        })
+    }
+
+    #[rstest]
+    fn test_passive_fill_is_valued_at_the_microprice_when_enabled() {
+        // The resting BUY is inside the spread; the ask-heavy touch values it below its
+        // limit. Disabled, the fill keeps the order's own limit price.
+        assert_eq!(
+            passive_maker_fill_price(false),
+            Some(Price::from("1499.50"))
+        );
+        assert_eq!(passive_maker_fill_price(true), Some(Price::from("1499.09")));
     }
 }
