@@ -305,17 +305,6 @@ pub struct PeriodAccounting {
     pub unrealized_pnl: CurrencyTotals,
     /// The commission paid on the period's fills.
     pub commission: CurrencyTotals,
-    /// The fees paid over the period.
-    ///
-    /// [`OrderFilled`] carries no fee field, so the reducer leaves this empty; a caller that has
-    /// fee information beyond the fill can populate it when constructing a record.
-    pub fees: CurrencyTotals,
-    /// The slippage incurred over the period.
-    ///
-    /// [`OrderFilled`] carries no slippage field, so the reducer leaves this empty; slippage is
-    /// not derived from the fill's price because the reference price it would be measured against
-    /// is not defined unambiguously by the fill alone.
-    pub slippage: CurrencyTotals,
 }
 
 /// The trading-activity fields of a [`PerformancePeriod`].
@@ -583,8 +572,6 @@ impl PerformancePeriodReducer {
             realized_pnl: difference_totals(&latest.realized_pnls, &previous.realized_pnls),
             unrealized_pnl: difference_totals(&latest.unrealized_pnls, &previous.unrealized_pnls),
             commission: std::mem::take(&mut self.commission),
-            fees: CurrencyTotals::new(),
-            slippage: CurrencyTotals::new(),
         };
 
         let activity = PeriodActivity {

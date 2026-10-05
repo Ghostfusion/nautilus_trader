@@ -163,8 +163,6 @@ mod tests {
                 realized_pnl: CurrencyTotals::new(),
                 unrealized_pnl: CurrencyTotals::new(),
                 commission: CurrencyTotals::new(),
-                fees: CurrencyTotals::new(),
-                slippage: CurrencyTotals::new(),
             },
             activity: PeriodActivity {
                 volume: rust_decimal::Decimal::ZERO,

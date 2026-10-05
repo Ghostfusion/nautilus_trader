@@ -42,17 +42,17 @@ Every "Today" line names the file and symbol that owns the behaviour, checked ag
 
 ### 2.2 Partial
 
-| Capability            | Today                                                                                                                          | Missing                                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| Market impact         | `MarketImpactModel` with one linear variant                                                                                    | Concavity, prefactor calibration, a Python extension point                                       |
-| Passive fill realism  | Probabilistic fills; queue position and liquidity consumption exist but default false                                          | Adverse-selection and size conditioning                                                          |
-| Latency               | `StaticLatencyModel` over three order legs plus a base                                                                         | Market-data latency, competitor rank, a Python extension point                                   |
-| Data quality          | Bar sequence validation (off by default); Python array monotonicity; adapters log and substitute `ts_init`                     | Quote and trade validation, crossed-print checks, feed-identity checks, offset estimation        |
-| Point-in-time control | `crates/research` (`FeatureValue.as_of`, `Panel::check`, `AdmittedDecision.available_at`)                                      | Any Python binding; the crate has no dependents                                                  |
-| Net-of-cost reporting | Commission netted into fills; `TotalCommissions`, `TotalTurnover`; `PeriodAccounting.fees` and `.slippage` built empty         | A cost report, breakeven cost, a visible fill assumption                                         |
-| Tick rules            | `price_increment` known and precision enforced; alignment checked only when an instrument is redefined or a fill is normalized | Alignment at submit                                                                              |
-| Trading state         | A halt denies new submits per instrument; global `TradingState` denies or restricts                                            | Cancel-on-halt; a Python setter for `TradingState`                                               |
-| Risk limits           | `RiskCap` (metric, scope, limit, window) plus per-order notional, quantity, price and margin checks                            | Participation-rate and inventory caps; cross-strategy enforcement; a coordinated de-risking path |
+| Capability            | Today                                                                                                                                                    | Missing                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Market impact         | `MarketImpactModel` with one linear variant                                                                                                              | Concavity, prefactor calibration, a Python extension point                                       |
+| Passive fill realism  | Probabilistic fills; queue position and liquidity consumption exist but default false                                                                    | Adverse-selection and size conditioning                                                          |
+| Latency               | `StaticLatencyModel` over three order legs plus a base                                                                                                   | Market-data latency, competitor rank, a Python extension point                                   |
+| Data quality          | Bar sequence validation (off by default); Python array monotonicity; adapters log and substitute `ts_init`                                               | Quote and trade validation, crossed-print checks, feed-identity checks, offset estimation        |
+| Point-in-time control | `crates/research` (`FeatureValue.as_of`, `Panel::check`, `AdmittedDecision.available_at`)                                                                | Any Python binding; the crate has no dependents                                                  |
+| Net-of-cost reporting | Commission netted into fills; `TotalCommissions` and `TotalTurnover` computable from the period frame but registered nowhere, so no cost row is reported | A cost report, breakeven cost, a visible fill assumption                                         |
+| Tick rules            | `price_increment` known and precision enforced; alignment checked only when an instrument is redefined or a fill is normalized                           | Alignment at submit                                                                              |
+| Trading state         | A halt denies new submits per instrument; global `TradingState` denies or restricts                                                                      | Cancel-on-halt; a Python setter for `TradingState`                                               |
+| Risk limits           | `RiskCap` (metric, scope, limit, window) plus per-order notional, quantity, price and margin checks                                                      | Participation-rate and inventory caps; cross-strategy enforcement; a coordinated de-risking path |
 
 ### 2.3 Absent
 
@@ -98,12 +98,18 @@ adverse selection consume the effective rebate.
 
 **Today.** Costs enter only through the fee model, and commission is netted into
 `Position.realized_pnl`. `PeriodAccounting` (`crates/analysis/src/period.rs:293`) carries
-`fees` (`:312`) and `slippage` (`:318`) and both are constructed empty (`:586-587`) because
-`OrderFilled` carries no fee or slippage field. `PortfolioStatistics` offers `TotalCommissions`
-and `TotalTurnover` but no cost semantics. Rust has a read-only execution analytics module
-(`crates/trading/src/lib.rs`: `ExecutionObserver`, `METRIC_IMPLEMENTATION_SHORTFALL_BPS`,
-`METRIC_ARRIVAL_SLIPPAGE_BPS`, `METRIC_VWAP_SLIPPAGE_BPS`, `MetricValue::NotAvailable`) with no
-Python exposure. The deflated Sharpe lives only in `optimization/significance.py`.
+`commission` only: the empty `fees` and `slippage` fields were deleted at revision 2 (W1.3),
+because nothing read them, neither was exposed to Python, and `nautilus-analysis` cannot depend on
+a fee model or the analytics module. `PortfolioStatistics` can compute `TotalCommissions` and
+`TotalTurnover` from the period frame, but neither is registered in the default analyzer and no
+cost row is reported. Rust has a read-only execution analytics module under
+`crates/trading/src/analytics/` (declared at `crates/trading/src/lib.rs:110`): `ExecutionObserver`,
+fifteen `METRIC_*` constants including
+`METRIC_IMPLEMENTATION_SHORTFALL_BPS`, `METRIC_ARRIVAL_SLIPPAGE_BPS` and
+`METRIC_VWAP_SLIPPAGE_BPS`, and `MetricValue::NotAvailable`. Only its own unit tests construct an
+`ExecutionObserver`, so it has no consumer and no Python exposure. The deflated Sharpe lives only
+in `optimization/significance.py`, where the trial counts travel on `SharpeSample` rather than as a
+call argument.
 
 **Work.**
 
@@ -111,8 +117,10 @@ Python exposure. The deflated Sharpe lives only in `optimization/significance.py
   shortfall, arrival slippage and VWAP slippage without re-deriving them.
 - W1.2 Add a cost row to the report: gross return, commission, cost in basis points, net return,
   turnover and breakeven cost, next to Sharpe and Calmar.
-- W1.3 Decide `PeriodAccounting.fees` and `.slippage`: populate them from the fee model and the
-  analytics module, or delete them, so no consumer can read a silently empty field.
+- W1.3 (done at revision 2) Decided to delete `PeriodAccounting.fees` and `.slippage`: nothing
+  read either field, `nautilus-analysis` cannot depend on the fee model or on the analytics
+  module, and population would have added a field to `OrderFilled` to feed two unread duplicates
+  of `commission`. The cost row of W1.2 reads `commission`; the slippage numbers belong to W1.1.
 - W1.4 Put the deflated Sharpe beside the gross and net figures, with the trial count that
   produced it. Shared with W8.4.
 
@@ -431,6 +439,7 @@ that is admissible per strategy but not in aggregate.
 
 ## 8. Revision history
 
-| Revision | Date       | Change                                                                                         |
-| -------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| 1        | 2026-10-05 | First plan, from the ten findings in `README.md` and a symbol-level survey of this repository. |
+| Revision | Date       | Change                                                                                                                                      |
+| -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | 2026-10-05 | First plan, from the ten findings in `README.md` and a symbol-level survey of this repository.                                              |
+| 2        | 2026-10-05 | W1.3 done: `PeriodAccounting.fees` and `.slippage` are deleted. T1's Today line and the 2.2 net-of-cost row are rechecked against the tree. |
