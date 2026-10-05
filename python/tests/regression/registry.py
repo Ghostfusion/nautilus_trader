@@ -25,6 +25,7 @@ from tests.regression.cases.btcusdt_ema_cross import SCENARIO as BTCUSDT_EMA_CRO
 from tests.regression.cases.equity_session_events import SCENARIO as EQUITY_SESSION_EVENTS
 from tests.regression.cases.execution_realism_composed import SCENARIO as EXECUTION_REALISM_COMPOSED
 from tests.regression.cases.market_impact_model import SCENARIO as MARKET_IMPACT_MODEL
+from tests.regression.cases.market_impact_square_root import SCENARIO as MARKET_IMPACT_SQUARE_ROOT
 from tests.regression.cases.multi_venue_parity import SCENARIO as MULTI_VENUE_PARITY
 from tests.regression.cases.optimization_golden import SCENARIO as OPTIMIZATION_GOLDEN
 from tests.regression.cases.target_pipeline_parity import SCENARIO as TARGET_PIPELINE_PARITY
@@ -40,6 +41,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     UNIVERSE_MEMBERSHIP,
     VENUE_SLIPPAGE_MODEL,
     MARKET_IMPACT_MODEL,
+    MARKET_IMPACT_SQUARE_ROOT,
     EXECUTION_REALISM_COMPOSED,
     TARGET_PIPELINE_PARITY,
     OPTIMIZATION_GOLDEN,

@@ -29,6 +29,7 @@ __all__ = [
     "ProbabilisticSlippageModel",
     "ProbabilityPriceFeeModel",
     "SizeAwareFillModel",
+    "SquareRootMarketImpactModel",
     "StaticLatencyModel",
     "ThreeTierFillModel",
     "TieredNotionalOptionFeeModel",
@@ -293,6 +294,12 @@ class ProbabilityPriceFeeModel(FeeModel):
 class SizeAwareFillModel:
     def __init__(
         self, prob_fill_on_limit: float, prob_slippage: float, random_seed: int | None = ...
+    ) -> None: ...
+
+@typing.final
+class SquareRootMarketImpactModel:
+    def __init__(
+        self, prefactor: float, reference_quantity: model.Quantity, max_increments: int
     ) -> None: ...
 
 @typing.final

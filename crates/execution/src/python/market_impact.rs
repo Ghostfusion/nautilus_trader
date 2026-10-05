@@ -19,7 +19,9 @@ use nautilus_core::python::{to_pyruntime_err, to_pytype_err};
 use nautilus_model::types::Quantity;
 use pyo3::prelude::*;
 
-use crate::models::market_impact::{LinearMarketImpactModel, MarketImpactModelAny};
+use crate::models::market_impact::{
+    LinearMarketImpactModel, MarketImpactModelAny, SquareRootMarketImpactModel,
+};
 
 #[pymethods]
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -45,6 +47,30 @@ impl LinearMarketImpactModel {
     }
 }
 
+#[pymethods]
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+impl SquareRootMarketImpactModel {
+    /// A concave market impact model with a square-root shape.
+    ///
+    /// The model moves the fill price against the order direction by `prefactor` times the square
+    /// root of the fill's size relative to `reference_quantity`, capped at `max_increments`: a fill
+    /// equal to the reference quantity moves by the prefactor's worth of increments, and doubling
+    /// the size less than doubles the adjustment. The exponent is fixed at one half because the
+    /// corpus finds it robust while the prefactor is not, so the prefactor is the parameter that
+    /// carries the calibration's uncertainty.
+    ///
+    /// The model is a pure function of the fill quantity and takes no random seed.
+    #[new]
+    #[pyo3(signature = (prefactor, reference_quantity, max_increments))]
+    fn py_new(prefactor: f64, reference_quantity: Quantity, max_increments: u64) -> PyResult<Self> {
+        Self::new(prefactor, reference_quantity, max_increments).map_err(to_pyruntime_err)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
 /// Extracts a Python market impact model object into a Rust [`MarketImpactModelAny`].
 ///
 /// # Errors
@@ -55,6 +81,9 @@ pub fn pyobject_to_market_impact_model_any(
 ) -> PyResult<MarketImpactModelAny> {
     if let Ok(m) = obj.extract::<LinearMarketImpactModel>() {
         return Ok(MarketImpactModelAny::Linear(m));
+    }
+    if let Ok(m) = obj.extract::<SquareRootMarketImpactModel>() {
+        return Ok(MarketImpactModelAny::SquareRoot(m));
     }
 
     let type_name = obj.get_type().name()?;
@@ -74,6 +103,7 @@ pub fn market_impact_model_any_to_pyobject(
 ) -> PyResult<Py<PyAny>> {
     match model {
         MarketImpactModelAny::Linear(model) => Ok(Py::new(py, model.clone())?.into_any()),
+        MarketImpactModelAny::SquareRoot(model) => Ok(Py::new(py, model.clone())?.into_any()),
     }
 }
 
