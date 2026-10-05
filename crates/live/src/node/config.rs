@@ -31,7 +31,7 @@ use nautilus_common::{
     throttler::RateLimit,
 };
 use nautilus_core::{DurationNanos, UUID4, datetime::secs_to_nanos};
-use nautilus_data::engine::config::DataEngineConfig;
+use nautilus_data::engine::{config::DataEngineConfig, quality::DataQualityAction};
 use nautilus_execution::{
     engine::config::ExecutionEngineConfig, order_emulator::config::OrderEmulatorConfig,
 };
@@ -112,6 +112,11 @@ pub struct LiveDataEngineConfig {
     /// If data timestamp sequencing should be validated and handled.
     #[builder(default)]
     pub validate_data_sequence: bool,
+    /// The action the data-quality gate takes on quotes and trades that violate a check.
+    ///
+    /// `None` (the default) disables the gate. `Flag` forwards and counts a violating record;
+    /// `Drop` refuses and counts it.
+    pub data_quality_action: Option<DataQualityAction>,
     /// If order book deltas should be buffered until the `F_LAST` flag is set for a delta.
     #[builder(default)]
     pub buffer_deltas: bool,
@@ -162,6 +167,7 @@ impl From<LiveDataEngineConfig> for DataEngineConfig {
             time_bars_build_delay: config.time_bars_build_delay,
             time_bars_origin_offset,
             validate_data_sequence: config.validate_data_sequence,
+            data_quality_action: config.data_quality_action,
             buffer_deltas: config.buffer_deltas,
             emit_quotes_from_book: config.emit_quotes_from_book,
             emit_quotes_from_book_depths: config.emit_quotes_from_book_depths,
@@ -1503,6 +1509,7 @@ mean_dispatch_ns_clear = 700
             time_bars_interval_type: BarIntervalType::RightOpen,
             time_bars_build_delay: 1_500,
             validate_data_sequence: true,
+            data_quality_action: Some(DataQualityAction::Drop),
             buffer_deltas: true,
             external_clients: Some(vec![ClientId::from("EXTERNAL")]),
             debug: true,
@@ -1521,6 +1528,7 @@ mean_dispatch_ns_clear = 700
         assert_eq!(converted.time_bars_build_delay, 1_500);
         assert!(converted.time_bars_origin_offset.is_empty());
         assert!(converted.validate_data_sequence);
+        assert_eq!(converted.data_quality_action, Some(DataQualityAction::Drop));
         assert!(converted.buffer_deltas);
         assert!(!converted.emit_quotes_from_book);
         assert!(!converted.emit_quotes_from_book_depths);

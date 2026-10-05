@@ -223,6 +223,7 @@ impl LiveDataEngineConfig {
             time_bars_origin_offset: time_bars_origin_offset.unwrap_or_default(),
             validate_data_sequence: validate_data_sequence
                 .unwrap_or(default.validate_data_sequence),
+            data_quality_action: default.data_quality_action,
             buffer_deltas: buffer_deltas.unwrap_or(default.buffer_deltas),
             emit_quotes_from_book: emit_quotes_from_book.unwrap_or(default.emit_quotes_from_book),
             emit_quotes_from_book_depths: emit_quotes_from_book_depths

@@ -27,5 +27,7 @@ use pyo3::prelude::*;
 #[pymodule]
 pub fn data(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::engine::config::DataEngineConfig>()?;
+    m.add_class::<crate::engine::quality::DataQualityViolation>()?;
+    m.add_class::<crate::engine::quality::DataQualityAction>()?;
     Ok(())
 }

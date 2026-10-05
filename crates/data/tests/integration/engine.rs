@@ -63,7 +63,11 @@ use nautilus_common::{
 use nautilus_core::{DurationNanos, Params, UUID4, UnixNanos, datetime::NANOSECONDS_IN_SECOND};
 use nautilus_data::{
     client::DataClientAdapter,
-    engine::{DataEngine, config::DataEngineConfig},
+    engine::{
+        DataEngine,
+        config::DataEngineConfig,
+        quality::{DataQualityAction, DataQualityViolation},
+    },
 };
 #[cfg(feature = "defi")]
 use nautilus_model::defi::tick_map::tick_math::get_tick_at_sqrt_ratio;
@@ -2147,6 +2151,136 @@ fn make_quote(instrument_id: InstrumentId, bid: &str, ask: &str, ts: u64) -> Quo
         UnixNanos::from(ts),
         UnixNanos::from(ts),
     )
+}
+
+fn quality_engine(config: DataEngineConfig) -> (Rc<RefCell<DataEngine>>, Rc<RefCell<Cache>>) {
+    let clock: Rc<RefCell<dyn Clock>> = Rc::new(RefCell::new(VirtualClock::new()));
+    let cache = Rc::new(RefCell::new(Cache::default()));
+    let engine = Rc::new(RefCell::new(DataEngine::new(
+        clock,
+        cache.clone(),
+        Some(config),
+    )));
+    (engine, cache)
+}
+
+#[rstest]
+fn test_data_quality_gate_off_counts_nothing_and_forwards(stub_msgbus: Rc<RefCell<MessageBus>>) {
+    let _ = stub_msgbus;
+    let (engine, cache) = quality_engine(DataEngineConfig::default());
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    let crossed = make_quote(instrument_id, "101.00", "100.00", 1);
+    engine.borrow_mut().process_data(Data::Quote(crossed));
+
+    assert_eq!(engine.borrow().data_quality_counts().total(), 0);
+    assert_eq!(engine.borrow().data_quality_counts().rejected(), 0);
+    // The gate is off, so the record passes through exactly as before.
+    assert_eq!(cache.borrow().quote(&instrument_id), Some(crossed).as_ref());
+}
+
+#[rstest]
+fn test_data_quality_flag_forwards_and_counts(stub_msgbus: Rc<RefCell<MessageBus>>) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .data_quality_action(DataQualityAction::Flag)
+        .build();
+    let (engine, cache) = quality_engine(config);
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    let crossed = make_quote(instrument_id, "101.00", "100.00", 1);
+    engine.borrow_mut().process_data(Data::Quote(crossed));
+
+    {
+        let counts = engine.borrow().data_quality_counts().clone();
+        assert_eq!(counts.rejected(), 1);
+        assert_eq!(counts.count(DataQualityViolation::CrossedQuote), 1);
+        assert_eq!(counts.accepted(), 0);
+    }
+    // `Flag` forwards the violating record rather than refusing it.
+    assert_eq!(cache.borrow().quote(&instrument_id), Some(crossed).as_ref());
+
+    let clean = make_quote(instrument_id, "100.00", "100.10", 2);
+    engine.borrow_mut().process_data(Data::Quote(clean));
+
+    {
+        let counts = engine.borrow().data_quality_counts().clone();
+        assert_eq!(counts.accepted(), 1);
+        assert_eq!(counts.total(), 2);
+    }
+    assert_eq!(cache.borrow().quote(&instrument_id), Some(clean).as_ref());
+}
+
+#[rstest]
+fn test_data_quality_drop_refuses_and_counts(stub_msgbus: Rc<RefCell<MessageBus>>) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .data_quality_action(DataQualityAction::Drop)
+        .build();
+    let (engine, cache) = quality_engine(config);
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    // Crossed quote: refused and counted.
+    engine.borrow_mut().process_data(Data::Quote(make_quote(
+        instrument_id,
+        "101.00",
+        "100.00",
+        1,
+    )));
+    assert!(cache.borrow().quote(&instrument_id).is_none());
+
+    // Clean quote: accepted and cached.
+    let clean = make_quote(instrument_id, "100.00", "100.10", 2);
+    engine.borrow_mut().process_data(Data::Quote(clean));
+
+    // Out-of-order quote: refused and counted against the engine's last-seen `ts_event`.
+    engine.borrow_mut().process_data(Data::Quote(make_quote(
+        instrument_id,
+        "100.00",
+        "100.10",
+        1,
+    )));
+
+    // Non-positive price: refused and counted.
+    engine
+        .borrow_mut()
+        .process_data(Data::Quote(make_quote(instrument_id, "0.00", "100.10", 3)));
+
+    let counts = engine.borrow().data_quality_counts().clone();
+    assert_eq!(counts.count(DataQualityViolation::CrossedQuote), 1);
+    assert_eq!(counts.count(DataQualityViolation::NonPositiveValue), 1);
+    assert_eq!(counts.count(DataQualityViolation::OutOfOrderTimestamp), 1);
+    assert_eq!(counts.rejected(), 3);
+    assert_eq!(counts.accepted(), 1);
+    assert_eq!(counts.total(), 4);
+
+    // Only the clean record was cached; the refusals never reached the cache.
+    assert_eq!(cache.borrow().quote(&instrument_id), Some(clean).as_ref());
+}
+
+#[rstest]
+fn test_data_quality_counts_reset(stub_msgbus: Rc<RefCell<MessageBus>>) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .data_quality_action(DataQualityAction::Flag)
+        .build();
+    let (engine, _cache) = quality_engine(config);
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    engine.borrow_mut().process_data(Data::Quote(make_quote(
+        instrument_id,
+        "101.00",
+        "100.00",
+        1,
+    )));
+    assert_eq!(engine.borrow().data_quality_counts().rejected(), 1);
+
+    engine.borrow_mut().reset();
+
+    let counts = engine.borrow().data_quality_counts().clone();
+    assert_eq!(counts.rejected(), 0);
+    assert_eq!(counts.accepted(), 0);
+    assert_eq!(counts.total(), 0);
 }
 
 fn recorded_bars_request(recorder: &Rc<RefCell<Vec<DataCommand>>>, index: usize) -> RequestBars {

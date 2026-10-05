@@ -31,6 +31,7 @@
 pub mod bar;
 pub mod book;
 pub mod config;
+pub mod quality;
 
 #[cfg(feature = "defi")]
 pub mod pool;
@@ -116,6 +117,9 @@ use nautilus_model::{
     instruments::{Instrument, InstrumentAny, SyntheticInstrument},
     orderbook::OrderBook,
     types::{Price, Quantity},
+};
+use quality::{
+    DataQualityAction, DataQualityCounts, DataQualityViolation, classify_quote, classify_trade,
 };
 use requests::{
     ContinuousFutureRequest, ContinuousFutureRequestState, ContinuousFutureSegment,
@@ -204,6 +208,8 @@ pub struct DataEngine {
     data_count: u64,
     request_count: u64,
     response_count: u64,
+    data_quality_counts: DataQualityCounts,
+    data_quality_last_ts: AHashMap<InstrumentId, UnixNanos>,
     #[cfg(feature = "streaming")]
     catalogs: CatalogMap,
     #[cfg(feature = "defi")]
@@ -283,6 +289,8 @@ impl DataEngine {
             data_count: 0,
             request_count: 0,
             response_count: 0,
+            data_quality_counts: DataQualityCounts::default(),
+            data_quality_last_ts: AHashMap::new(),
             #[cfg(feature = "streaming")]
             catalogs: CatalogMap::new(),
             #[cfg(feature = "defi")]
@@ -425,6 +433,14 @@ impl DataEngine {
     #[must_use]
     pub const fn response_count(&self) -> u64 {
         self.response_count
+    }
+
+    /// Returns the data-quality counts accumulated by the gate.
+    ///
+    /// The counts are empty until `DataEngineConfig::data_quality_action` enables the gate.
+    #[must_use]
+    pub fn data_quality_counts(&self) -> &DataQualityCounts {
+        &self.data_quality_counts
     }
 
     /// Returns whether an `OptionChainManager` exists for the given series.
@@ -704,6 +720,8 @@ impl DataEngine {
         self.data_count = 0;
         self.request_count = 0;
         self.response_count = 0;
+        self.data_quality_counts = DataQualityCounts::default();
+        self.data_quality_last_ts.clear();
     }
 
     /// Disposes the engine, stopping all clients and canceling any timers.
@@ -2636,7 +2654,54 @@ impl DataEngine {
         }
     }
 
-    fn handle_quote(&self, quote: QuoteTick) {
+    /// Applies the data-quality gate to a quote or trade record.
+    ///
+    /// Returns `true` when the record may be forwarded to the cache and message bus. When the
+    /// gate is disabled (`None`) it returns `true` without recording anything, which is the
+    /// previous behaviour. Otherwise it records the value violation or the out-of-order
+    /// violation against the engine's own last-seen `ts_event` for the instrument (accepting the
+    /// record when neither applies), and returns `false` only for `Drop` with a violation.
+    fn gate_market_data(
+        &mut self,
+        instrument_id: InstrumentId,
+        ts_event: UnixNanos,
+        violation: Option<DataQualityViolation>,
+    ) -> bool {
+        let Some(action) = self.config.data_quality_action else {
+            return true;
+        };
+
+        let monotonic_violation = self
+            .data_quality_last_ts
+            .get(&instrument_id)
+            .filter(|last| ts_event < **last)
+            .map(|_| DataQualityViolation::OutOfOrderTimestamp);
+
+        let last_ts = self
+            .data_quality_last_ts
+            .entry(instrument_id)
+            .or_insert(ts_event);
+        if ts_event > *last_ts {
+            *last_ts = ts_event;
+        }
+
+        match violation.or(monotonic_violation) {
+            Some(violation) => {
+                self.data_quality_counts.record(violation);
+                matches!(action, DataQualityAction::Flag)
+            }
+            None => {
+                self.data_quality_counts.accept();
+                true
+            }
+        }
+    }
+
+    fn handle_quote(&mut self, quote: QuoteTick) {
+        if !self.gate_market_data(quote.instrument_id, quote.ts_event, classify_quote(&quote)) {
+            return;
+        }
+
         if let Err(e) = self.cache.as_ref().borrow_mut().add_quote(quote) {
             log_error_on_cache_insert(&e);
         }
@@ -2650,7 +2715,11 @@ impl DataEngine {
         msgbus::publish_quote(topic, &quote);
     }
 
-    fn handle_trade(&self, trade: TradeTick) {
+    fn handle_trade(&mut self, trade: TradeTick) {
+        if !self.gate_market_data(trade.instrument_id, trade.ts_event, classify_trade(&trade)) {
+            return;
+        }
+
         if let Err(e) = self.cache.as_ref().borrow_mut().add_trade(trade) {
             log_error_on_cache_insert(&e);
         }
@@ -2969,7 +3038,11 @@ impl DataEngine {
         msgbus::publish_depth(topic, depth);
     }
 
-    fn handle_quote_pipeline(&self, quote: QuoteTick) {
+    fn handle_quote_pipeline(&mut self, quote: QuoteTick) {
+        if !self.gate_market_data(quote.instrument_id, quote.ts_event, classify_quote(&quote)) {
+            return;
+        }
+
         if self.pipeline_cache_writes_allowed()
             && let Err(e) = self.cache.as_ref().borrow_mut().add_quote(quote)
         {
@@ -2980,7 +3053,11 @@ impl DataEngine {
         msgbus::publish_quote(topic, &quote);
     }
 
-    fn handle_trade_pipeline(&self, trade: TradeTick) {
+    fn handle_trade_pipeline(&mut self, trade: TradeTick) {
+        if !self.gate_market_data(trade.instrument_id, trade.ts_event, classify_trade(&trade)) {
+            return;
+        }
+
         if self.pipeline_cache_writes_allowed()
             && let Err(e) = self.cache.as_ref().borrow_mut().add_trade(trade)
         {

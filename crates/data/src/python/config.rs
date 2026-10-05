@@ -24,7 +24,7 @@ use nautilus_model::{
 };
 use pyo3::{Py, PyAny, PyResult, Python, prelude::PyAnyMethods, pymethods};
 
-use crate::engine::config::DataEngineConfig;
+use crate::engine::{config::DataEngineConfig, quality::DataQualityAction};
 
 // Coerces a PyO3 input into `BarIntervalType`, accepting both the enum (modern
 // Rust surface) and the legacy Python v1 string form
@@ -64,6 +64,7 @@ impl DataEngineConfig {
         time_bars_build_delay = None,
         time_bars_origin_offset = None,
         validate_data_sequence = None,
+        data_quality_action = None,
         buffer_deltas = None,
         emit_quotes_from_book = None,
         emit_quotes_from_book_depths = None,
@@ -79,6 +80,7 @@ impl DataEngineConfig {
         time_bars_build_delay: Option<u64>,
         time_bars_origin_offset: Option<HashMap<BarAggregation, u64>>,
         validate_data_sequence: Option<bool>,
+        data_quality_action: Option<DataQualityAction>,
         buffer_deltas: Option<bool>,
         emit_quotes_from_book: Option<bool>,
         emit_quotes_from_book_depths: Option<bool>,
@@ -103,6 +105,7 @@ impl DataEngineConfig {
             .maybe_time_bars_build_delay(time_bars_build_delay)
             .maybe_time_bars_origin_offset(time_bars_origin_offset)
             .maybe_validate_data_sequence(validate_data_sequence)
+            .maybe_data_quality_action(data_quality_action)
             .maybe_buffer_deltas(buffer_deltas)
             .maybe_emit_quotes_from_book(emit_quotes_from_book)
             .maybe_emit_quotes_from_book_depths(emit_quotes_from_book_depths)
@@ -155,6 +158,12 @@ impl DataEngineConfig {
     #[pyo3(name = "validate_data_sequence")]
     const fn py_validate_data_sequence(&self) -> bool {
         self.validate_data_sequence
+    }
+
+    #[getter]
+    #[pyo3(name = "data_quality_action")]
+    fn py_data_quality_action(&self) -> Option<DataQualityAction> {
+        self.data_quality_action
     }
 
     #[getter]

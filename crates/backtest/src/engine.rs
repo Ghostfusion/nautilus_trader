@@ -1596,6 +1596,19 @@ impl BacktestEngine {
             }
         }
 
+        // Data-quality violations are reported as a number rather than a log line; the entry is
+        // omitted entirely when the gate is off or the run was clean, so existing summaries are
+        // unchanged for runs that do not enable the gate.
+        let data_quality = self
+            .kernel
+            .data_engine
+            .borrow()
+            .data_quality_counts()
+            .clone();
+        if data_quality.rejected() > 0 {
+            summary.insert("data_quality".to_string(), data_quality.to_string());
+        }
+
         summary
     }
 

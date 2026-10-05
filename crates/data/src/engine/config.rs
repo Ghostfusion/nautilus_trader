@@ -21,6 +21,8 @@ use nautilus_model::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::engine::quality::DataQualityAction;
+
 /// Configuration for `DataEngine` instances.
 #[cfg_attr(
     feature = "python",
@@ -57,6 +59,14 @@ pub struct DataEngineConfig {
     /// If data objects timestamp sequencing will be validated and handled.
     #[builder(default)]
     pub validate_data_sequence: bool,
+    /// The action the data-quality gate takes on quotes and trades that violate a check.
+    ///
+    /// `None` (the default) disables the gate: records pass through unchecked and nothing is
+    /// counted, which is the behaviour of previous releases. `Flag` forwards a violating record
+    /// to the cache and the message bus and counts the violation, which lets a consumer decide
+    /// what to do with an out-of-order or crossed record. `Drop` refuses a violating record: it
+    /// is neither cached nor published, and the violation is counted.
+    pub data_quality_action: Option<DataQualityAction>,
     /// If order book deltas should be buffered until the `F_LAST` flag is set for a delta.
     #[builder(default)]
     pub buffer_deltas: bool,
