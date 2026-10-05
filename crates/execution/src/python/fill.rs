@@ -27,7 +27,7 @@ use pyo3::prelude::*;
 
 use crate::models::fill::{
     AdverseSelectionFillModel, BestPriceFillModel, CompetitionAwareFillModel, DefaultFillModel,
-    FillModel, FillModelAny, FillModelConfig, FillModelHandle, FillModelKind,
+    FillAssumption, FillModel, FillModelAny, FillModelConfig, FillModelHandle, FillModelKind,
     LimitOrderPartialFillModel, MarketHoursFillModel, OneTickSlippageFillModel,
     ProbabilisticFillModel, SizeAwareFillModel, ThreeTierFillModel, TwoTierFillModel,
     VolumeSensitiveFillModel,
@@ -275,6 +275,13 @@ macro_rules! impl_fill_model_pymethods {
                 Self::new(prob_fill_on_limit, prob_slippage, random_seed).map_err(to_pyruntime_err)
             }
 
+            /// The passive fill assumption this model makes, or `None` when it declares none.
+            #[getter]
+            #[pyo3(name = "fill_assumption")]
+            fn py_fill_assumption(&self) -> Option<FillAssumption> {
+                FillModel::fill_assumption(self)
+            }
+
             fn __repr__(&self) -> String {
                 format!("{self:?}")
             }
@@ -351,6 +358,13 @@ impl AdverseSelectionFillModel {
             toxicity_sensitivity,
         )
         .map_err(to_pyruntime_err)
+    }
+
+    /// The passive fill assumption this model makes, or `None` when it declares none.
+    #[getter]
+    #[pyo3(name = "fill_assumption")]
+    fn py_fill_assumption(&self) -> Option<FillAssumption> {
+        FillModel::fill_assumption(self)
     }
 
     fn __repr__(&self) -> String {

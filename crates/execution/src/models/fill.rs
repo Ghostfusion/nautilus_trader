@@ -75,6 +75,49 @@ pub struct PassiveFillContext {
     pub toxicity: f64,
 }
 
+/// The passive fill assumption a model makes, for a result to be read against.
+///
+/// The assumption is what a passive result means: a model that fills every resting order in full
+/// reports a result no passive strategy could have earned, while a model that fills
+/// probabilistically or on adverse selection reports one that depends on how often it filled. A
+/// model that does not declare its assumption is reported as undeclared rather than assumed to be
+/// either of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.execution",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.execution")
+)]
+pub enum FillAssumption {
+    /// Every resting limit order fills in full.
+    Full,
+    /// A resting limit order fills with a probability that does not depend on the book or flow.
+    Probabilistic,
+    /// A resting limit order fills less often the more is ahead of it and the more the flow has
+    /// turned against it, so its fills coincide with adverse moves.
+    AdverseSelected,
+}
+
+impl std::fmt::Display for FillAssumption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Full => "full",
+            Self::Probabilistic => "probabilistic",
+            Self::AdverseSelected => "adverse-selected",
+        })
+    }
+}
+
 pub trait FillModel {
     /// Returns `true` if a limit order should be filled based on the model.
     ///
@@ -97,6 +140,16 @@ pub trait FillModel {
         _context: &PassiveFillContext,
     ) -> anyhow::Result<bool> {
         self.is_limit_filled()
+    }
+
+    /// Returns the passive fill assumption this model makes, or `None` when it declares none.
+    ///
+    /// The assumption is what a passive result must be read against, so a model that declares
+    /// nothing is reported as undeclared rather than assumed to fill in full. The default declares
+    /// nothing; a model whose passive fills are driven by a probability or by the order's queue
+    /// position and the recent flow declares which of them it is.
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        None
     }
 
     /// Returns `true` if an order fill should slip by one tick.
@@ -195,13 +248,30 @@ impl FillModelHandle {
 
 impl Debug for FillModelHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The assumption travels with the handle so that a venue configuration, or anything else
+        // that prints the fill model, names what a passive result was produced under. A re-entrant
+        // borrow reports undeclared rather than panicking inside a formatter.
+        let assumption = self
+            .0
+            .try_borrow()
+            .ok()
+            .and_then(|model| model.fill_assumption())
+            .map_or_else(
+                || "undeclared".to_string(),
+                |assumption| assumption.to_string(),
+            );
+
         f.debug_tuple(stringify!(FillModelHandle))
-            .field(&"<dyn FillModel>")
+            .field(&format!("<dyn FillModel: {assumption}>"))
             .finish()
     }
 }
 
 impl FillModel for FillModelHandle {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        self.0.borrow().fill_assumption()
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         self.0.borrow_mut().is_limit_filled()
     }
@@ -415,7 +485,23 @@ impl Display for DefaultFillModel {
     }
 }
 
+/// Returns the assumption a passive fill probability implies.
+///
+/// A probability of one fills every resting order, which is the full-fill assumption a result must
+/// not be read as passive performance against; anything less is probabilistic.
+fn assumption_for_probability(state: &ProbabilisticFillState) -> FillAssumption {
+    if state.prob_fill_on_limit >= 1.0 {
+        FillAssumption::Full
+    } else {
+        FillAssumption::Probabilistic
+    }
+}
+
 impl FillModel for DefaultFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -491,6 +577,10 @@ impl Default for BestPriceFillModel {
 }
 
 impl FillModel for BestPriceFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -590,6 +680,10 @@ impl Default for OneTickSlippageFillModel {
 }
 
 impl FillModel for OneTickSlippageFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -687,6 +781,10 @@ impl Default for ProbabilisticFillModel {
 }
 
 impl FillModel for ProbabilisticFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -801,6 +899,10 @@ impl Default for TwoTierFillModel {
 }
 
 impl FillModel for TwoTierFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -912,6 +1014,10 @@ impl Default for ThreeTierFillModel {
 }
 
 impl FillModel for ThreeTierFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -1038,6 +1144,10 @@ impl Default for LimitOrderPartialFillModel {
 }
 
 impl FillModel for LimitOrderPartialFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -1150,6 +1260,10 @@ impl Default for SizeAwareFillModel {
 }
 
 impl FillModel for SizeAwareFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -1266,6 +1380,10 @@ impl Default for CompetitionAwareFillModel {
 }
 
 impl FillModel for CompetitionAwareFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -1364,6 +1482,10 @@ impl Default for VolumeSensitiveFillModel {
 }
 
 impl FillModel for VolumeSensitiveFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -1482,6 +1604,10 @@ impl Default for MarketHoursFillModel {
 }
 
 impl FillModel for MarketHoursFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(assumption_for_probability(&self.state))
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -1650,6 +1776,10 @@ impl Default for AdverseSelectionFillModel {
 }
 
 impl FillModel for AdverseSelectionFillModel {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        Some(FillAssumption::AdverseSelected)
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_limit_filled())
     }
@@ -1704,6 +1834,23 @@ pub enum FillModelAny {
 }
 
 impl FillModel for FillModelAny {
+    fn fill_assumption(&self) -> Option<FillAssumption> {
+        match self {
+            Self::Default(m) => m.fill_assumption(),
+            Self::BestPrice(m) => m.fill_assumption(),
+            Self::OneTickSlippage(m) => m.fill_assumption(),
+            Self::Probabilistic(m) => m.fill_assumption(),
+            Self::TwoTier(m) => m.fill_assumption(),
+            Self::ThreeTier(m) => m.fill_assumption(),
+            Self::LimitOrderPartialFill(m) => m.fill_assumption(),
+            Self::SizeAware(m) => m.fill_assumption(),
+            Self::CompetitionAware(m) => m.fill_assumption(),
+            Self::VolumeSensitive(m) => m.fill_assumption(),
+            Self::MarketHours(m) => m.fill_assumption(),
+            Self::AdverseSelection(m) => m.fill_assumption(),
+        }
+    }
+
     fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
         match self {
             Self::Default(m) => m.is_limit_filled(),
@@ -3152,5 +3299,79 @@ mod tests {
         model.seed_if_unset(5);
 
         assert_eq!(model.random_seed(), Some(5));
+    }
+
+    #[rstest]
+    fn test_a_full_fill_probability_declares_the_full_assumption() {
+        // The row's purpose: a model configured to fill every resting order says so, so its passive
+        // result is not read as performance a passive strategy could have earned.
+        let full = ProbabilisticFillModel::new(1.0, 0.0, None).unwrap();
+        assert_eq!(full.fill_assumption(), Some(FillAssumption::Full));
+
+        let probabilistic = ProbabilisticFillModel::new(0.5, 0.0, None).unwrap();
+        assert_eq!(
+            probabilistic.fill_assumption(),
+            Some(FillAssumption::Probabilistic)
+        );
+    }
+
+    #[rstest]
+    fn test_the_builtin_models_declare_their_assumption() {
+        let default = DefaultFillModel::new(1.0, 0.0, None).unwrap();
+        assert_eq!(default.fill_assumption(), Some(FillAssumption::Full));
+
+        let adverse = AdverseSelectionFillModel::new(0.5, 0.0, None, 1.0, 1.0).unwrap();
+        assert_eq!(
+            adverse.fill_assumption(),
+            Some(FillAssumption::AdverseSelected)
+        );
+
+        // The declarations travel through the composition slot a venue is configured with.
+        assert_eq!(
+            FillModelAny::AdverseSelection(adverse).fill_assumption(),
+            Some(FillAssumption::AdverseSelected)
+        );
+    }
+
+    /// A fill model that declares no assumption, to pin the undeclared row.
+    #[derive(Debug)]
+    struct UndeclaredFillModel;
+
+    impl FillModel for UndeclaredFillModel {
+        fn is_limit_filled(&mut self) -> anyhow::Result<bool> {
+            Ok(true)
+        }
+
+        fn is_slipped(&mut self) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+
+        fn get_orderbook_for_fill_simulation(
+            &mut self,
+            _instrument: &InstrumentAny,
+            _order: &OrderAny,
+            _best_bid: Option<Price>,
+            _best_ask: Option<Price>,
+        ) -> anyhow::Result<Option<OrderBook>> {
+            Ok(None)
+        }
+    }
+
+    #[rstest]
+    fn test_the_handle_names_the_assumption_a_result_was_produced_under() {
+        // A venue configuration prints its fill model through this handle, so the assumption
+        // travels with the model to whatever prints it.
+        let adverse =
+            FillModelHandle::new(AdverseSelectionFillModel::new(0.5, 0.0, None, 1.0, 1.0).unwrap());
+        assert!(
+            format!("{adverse:?}").contains("adverse-selected"),
+            "the handle must name the assumption, was {adverse:?}",
+        );
+
+        let undeclared = FillModelHandle::new(UndeclaredFillModel);
+        assert!(
+            format!("{undeclared:?}").contains("undeclared"),
+            "a model that declares nothing must read as undeclared, was {undeclared:?}",
+        );
     }
 }
