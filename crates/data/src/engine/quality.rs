@@ -21,6 +21,11 @@
 //! requests it, in which case its effect on the replay path is byte-for-byte the previous
 //! behaviour.
 //!
+//! The same vocabulary carries the feed-identity checks an adapter runs over its own feed, where
+//! the engine sees nothing to check: whether a venue's reported change in open interest is
+//! explicable by the volume traded over the same interval, and whether a reported settlement total
+//! reconciles with the sum of its components.
+//!
 //! [`DataEngineConfig::data_quality_action`]: crate::engine::config::DataEngineConfig::data_quality_action
 
 use std::{
@@ -28,7 +33,11 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use nautilus_model::data::{QuoteTick, TradeTick};
+use nautilus_model::{
+    data::{QuoteTick, TradeTick},
+    types::{Money, Quantity},
+};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 /// A named reason the data-quality gate rejected or flagged a record.
@@ -58,14 +67,20 @@ pub enum DataQualityViolation {
     NonPositiveValue,
     /// The record's `ts_event` preceded the last `ts_event` seen for its instrument.
     OutOfOrderTimestamp,
+    /// The reported change in open interest exceeded the volume traded over the same interval.
+    OpenInterestChangeExceedsVolume,
+    /// A reported settlement total did not reconcile with the sum of its components.
+    SettlementTotalMismatch,
 }
 
 impl DataQualityViolation {
     /// Every violation kind, used to render a complete and stable count line.
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 5] = [
         Self::CrossedQuote,
         Self::NonPositiveValue,
         Self::OutOfOrderTimestamp,
+        Self::OpenInterestChangeExceedsVolume,
+        Self::SettlementTotalMismatch,
     ];
 }
 
@@ -75,6 +90,10 @@ impl Display for DataQualityViolation {
             Self::CrossedQuote => f.write_str("crossed_quote"),
             Self::NonPositiveValue => f.write_str("non_positive_value"),
             Self::OutOfOrderTimestamp => f.write_str("out_of_order_timestamp"),
+            Self::OpenInterestChangeExceedsVolume => {
+                f.write_str("open_interest_change_exceeds_volume")
+            }
+            Self::SettlementTotalMismatch => f.write_str("settlement_total_mismatch"),
         }
     }
 }
@@ -150,7 +169,11 @@ impl DataQualityCounts {
         self.counts.iter().map(|(k, v)| (*k, *v))
     }
 
-    pub(crate) fn record(&mut self, violation: DataQualityViolation) {
+    /// Records one violation of `violation`.
+    ///
+    /// The engine records what its gate detects; an adapter records what its own feed-identity
+    /// checks detect, so both reach the same totals.
+    pub fn record(&mut self, violation: DataQualityViolation) {
         *self.counts.entry(violation).or_insert(0) += 1;
     }
 
@@ -208,6 +231,61 @@ pub fn classify_trade(trade: &TradeTick) -> Option<DataQualityViolation> {
     None
 }
 
+/// Validates a venue's reported change in open interest against the volume traded over the same
+/// interval.
+///
+/// Open interest is a stock that moves only through trades, and one traded unit opens or closes at
+/// most one unit, so the absolute change in open interest across an interval cannot exceed the
+/// volume traded in it, when both are in the same units and cover the same interval. A larger
+/// change means the two numbers do not describe the same instrument and the same interval.
+///
+/// The engine never sees open interest, so this is a pure check for an adapter to run over its own
+/// feed. The verdict is drawn from the gate's vocabulary, so the adapter records it with
+/// [`DataQualityCounts::record`] and it reaches the same totals.
+#[must_use]
+pub fn validate_open_interest_change(
+    open_interest_prev: Quantity,
+    open_interest_now: Quantity,
+    volume: Quantity,
+) -> Option<DataQualityViolation> {
+    let change = (open_interest_now.as_decimal() - open_interest_prev.as_decimal()).abs();
+
+    if change > volume.as_decimal() {
+        return Some(DataQualityViolation::OpenInterestChangeExceedsVolume);
+    }
+
+    None
+}
+
+/// Validates that a reported settlement total reconciles with the sum of its components.
+///
+/// Every component and the tolerance must be in the reported total's currency, and the absolute
+/// difference between the sum of the components and the reported total must not exceed `tolerance`.
+/// A component in another currency is itself a mismatch: the two numbers are not the same quantity.
+#[must_use]
+pub fn validate_settlement_total(
+    reported: Money,
+    components: &[Money],
+    tolerance: Money,
+) -> Option<DataQualityViolation> {
+    if components
+        .iter()
+        .any(|component| component.currency != reported.currency)
+        || tolerance.currency != reported.currency
+    {
+        return Some(DataQualityViolation::SettlementTotalMismatch);
+    }
+
+    let sum: Decimal = components.iter().map(Money::as_decimal).sum();
+    let difference = (sum - reported.as_decimal()).abs();
+
+    if difference > tolerance.as_decimal() {
+        return Some(DataQualityViolation::SettlementTotalMismatch);
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use nautilus_core::UnixNanos;
@@ -215,7 +293,7 @@ mod tests {
         data::{QuoteTick, TradeTick},
         enums::AggressorSide,
         identifiers::{InstrumentId, TradeId},
-        types::{Price, Quantity},
+        types::{Money, Price, Quantity},
     };
 
     use super::*;
@@ -335,10 +413,12 @@ mod tests {
         counts.accept();
 
         let line = counts.to_string();
-        assert_eq!(
-            line,
-            "data quality: total=4 accepted=1 rejected=3 crossed_quote=1 non_positive_value=2 out_of_order_timestamp=0"
+        let expected = concat!(
+            "data quality: total=4 accepted=1 rejected=3 crossed_quote=1 non_positive_value=2 ",
+            "out_of_order_timestamp=0 open_interest_change_exceeds_volume=0 ",
+            "settlement_total_mismatch=0"
         );
+        assert_eq!(line, expected);
     }
 
     #[rstest::rstest]
@@ -355,5 +435,110 @@ mod tests {
             DataQualityViolation::OutOfOrderTimestamp.to_string(),
             "out_of_order_timestamp"
         );
+        assert_eq!(
+            DataQualityViolation::OpenInterestChangeExceedsVolume.to_string(),
+            "open_interest_change_exceeds_volume"
+        );
+        assert_eq!(
+            DataQualityViolation::SettlementTotalMismatch.to_string(),
+            "settlement_total_mismatch"
+        );
+    }
+
+    #[rstest::rstest]
+    #[case("100", "101", "5")]
+    #[case("100", "95", "5")]
+    #[case("100", "105", "5")]
+    fn test_open_interest_change_is_accepted_when_explicable_by_volume(
+        #[case] prev: &str,
+        #[case] now: &str,
+        #[case] volume: &str,
+    ) {
+        assert_eq!(
+            validate_open_interest_change(
+                Quantity::from(prev),
+                Quantity::from(now),
+                Quantity::from(volume)
+            ),
+            None
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_open_interest_change_is_detected_when_it_exceeds_volume() {
+        assert_eq!(
+            validate_open_interest_change(
+                Quantity::from("100"),
+                Quantity::from("110"),
+                Quantity::from("5")
+            ),
+            Some(DataQualityViolation::OpenInterestChangeExceedsVolume)
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_settlement_total_is_accepted_when_the_components_reconcile() {
+        assert_eq!(
+            validate_settlement_total(
+                Money::from("100.00 USD"),
+                &[Money::from("60.00 USD"), Money::from("40.00 USD")],
+                Money::from("0.01 USD")
+            ),
+            None
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_settlement_total_is_accepted_at_the_tolerance_boundary() {
+        assert_eq!(
+            validate_settlement_total(
+                Money::from("100.00 USD"),
+                &[Money::from("60.00 USD"), Money::from("39.99 USD")],
+                Money::from("0.01 USD")
+            ),
+            None
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_settlement_total_is_detected_when_it_does_not_reconcile() {
+        assert_eq!(
+            validate_settlement_total(
+                Money::from("100.00 USD"),
+                &[Money::from("60.00 USD"), Money::from("39.00 USD")],
+                Money::from("0.01 USD")
+            ),
+            Some(DataQualityViolation::SettlementTotalMismatch)
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_settlement_total_is_detected_when_a_component_is_in_another_currency() {
+        assert_eq!(
+            validate_settlement_total(
+                Money::from("100.00 USD"),
+                &[Money::from("60.00 USD"), Money::from("40.00 EUR")],
+                Money::from("0.01 USD")
+            ),
+            Some(DataQualityViolation::SettlementTotalMismatch)
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_feed_identity_violations_are_counted_through_the_public_entry() {
+        let mut counts = DataQualityCounts::default();
+        counts.record(DataQualityViolation::OpenInterestChangeExceedsVolume);
+        counts.record(DataQualityViolation::SettlementTotalMismatch);
+
+        assert_eq!(
+            counts.count(DataQualityViolation::OpenInterestChangeExceedsVolume),
+            1
+        );
+        assert_eq!(
+            counts.count(DataQualityViolation::SettlementTotalMismatch),
+            1
+        );
+        assert_eq!(counts.rejected(), 2);
+        assert_eq!(counts.total(), 2);
     }
 }
