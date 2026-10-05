@@ -26,6 +26,21 @@ use nautilus_core::DurationNanos;
 
 /// Where the reference price a metric is measured against comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.trading",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.trading")
+)]
 pub enum ReferencePriceSource {
     /// The price at the moment the caller decided to trade.
     Decision,
@@ -59,6 +74,21 @@ impl Display for ReferencePriceSource {
 
 /// Which timestamp a reference price or horizon is measured against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.trading",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.trading")
+)]
 pub enum ReferenceTimestamp {
     /// The decision timestamp the caller declared.
     Decision,
@@ -89,6 +119,21 @@ impl Display for ReferenceTimestamp {
 
 /// What a metric value is normalised against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.trading",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.trading")
+)]
 pub enum DenominatorSource {
     /// The metric's own declared reference price.
     ReferencePrice,
@@ -122,6 +167,21 @@ impl Display for DenominatorSource {
 
 /// The direction a metric is better in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.trading",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.trading")
+)]
 pub enum MetricDirection {
     /// A smaller value is better (a cost).
     LowerIsBetter,
@@ -143,6 +203,21 @@ impl Display for MetricDirection {
 
 /// The units a metric value is expressed in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.trading",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.trading")
+)]
 pub enum MetricUnits {
     /// Basis points (one hundredth of a percent).
     BasisPoints,
@@ -173,6 +248,14 @@ impl Display for MetricUnits {
 /// Every value produced by the analytics layer carries one of these, so a caller cannot read the
 /// number without also reading the price, denominator and timestamp it was measured against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct MetricDeclaration {
     /// The stable metric identifier.
     pub metric_id: &'static str,

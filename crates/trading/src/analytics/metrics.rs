@@ -70,6 +70,21 @@ pub const METRIC_PRICE_IMPROVEMENT: &str = "price_improvement";
 
 /// Why a metric has no value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.trading",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.trading")
+)]
 pub enum UnavailableReason {
     /// A reference price the metric is defined against was not declared.
     NoReferencePrice,
@@ -132,6 +147,14 @@ impl MetricValue {
 
 /// A metric value together with the declaration that defines it.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct Metric {
     /// The declaration that makes the value meaningful.
     pub declaration: MetricDeclaration,
@@ -155,6 +178,14 @@ impl Metric {
 
 /// The complete set of execution metrics for one parent order.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct ExecutionMetrics {
     /// Implementation shortfall against the decision price, in basis points.
     pub implementation_shortfall_bps: Metric,

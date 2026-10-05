@@ -50,6 +50,14 @@ use super::metrics::{ExecutionMetrics, MetricInputs};
 
 /// The parent order's terms, as declared by the caller.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct ExecutionTerms {
     /// The instrument the parent executes in.
     pub instrument_id: InstrumentId,
@@ -65,6 +73,14 @@ pub struct ExecutionTerms {
 
 /// A declared reference price together with the timestamp it belongs to.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct ReferencePoint {
     /// The timestamp of the reference price.
     pub timestamp: UnixNanos,
@@ -74,6 +90,14 @@ pub struct ReferencePoint {
 
 /// The declared benchmark interval a VWAP or TWAP is formed over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct BenchmarkInterval {
     /// The interval start (inclusive).
     pub start: UnixNanos,
@@ -91,6 +115,14 @@ impl BenchmarkInterval {
 
 /// A top-of-book observation used for midpoint and spread metrics.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct QuoteObservation {
     /// The observation timestamp.
     pub timestamp: UnixNanos,
@@ -116,6 +148,14 @@ impl QuoteObservation {
 
 /// A trade observation used for benchmark VWAP.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct TradeObservation {
     /// The observation timestamp.
     pub timestamp: UnixNanos,
@@ -127,6 +167,14 @@ pub struct TradeObservation {
 
 /// A fill observation attributed to a child order.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct FillObservation {
     /// The client order ID of the child that filled.
     pub child_id: ClientOrderId,
@@ -143,6 +191,14 @@ pub struct FillObservation {
 /// For a submission the quantity is the submitted quantity, and for a cancellation it is the
 /// unfilled quantity the cancellation closes out.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct ChildObservation {
     /// The client order ID of the child.
     pub child_id: ClientOrderId,
@@ -157,6 +213,14 @@ pub struct ChildObservation {
 /// The observer stores only what it is fed and derives every metric without external state. It does
 /// not mutate orders, maintain a ledger or depend on a clock or message bus.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.trading", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.trading")
+)]
 pub struct ExecutionObserver {
     terms: ExecutionTerms,
     decision: Option<ReferencePoint>,

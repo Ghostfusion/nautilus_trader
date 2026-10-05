@@ -21,6 +21,7 @@
 )]
 
 pub mod algorithm;
+pub mod analytics;
 pub mod controller;
 pub mod sessions;
 pub mod strategy;
@@ -59,6 +60,87 @@ pub fn trading(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::universe::ScheduledUniverseRule>()?;
     m.add_class::<crate::universe::UniverseSubscription>()?;
     m.add_class::<crate::universe::UniverseRemovalPolicy>()?;
+    m.add_class::<crate::analytics::ExecutionTerms>()?;
+    m.add_class::<crate::analytics::ExecutionObserver>()?;
+    m.add_class::<crate::analytics::ReferencePoint>()?;
+    m.add_class::<crate::analytics::BenchmarkInterval>()?;
+    m.add_class::<crate::analytics::QuoteObservation>()?;
+    m.add_class::<crate::analytics::TradeObservation>()?;
+    m.add_class::<crate::analytics::FillObservation>()?;
+    m.add_class::<crate::analytics::ChildObservation>()?;
+    m.add_class::<crate::analytics::Metric>()?;
+    m.add_class::<crate::analytics::ExecutionMetrics>()?;
+    m.add_class::<crate::analytics::MetricDeclaration>()?;
+    m.add_class::<crate::analytics::MetricUnits>()?;
+    m.add_class::<crate::analytics::MetricDirection>()?;
+    m.add_class::<crate::analytics::ReferencePriceSource>()?;
+    m.add_class::<crate::analytics::ReferenceTimestamp>()?;
+    m.add_class::<crate::analytics::DenominatorSource>()?;
+    m.add_class::<crate::analytics::UnavailableReason>()?;
+    m.add(
+        stringify!(METRIC_IMPLEMENTATION_SHORTFALL_BPS),
+        crate::analytics::METRIC_IMPLEMENTATION_SHORTFALL_BPS,
+    )?;
+    m.add(
+        stringify!(METRIC_ARRIVAL_SLIPPAGE_BPS),
+        crate::analytics::METRIC_ARRIVAL_SLIPPAGE_BPS,
+    )?;
+    m.add(
+        stringify!(METRIC_DECISION_PRICE_SLIPPAGE_BPS),
+        crate::analytics::METRIC_DECISION_PRICE_SLIPPAGE_BPS,
+    )?;
+    m.add(
+        stringify!(METRIC_VWAP_SLIPPAGE_BPS),
+        crate::analytics::METRIC_VWAP_SLIPPAGE_BPS,
+    )?;
+    m.add(
+        stringify!(METRIC_TWAP_SLIPPAGE_BPS),
+        crate::analytics::METRIC_TWAP_SLIPPAGE_BPS,
+    )?;
+    m.add(
+        stringify!(METRIC_MIDPOINT_SLIPPAGE_BPS),
+        crate::analytics::METRIC_MIDPOINT_SLIPPAGE_BPS,
+    )?;
+    m.add(
+        stringify!(METRIC_SPREAD_CAPTURE),
+        crate::analytics::METRIC_SPREAD_CAPTURE,
+    )?;
+    m.add(
+        stringify!(METRIC_ADVERSE_SELECTION),
+        crate::analytics::METRIC_ADVERSE_SELECTION,
+    )?;
+    m.add(
+        stringify!(METRIC_FILL_RATIO),
+        crate::analytics::METRIC_FILL_RATIO,
+    )?;
+    m.add(
+        stringify!(METRIC_CANCEL_RATIO),
+        crate::analytics::METRIC_CANCEL_RATIO,
+    )?;
+    m.add(
+        stringify!(METRIC_COMPLETION_TIME_S),
+        crate::analytics::METRIC_COMPLETION_TIME_S,
+    )?;
+    m.add(
+        stringify!(METRIC_CHILD_COUNT),
+        crate::analytics::METRIC_CHILD_COUNT,
+    )?;
+    m.add(
+        stringify!(METRIC_CHILD_CHURN),
+        crate::analytics::METRIC_CHILD_CHURN,
+    )?;
+    m.add(
+        stringify!(METRIC_MEAN_CHILD_LIFETIME_S),
+        crate::analytics::METRIC_MEAN_CHILD_LIFETIME_S,
+    )?;
+    m.add(
+        stringify!(METRIC_PARTIAL_FILL_RATIO),
+        crate::analytics::METRIC_PARTIAL_FILL_RATIO,
+    )?;
+    m.add(
+        stringify!(METRIC_PRICE_IMPROVEMENT),
+        crate::analytics::METRIC_PRICE_IMPROVEMENT,
+    )?;
     #[cfg(feature = "examples")]
     m.add_class::<crate::examples::strategies::CompositeMarketMakerConfig>()?;
     #[cfg(feature = "examples")]
