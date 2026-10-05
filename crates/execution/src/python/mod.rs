@@ -42,6 +42,7 @@ pub fn execution(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::models::fee::CappedOptionFeeModel>()?;
     m.add_class::<crate::models::fee::TieredNotionalOptionFeeModel>()?;
     m.add_class::<fill::PyFillModel>()?;
+    m.add_class::<latency::PyLatencyModel>()?;
     m.add_class::<crate::models::fill::FillModelKind>()?;
     m.add_class::<crate::models::fill::FillModelConfig>()?;
     m.add_class::<crate::models::fill::DefaultFillModel>()?;

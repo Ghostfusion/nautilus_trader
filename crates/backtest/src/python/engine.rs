@@ -35,7 +35,7 @@ use nautilus_execution::{
     models::fill::FillModelHandle,
     python::{
         fee::pyobject_to_fee_model_handle, fill::pyobject_to_fill_model_handle,
-        latency::pyobject_to_latency_model_any,
+        latency::pyobject_to_latency_model_handle,
         market_impact::pyobject_to_market_impact_model_handle,
         slippage::pyobject_to_slippage_model_any,
     },
@@ -258,9 +258,8 @@ impl PyBacktestEngine {
             })?;
 
         let latency_model = latency_model
-            .map(|obj| Python::attach(|py| pyobject_to_latency_model_any(obj.bind(py))))
-            .transpose()?
-            .map(Into::into);
+            .map(|obj| Python::attach(|py| pyobject_to_latency_model_handle(obj.bind(py))))
+            .transpose()?;
         let slippage_model = slippage_model
             .map(|obj| Python::attach(|py| pyobject_to_slippage_model_any(obj.bind(py))))
             .transpose()?
