@@ -30,6 +30,7 @@ use nautilus_data::engine::config::DataEngineConfig;
 use nautilus_execution::{
     engine::config::ExecutionEngineConfig,
     models::{
+        competition::{CompetitorSet, CompetitorSetHandle},
         fee::{FeeModelAny, FeeModelHandle},
         fill::{FillModelAny, FillModelHandle},
         latency::{LatencyModelAny, LatencyModelHandle},
@@ -338,6 +339,11 @@ pub struct SimulatedVenueConfig {
     pub fee_model: FeeModelHandle,
     /// The optional model used to simulate command latency.
     pub latency_model: Option<LatencyModelHandle>,
+    /// The optional competitor set used to rank order arrivals.
+    ///
+    /// When set, each submission is ranked against the declared rival latencies and the rank
+    /// reaches the passive fill context; when unset, no cohort is used and behaviour is unchanged.
+    pub competitor_set: Option<CompetitorSetHandle>,
     /// If the execution client supports routing orders to other venues.
     #[builder(default = false)]
     pub routing: bool,
@@ -600,6 +606,8 @@ pub struct BacktestVenueConfig {
     market_impact_model: Option<MarketImpactModelAny>,
     /// The latency model for the venue.
     latency_model: Option<LatencyModelAny>,
+    /// The competitor set used to rank order arrivals for the venue.
+    competitor_set: Option<CompetitorSet>,
     /// The fee model for the venue.
     ///
     /// Required when building engines from this config, including an explicit
@@ -851,6 +859,11 @@ impl BacktestVenueConfig {
     #[must_use]
     pub fn latency_model(&self) -> Option<&LatencyModelAny> {
         self.latency_model.as_ref()
+    }
+
+    #[must_use]
+    pub fn competitor_set(&self) -> Option<&CompetitorSet> {
+        self.competitor_set.as_ref()
     }
 
     #[must_use]

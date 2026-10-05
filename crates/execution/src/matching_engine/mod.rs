@@ -140,6 +140,11 @@ pub struct OrderMatchingEngine {
     queue_pending: IndexMap<ClientOrderId, PriceRaw>,
     queue_ahead_orders: IndexMap<ClientOrderId, IndexMap<OrderId, QuantityRaw>>,
     queue_ahead_total: IndexMap<ClientOrderId, (PriceRaw, QuantityRaw)>,
+    /// Ordinal arrival rank per resting client order id against a configured competitor set.
+    ///
+    /// Simulation metadata set by the caller (the backtest exchange) at submission; an absent
+    /// entry means no cohort and is read as rank zero.
+    competitor_rank: IndexMap<ClientOrderId, u32>,
     queue_snapshot_in_progress: bool,
     queue_ids_by_price: IndexMap<PriceRaw, IndexSet<ClientOrderId>>,
     queue_excess: IndexMap<ClientOrderId, QuantityRaw>,
@@ -238,6 +243,7 @@ impl OrderMatchingEngine {
             queue_pending: IndexMap::new(),
             queue_ahead_orders: IndexMap::new(),
             queue_ahead_total: IndexMap::new(),
+            competitor_rank: IndexMap::new(),
             queue_snapshot_in_progress: false,
             queue_ids_by_price: IndexMap::new(),
             queue_excess: IndexMap::new(),
@@ -310,6 +316,7 @@ impl OrderMatchingEngine {
         self.queue_pending.clear();
         self.queue_ahead_orders.clear();
         self.queue_ahead_total.clear();
+        self.competitor_rank.clear();
         self.queue_snapshot_in_progress = false;
         self.queue_ids_by_price.clear();
         self.queue_excess.clear();
@@ -576,12 +583,26 @@ impl OrderMatchingEngine {
         self.market_impact_model = Some(market_impact_model);
     }
 
+    /// Sets the ordinal arrival rank for a resting order's client order id.
+    ///
+    /// This is simulation metadata set by the caller (the backtest exchange) at submission, from
+    /// the configured competitor set and the order's insert latency. A rank of zero means no
+    /// cohort and removes any stored entry, so the map only tracks orders that compete.
+    pub fn set_competitor_rank(&mut self, client_order_id: ClientOrderId, rank: u32) {
+        if rank == 0 {
+            self.competitor_rank.shift_remove(&client_order_id);
+        } else {
+            self.competitor_rank.insert(client_order_id, rank);
+        }
+    }
+
     /// Builds the passive fill context for a resting `order` at the decision point.
     ///
     /// Queue ahead is read from the tracked queue position when queue position tracking is
     /// enabled, and is zero otherwise. Toxicity is derived from the most recent trade, which is
     /// tracked only while a trade tick is being processed; a fill decision driven by a quote or
-    /// an order event therefore carries no toxicity signal.
+    /// an order event therefore carries no toxicity signal. The competitor rank is read from the
+    /// metadata set at submission and is zero when no cohort was configured.
     fn passive_fill_context(&self, order: &OrderAny) -> PassiveFillContext {
         let size_precision = self.instrument.size_precision();
         let queue_ahead = self
@@ -597,6 +618,11 @@ impl OrderMatchingEngine {
             order_quantity: order.quantity(),
             queue_ahead,
             toxicity: self.trade_toxicity(order.order_side(), order.quantity()),
+            competitor_rank: self
+                .competitor_rank
+                .get(&order.client_order_id())
+                .copied()
+                .unwrap_or(0),
         }
     }
 
@@ -702,6 +728,7 @@ impl OrderMatchingEngine {
             .map(|(price_raw, _)| price_raw);
         self.queue_ahead_orders.shift_remove(&client_order_id);
         self.queue_excess.shift_remove(&client_order_id);
+        self.competitor_rank.shift_remove(&client_order_id);
 
         for price_raw in [pending_price, ahead_price].into_iter().flatten() {
             let remove_price = self
@@ -1569,6 +1596,7 @@ impl OrderMatchingEngine {
             self.queue_pending.clear();
             self.queue_ahead_orders.clear();
             self.queue_ahead_total.clear();
+            self.competitor_rank.clear();
             self.queue_ids_by_price.clear();
             self.queue_excess.clear();
             self.prev_bid_price_raw = 0;
@@ -7355,7 +7383,7 @@ mod tests {
         matching_engine::config::OrderMatchingEngineConfig,
         models::{
             fee::{FeeModel, FeeModelAny, FeeModelHandle, MakerTakerFeeModel},
-            fill::{FillModel, FillModelHandle},
+            fill::{AdverseSelectionFillModel, FillModel, FillModelHandle, PassiveFillContext},
             market_impact::{LinearMarketImpactModel, MarketImpactModel, MarketImpactModelHandle},
         },
     };
@@ -10538,6 +10566,60 @@ mod tests {
         process_cached_order(&mut engine, &mut order, AccountId::from("ACCOUNT-001"));
 
         assert_eq!(calls.get(), 1);
+    }
+
+    #[rstest]
+    fn test_competitor_rank_flows_into_the_passive_fill_decision() {
+        let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt());
+        let cache = Rc::new(RefCell::new(Cache::default()));
+        let clock = Rc::new(RefCell::new(VirtualClock::new()));
+        let mut engine = OrderMatchingEngine::new(
+            instrument.clone(),
+            1,
+            FillModelHandle::default(),
+            FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into(),
+            BookType::L1_MBP,
+            OmsType::Netting,
+            AccountType::Margin,
+            clock,
+            cache,
+            Default::default(),
+        );
+        let order = OrderTestBuilder::new(OrderType::Limit)
+            .instrument_id(instrument.id())
+            .side(OrderSide::Buy)
+            .quantity(Quantity::from("1.000"))
+            .price(Price::from("1500.00"))
+            .build();
+        let client_order_id = order.client_order_id();
+
+        // With no cohort the context carries rank zero.
+        let context_rank0 = engine.passive_fill_context(&order);
+        assert_eq!(context_rank0.competitor_rank, 0);
+
+        engine.set_competitor_rank(client_order_id, 2);
+        let context_rank2 = engine.passive_fill_context(&order);
+        assert_eq!(context_rank2.competitor_rank, 2);
+
+        engine.set_competitor_rank(client_order_id, 1);
+        let context_rank1 = engine.passive_fill_context(&order);
+        assert_eq!(context_rank1.competitor_rank, 1);
+
+        // A model that fills with certainty alone draws the same sequence for rank 0 and 1 and a
+        // strictly sparser one at rank 2, where the order is one of two at the level.
+        let count_fills = |context: &PassiveFillContext| {
+            let mut model = AdverseSelectionFillModel::new(1.0, 0.0, Some(7), 0.0, 0.0).unwrap();
+            (0..16)
+                .filter(|_| model.is_limit_filled_with_context(context).unwrap())
+                .count()
+        };
+
+        let fills_rank0 = count_fills(&context_rank0);
+        let fills_rank1 = count_fills(&context_rank1);
+        let fills_rank2 = count_fills(&context_rank2);
+
+        assert_eq!(fills_rank1, fills_rank0);
+        assert!(fills_rank2 < fills_rank0);
     }
 
     #[rstest]

@@ -41,6 +41,7 @@ use nautilus_execution::{
         OrderMatchingEngine, config::OrderMatchingEngineConfig, inflight::InflightOrders,
     },
     models::{
+        competition::CompetitorSetHandle,
         fee::FeeModelHandle,
         fill::{FillModelHandle, FillModelSelection},
         latency::{LatencyModel, LatencyModelHandle},
@@ -84,14 +85,17 @@ use crate::{
 struct InflightCommand {
     timestamp: UnixNanos,
     counter: u32,
+    /// The ordinal arrival rank for a submission against the competitor set, or zero.
+    rank: u32,
     command: TradingCommand,
 }
 
 impl InflightCommand {
-    const fn new(timestamp: UnixNanos, counter: u32, command: TradingCommand) -> Self {
+    const fn new(timestamp: UnixNanos, counter: u32, rank: u32, command: TradingCommand) -> Self {
         Self {
             timestamp,
             counter,
+            rank,
             command,
         }
     }
@@ -166,6 +170,7 @@ pub struct SimulatedExchange {
     slippage_model: Option<SlippageModelHandle>,
     market_impact_model: Option<MarketImpactModelHandle>,
     latency_model: Option<LatencyModelHandle>,
+    competitor_set: Option<CompetitorSetHandle>,
     instruments: AHashMap<InstrumentId, InstrumentAny>,
     matching_engines: IndexMap<InstrumentId, OrderMatchingEngine>,
     last_raw_id: u32,
@@ -177,7 +182,7 @@ pub struct SimulatedExchange {
     module_error: Option<String>,
     clock: Rc<RefCell<dyn Clock>>,
     cache: Rc<RefCell<Cache>>,
-    message_queue: VecDeque<TradingCommand>,
+    message_queue: VecDeque<(TradingCommand, u32)>,
     inflight_queue: BinaryHeap<InflightCommand>,
     inflight_orders: InflightOrders,
     inflight_counter: AHashMap<UnixNanos, u32>,
@@ -258,6 +263,7 @@ impl SimulatedExchange {
             slippage_model: config.slippage_model,
             market_impact_model: config.market_impact_model,
             latency_model: config.latency_model,
+            competitor_set: config.competitor_set,
             instruments: AHashMap::new(),
             matching_engines: IndexMap::new(),
             last_raw_id: 0,
@@ -880,29 +886,40 @@ impl SimulatedExchange {
 
         if !self.use_message_queue {
             let _guard = DeferEventsGuard::new(Rc::clone(&self.deferring_events));
-            self.process_trading_command(command);
+            self.process_trading_command(command, 0);
         } else if self.latency_model.is_none() {
-            self.message_queue.push_back(command);
+            self.message_queue.push_back((command, 0));
         } else {
-            let (timestamp, counter) = self.generate_inflight_command(&command);
+            let (timestamp, counter, rank) = self.generate_inflight_command(&command);
             self.inflight_queue
-                .push(InflightCommand::new(timestamp, counter, command));
+                .push(InflightCommand::new(timestamp, counter, rank, command));
         }
     }
 
-    fn generate_inflight_command(&mut self, command: &TradingCommand) -> (UnixNanos, u32) {
+    /// Returns the arrival `(timestamp, counter, rank)` for an inflight command.
+    ///
+    /// The rank is computed for submissions only, from the configured competitor set and the
+    /// insert latency the timestamp already uses; modify and cancel commands carry rank zero.
+    fn generate_inflight_command(&mut self, command: &TradingCommand) -> (UnixNanos, u32, u32) {
         if let Some(latency_model) = &self.latency_model {
-            let ts = match command {
+            let (ts, rank) = match command {
                 TradingCommand::SubmitOrder(_) | TradingCommand::SubmitOrderList(_) => {
-                    command.ts_init() + latency_model.get_insert_latency()
+                    let latency = latency_model.get_insert_latency();
+                    // An absent or empty cohort is no cohort, which is rank zero; a populated one
+                    // ranks the order against it.
+                    let rank = self
+                        .competitor_set
+                        .as_ref()
+                        .map_or(0, |set| if set.is_empty() { 0 } else { set.rank(latency) });
+                    (command.ts_init() + latency, rank)
                 }
                 TradingCommand::ModifyOrder(_) | TradingCommand::ModifyOrders(_) => {
-                    command.ts_init() + latency_model.get_update_latency()
+                    (command.ts_init() + latency_model.get_update_latency(), 0)
                 }
                 TradingCommand::CancelOrder(_)
                 | TradingCommand::CancelOrders(_)
                 | TradingCommand::CancelAllOrders(_) => {
-                    command.ts_init() + latency_model.get_delete_latency()
+                    (command.ts_init() + latency_model.get_delete_latency(), 0)
                 }
                 _ => panic!("Cannot handle command: {command:?}"),
             };
@@ -913,7 +930,7 @@ impl SimulatedExchange {
                 .and_modify(|e| *e += 1)
                 .or_insert(1);
 
-            (ts, *counter)
+            (ts, *counter, rank)
         } else {
             panic!("Latency model should be initialized");
         }
@@ -1683,7 +1700,8 @@ impl SimulatedExchange {
             }
 
             processed_timestamps.insert(inflight.timestamp);
-            self.message_queue.push_back(inflight.command);
+            self.message_queue
+                .push_back((inflight.command, inflight.rank));
         }
 
         let deferred_timestamps: BTreeSet<_> =
@@ -1694,8 +1712,8 @@ impl SimulatedExchange {
             self.inflight_counter.remove(timestamp);
         }
 
-        while let Some(command) = self.message_queue.pop_front() {
-            self.process_trading_command(command);
+        while let Some((command, rank)) = self.message_queue.pop_front() {
+            self.process_trading_command(command, rank);
         }
     }
 
@@ -1925,7 +1943,7 @@ impl SimulatedExchange {
         }
     }
 
-    fn process_trading_command(&mut self, command: TradingCommand) {
+    fn process_trading_command(&mut self, command: TradingCommand, rank: u32) {
         self.inflight_orders.remove(&command);
         let instrument_id = command.instrument_id();
         assert!(
@@ -1967,6 +1985,7 @@ impl SimulatedExchange {
             for order in &mut orders {
                 let order_instrument_id = order.instrument_id();
                 if let Some(matching_engine) = self.matching_engines.get_mut(&order_instrument_id) {
+                    matching_engine.set_competitor_rank(order.client_order_id(), rank);
                     matching_engine.process_order(order, account_id);
                 } else {
                     panic!("Matching engine not found for instrument {order_instrument_id}");
@@ -1985,6 +2004,7 @@ impl SimulatedExchange {
                         .order(&command.client_order_id)
                         .map(|o| o.clone())
                         .expect("Order must exist in cache");
+                    matching_engine.set_competitor_rank(order.client_order_id(), rank);
                     matching_engine.process_order(&mut order, account_id);
                 }
                 TradingCommand::ModifyOrder(ref command) => {
@@ -2163,9 +2183,12 @@ impl Drop for DeferEventsGuard {
 
 #[cfg(test)]
 mod tests {
-    use nautilus_common::messages::execution::{QueryAccount, QueryOrder, SubmitOrder};
+    use nautilus_common::messages::execution::{
+        CancelAllOrders, QueryAccount, QueryOrder, SubmitOrder,
+    };
     use nautilus_core::DurationNanos;
     use nautilus_execution::models::{
+        competition::CompetitorSet,
         fee::{FeeModelAny, MakerTakerFeeModel},
         latency::{LatencyModelHandle, StaticLatencyModel},
     };
@@ -2297,7 +2320,7 @@ mod tests {
 
     #[rstest]
     fn test_inflight_command_matches_settlement_scope() {
-        let inflight = InflightCommand::new(UnixNanos::from(1), 0, query_order());
+        let inflight = InflightCommand::new(UnixNanos::from(1), 0, 0, query_order());
         let instrument_id = InstrumentId::from("AUD/USD.SIM");
         let other_id = InstrumentId::from("GBP/USD.SIM");
 
@@ -2419,5 +2442,92 @@ mod tests {
         exchange.reset().unwrap();
 
         assert!(exchange.inflight_counter.is_empty());
+    }
+
+    fn submit_order_command(ts_init: UnixNanos) -> TradingCommand {
+        let order = OrderTestBuilder::new(OrderType::Limit)
+            .instrument_id(InstrumentId::from("AUD/USD.SIM"))
+            .client_order_id(ClientOrderId::from("O-RANK"))
+            .side(OrderSide::Buy)
+            .quantity(Quantity::from("1"))
+            .price(Price::from("1.00000"))
+            .build();
+        TradingCommand::SubmitOrder(SubmitOrder::new(
+            TraderId::test_default(),
+            None,
+            StrategyId::test_default(),
+            order.instrument_id(),
+            order.client_order_id(),
+            order.init_event().clone(),
+            None,
+            None,
+            None,
+            UUID4::default(),
+            ts_init,
+            None,
+        ))
+    }
+
+    fn latency_with_insert(insert_nanos: u64) -> LatencyModelHandle {
+        LatencyModelHandle::new(StaticLatencyModel::new(
+            DurationNanos::default(),
+            DurationNanos::new(insert_nanos),
+            DurationNanos::default(),
+            DurationNanos::default(),
+        ))
+    }
+
+    #[rstest]
+    fn test_generate_inflight_command_ranks_a_submission_against_the_competitor_set() {
+        let mut exchange = setup_exchange(Dispatch::Latency);
+        exchange.set_latency_model(latency_with_insert(100));
+        exchange.competitor_set = Some(CompetitorSetHandle::new(CompetitorSet::new(vec![
+            DurationNanos::new(50),
+            DurationNanos::new(200),
+        ])));
+
+        let command = submit_order_command(UnixNanos::from(1_000));
+        let (ts, _counter, rank) = exchange.generate_inflight_command(&command);
+
+        assert_eq!(ts, UnixNanos::from(1_100));
+        assert_eq!(rank, 2);
+    }
+
+    #[rstest]
+    fn test_generate_inflight_command_without_a_competitor_set_yields_rank_zero() {
+        let mut exchange = setup_exchange(Dispatch::Latency);
+        exchange.set_latency_model(latency_with_insert(100));
+        let command = submit_order_command(UnixNanos::from(1_000));
+
+        let (_, _, rank) = exchange.generate_inflight_command(&command);
+        assert_eq!(rank, 0);
+
+        exchange.competitor_set = Some(CompetitorSetHandle::new(CompetitorSet::default()));
+        let (_, _, rank) = exchange.generate_inflight_command(&command);
+        assert_eq!(rank, 0);
+    }
+
+    #[rstest]
+    fn test_generate_inflight_command_leaves_cancel_at_rank_zero() {
+        let mut exchange = setup_exchange(Dispatch::Latency);
+        exchange.set_latency_model(latency_with_insert(100));
+        exchange.competitor_set = Some(CompetitorSetHandle::new(CompetitorSet::new(vec![
+            DurationNanos::new(50),
+        ])));
+
+        let cancel = TradingCommand::CancelAllOrders(CancelAllOrders::new(
+            TraderId::test_default(),
+            None,
+            StrategyId::test_default(),
+            InstrumentId::from("AUD/USD.SIM"),
+            None,
+            UUID4::default(),
+            UnixNanos::from(1_000),
+            None,
+            None,
+        ));
+        let (_, _, rank) = exchange.generate_inflight_command(&cancel);
+
+        assert_eq!(rank, 0);
     }
 }

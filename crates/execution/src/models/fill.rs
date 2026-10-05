@@ -50,8 +50,9 @@ fn unlimited_liquidity(precision: u8) -> Quantity {
 /// A passive fill decision is made when a resting limit order is at the touch and the matching
 /// engine asks its fill model whether the order fills. The context carries only the signals the
 /// engine already tracks at that point: the order's own side and quantity, the quantity resting
-/// ahead of it at its price when queue position tracking is enabled, and a signed measure of
-/// recent trade-flow toxicity against the order's side.
+/// ahead of it at its price when queue position tracking is enabled, a signed measure of recent
+/// trade-flow toxicity against the order's side, and the order's ordinal arrival rank against a
+/// configured competitor set.
 ///
 /// A model that does not condition on the context implements nothing new: the default
 /// [`FillModel::is_limit_filled_with_context`] delegates to [`FillModel::is_limit_filled`], and
@@ -73,6 +74,12 @@ pub struct PassiveFillContext {
     /// magnitude is the last trade's size as a fraction of the order's own quantity, capped at
     /// one; the sign is the direction of that flow relative to the resting side.
     pub toxicity: f64,
+    /// The order's ordinal arrival rank against the configured competitor set.
+    ///
+    /// `0` when no competitor set was configured; `1` when the order arrived first (or tied for
+    /// first). A rank of `n >= 2` means `n - 1` rivals arrived strictly earlier, so the order is
+    /// one of `n` at the level.
+    pub competitor_rank: u32,
 }
 
 /// The passive fill assumption a model makes, for a result to be read against.
@@ -1740,6 +1747,12 @@ impl AdverseSelectionFillModel {
     /// falls monotonically as either the queue ahead grows relative to the order's own quantity
     /// or as the toxicity turns against the order's side. Non-finite sensitivity parameters are
     /// rejected by the constructor, so the result is always finite and within `[0, 1]`.
+    ///
+    /// When a competitor set was configured, the order is one of `context.competitor_rank` at the
+    /// level, so it takes `1 / rank` of what it would take alone and the probability is scaled by
+    /// that factor. The factor is ordinal: only the count of rivals ahead matters, not their
+    /// identities or latencies. A rank of `0` (no competitor set) or `1` (arrived first, or tied
+    /// for first) leaves the probability exactly as it was without a cohort.
     #[must_use]
     pub fn fill_probability(&self, context: &PassiveFillContext) -> f64 {
         let queue_ahead = context.queue_ahead.as_f64();
@@ -1755,7 +1768,12 @@ impl AdverseSelectionFillModel {
             + self.toxicity_sensitivity * adverse_toxicity))
             .exp();
 
-        (self.state.prob_fill_on_limit * decay).clamp(0.0, 1.0)
+        let probability = (self.state.prob_fill_on_limit * decay).clamp(0.0, 1.0);
+        if context.competitor_rank >= 2 {
+            (probability / f64::from(context.competitor_rank)).clamp(0.0, 1.0)
+        } else {
+            probability
+        }
     }
 }
 
@@ -3082,11 +3100,20 @@ mod tests {
     }
 
     fn passive_context(queue_ahead: Quantity, toxicity: f64) -> PassiveFillContext {
+        passive_context_ranked(queue_ahead, toxicity, 0)
+    }
+
+    fn passive_context_ranked(
+        queue_ahead: Quantity,
+        toxicity: f64,
+        competitor_rank: u32,
+    ) -> PassiveFillContext {
         PassiveFillContext {
             order_side: OrderSide::Buy,
             order_quantity: Quantity::from(100),
             queue_ahead,
             toxicity,
+            competitor_rank,
         }
     }
 
@@ -3143,6 +3170,44 @@ mod tests {
             model.fill_probability(&passive_context(Quantity::from(0), -1.0)),
             model.fill_probability(&passive_context(Quantity::from(0), 0.0))
         );
+    }
+
+    #[rstest]
+    fn test_adverse_selection_fill_probability_unchanged_for_rank_zero_and_one() {
+        let model = AdverseSelectionFillModel::new(0.8, 0.0, Some(42), 1.0, 1.0).unwrap();
+        let baseline = model.fill_probability(&passive_context(Quantity::from(100), 0.5));
+
+        assert_eq!(
+            model.fill_probability(&passive_context_ranked(Quantity::from(100), 0.5, 0)),
+            baseline
+        );
+        assert_eq!(
+            model.fill_probability(&passive_context_ranked(Quantity::from(100), 0.5, 1)),
+            baseline
+        );
+    }
+
+    #[rstest]
+    fn test_adverse_selection_fill_probability_falls_from_rank_two_to_three() {
+        let model = AdverseSelectionFillModel::new(1.0, 0.0, Some(42), 0.0, 0.0).unwrap();
+        let rank_two = model.fill_probability(&passive_context_ranked(Quantity::from(0), 0.0, 2));
+        let rank_three = model.fill_probability(&passive_context_ranked(Quantity::from(0), 0.0, 3));
+
+        assert!(rank_two > rank_three);
+    }
+
+    #[rstest]
+    fn test_adverse_selection_fill_probability_stays_in_unit_range_with_rank() {
+        let model = AdverseSelectionFillModel::new(1.0, 0.0, Some(42), 4.0, 4.0).unwrap();
+
+        for rank in [0u32, 1, 2, 3, 7, 100] {
+            let probability =
+                model.fill_probability(&passive_context_ranked(Quantity::from(300), 1.0, rank));
+            assert!(
+                (0.0..=1.0).contains(&probability),
+                "rank {rank} produced {probability}"
+            );
+        }
     }
 
     #[rstest]

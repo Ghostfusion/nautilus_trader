@@ -15,6 +15,7 @@
 
 //! Execution models and data structures.
 
+pub mod competition;
 pub mod fee;
 pub mod fill;
 pub mod latency;

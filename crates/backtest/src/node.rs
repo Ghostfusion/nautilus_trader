@@ -19,6 +19,7 @@ use std::{collections::BTreeMap, iter::Peekable};
 
 use ahash::{AHashMap, AHashSet};
 use nautilus_core::{Params, UnixNanos};
+use nautilus_execution::models::competition::CompetitorSetHandle;
 use nautilus_execution::models::fill::FillModelHandle;
 use nautilus_execution::models::market_impact::MarketImpactModelHandle;
 use nautilus_execution::models::slippage::SlippageModelHandle;
@@ -288,6 +289,10 @@ fn build_engine(config: &BacktestRunConfig) -> anyhow::Result<BacktestEngine> {
             .into();
 
         let latency_model = venue_config.latency_model().cloned().map(Into::into);
+        let competitor_set: Option<CompetitorSetHandle> = venue_config
+            .competitor_set()
+            .cloned()
+            .map(CompetitorSetHandle::new);
         let slippage_model: Option<SlippageModelHandle> =
             venue_config.slippage_model().cloned().map(Into::into);
         let market_impact_model: Option<MarketImpactModelHandle> =
@@ -309,6 +314,7 @@ fn build_engine(config: &BacktestRunConfig) -> anyhow::Result<BacktestEngine> {
             .maybe_market_impact_model(market_impact_model)
             .fee_model(fee_model)
             .maybe_latency_model(latency_model)
+            .maybe_competitor_set(competitor_set)
             .routing(venue_config.routing())
             .reject_stop_orders(venue_config.reject_stop_orders())
             .support_gtd_orders(venue_config.support_gtd_orders())
