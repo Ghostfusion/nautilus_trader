@@ -55,6 +55,16 @@ standard for correctness, reliability, testing, clarity, and maintainability.**
 - Do not put an issue or pull request number in a commit subject or pull request title. A squash
   merge appends the number; reference issues from the commit body instead.
 
+### Working agreement
+
+- A newly created code file or document is committed as part of the work that creates it. Treat
+  this as a standing instruction that satisfies the explicit-request requirement for those files;
+  do not stop to ask whether a new file should be committed.
+- The exception is sensitive content, which must not enter history: credentials, API keys and
+  tokens, private keys, personal or customer data, and third-party material whose licence forbids
+  redistribution. Name what was left out and why.
+- Pushing and every other change to remote state still require an explicit request.
+
 ## Pull request readiness
 
 **Prepare a complete, review-ready change before opening a pull request.**
@@ -79,7 +89,9 @@ contributor can push one coherent update.
 ## Git and public interaction
 
 - Base contributor work on `develop` and target `develop` when preparing a pull request.
-- Do not commit, amend, push, or change remote state unless the user explicitly asks.
+- Do not commit, amend, push, or change remote state unless the user explicitly asks, apart from
+  the standing exception for newly created files in the working agreement above. Pushing still
+  requires an explicit request.
 - Do not open, edit, comment on, review, or otherwise interact with GitHub issues or pull requests
   unless the user explicitly asks. The human contributor controls every public interaction and
   remains responsible for the final communication.
