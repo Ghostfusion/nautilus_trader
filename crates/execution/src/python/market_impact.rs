@@ -104,6 +104,16 @@ impl PrefactorInterval {
         self.is_point()
     }
 
+    /// Returns this calibration with the anonymous-tape de-bias applied.
+    ///
+    /// Both bounds are divided by the inflation the reconstruction introduced, and the result
+    /// records that it was de-biased rather than measured. A prefactor fitted from the venue's own
+    /// fills is refused, because a measured prefactor needs no correction.
+    #[pyo3(name = "debiased")]
+    fn py_debiased(&self) -> PyResult<Self> {
+        self.debiased().map_err(to_pyvalue_err)
+    }
+
     fn __repr__(&self) -> String {
         self.to_string()
     }

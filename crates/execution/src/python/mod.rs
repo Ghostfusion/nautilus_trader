@@ -20,6 +20,7 @@ pub mod fee;
 pub mod fill;
 pub mod latency;
 pub mod market_impact;
+pub mod market_impact_calibration;
 pub mod slippage;
 
 use pyo3::prelude::*;
@@ -60,5 +61,14 @@ pub fn execution(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::models::market_impact::SquareRootMarketImpactModel>()?;
     m.add_class::<crate::models::market_impact::PrefactorInterval>()?;
     m.add_class::<crate::models::market_impact::ImpactCalibrationSource>()?;
+    m.add_class::<crate::models::market_impact_calibration::ImpactObservation>()?;
+    m.add_function(wrap_pyfunction!(
+        market_impact_calibration::py_fit_prefactor_from_fills,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        market_impact_calibration::py_fit_prefactor_from_tape,
+        m
+    )?)?;
     Ok(())
 }

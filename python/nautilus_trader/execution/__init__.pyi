@@ -19,6 +19,7 @@ __all__ = [
     "FillModelKind",
     "FixedFeeModel",
     "ImpactCalibrationSource",
+    "ImpactObservation",
     "LimitOrderPartialFillModel",
     "LinearMarketImpactModel",
     "MakerTakerFeeModel",
@@ -37,6 +38,8 @@ __all__ = [
     "TieredNotionalOptionFeeModel",
     "TwoTierFillModel",
     "VolumeSensitiveFillModel",
+    "fit_prefactor_from_fills",
+    "fit_prefactor_from_tape",
 ]
 
 @typing.final
@@ -210,6 +213,20 @@ class FixedFeeModel(FeeModel):
     ) -> model.Money: ...
 
 @typing.final
+class ImpactObservation:
+    def __init__(
+        self, quantity: model.Quantity, reference_quantity: model.Quantity, increments: int
+    ) -> None: ...
+    @property
+    def quantity(self) -> model.Quantity: ...
+    @property
+    def reference_quantity(self) -> model.Quantity: ...
+    @property
+    def increments(self) -> int: ...
+    @property
+    def prefactor(self) -> float | None: ...
+
+@typing.final
 class LimitOrderPartialFillModel:
     def __init__(
         self, prob_fill_on_limit: float, prob_slippage: float, random_seed: int | None = ...
@@ -280,6 +297,7 @@ class PrefactorInterval:
     def source(self) -> ImpactCalibrationSource: ...
     @property
     def is_point(self) -> bool: ...
+    def debiased(self) -> PrefactorInterval: ...
 
 @typing.final
 class ProbabilisticFillModel:
@@ -391,3 +409,10 @@ class ImpactCalibrationSource(enum.Enum):
     ANONYMOUS_TAPE_DEBIASED = ...
     ANONYMOUS_TAPE = ...
     ASSUMED = ...
+
+def fit_prefactor_from_fills(
+    observations: typing.Sequence[ImpactObservation],
+) -> PrefactorInterval: ...
+def fit_prefactor_from_tape(
+    observations: typing.Sequence[ImpactObservation],
+) -> PrefactorInterval: ...

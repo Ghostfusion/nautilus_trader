@@ -166,6 +166,13 @@ impl MarketImpactModel for LinearMarketImpactModel {
     }
 }
 
+/// The factor by which reconstructing metaorders from an anonymous tape inflates the prefactor.
+///
+/// The corpus measures the reconstruction's effect at about twofold, so a prefactor fitted from an
+/// anonymous tape has to be de-biased by this factor before it is used. The step is explicit
+/// because it corrects for a heuristic rather than for a property of the model.
+pub const ANONYMOUS_TAPE_INFLATION: f64 = 2.0;
+
 /// Where a calibrated prefactor came from.
 ///
 /// The provenance travels with the value because the same number means different things depending
@@ -301,6 +308,31 @@ impl PrefactorInterval {
     )]
     pub fn is_point(&self) -> bool {
         self.lower == self.upper
+    }
+
+    /// Returns this calibration with the anonymous-tape de-bias applied.
+    ///
+    /// Both bounds are divided by [`ANONYMOUS_TAPE_INFLATION`], because reconstructing metaorders
+    /// from an anonymous tape inflates the prefactor about twofold, and the result records that it
+    /// was de-biased rather than measured.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the prefactor was not fitted from an anonymous tape, because a measured
+    /// prefactor needs no correction and applying one would be a silent mistake.
+    pub fn debiased(self) -> anyhow::Result<Self> {
+        if self.source != ImpactCalibrationSource::AnonymousTape {
+            anyhow::bail!(
+                "only a prefactor fitted from an anonymous tape can be de-biased, this one is {}",
+                self.source
+            );
+        }
+
+        Self::new(
+            self.lower / ANONYMOUS_TAPE_INFLATION,
+            self.upper / ANONYMOUS_TAPE_INFLATION,
+            ImpactCalibrationSource::AnonymousTapeDebiased,
+        )
     }
 }
 

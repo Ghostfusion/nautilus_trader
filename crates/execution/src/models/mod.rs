@@ -19,4 +19,5 @@ pub mod fee;
 pub mod fill;
 pub mod latency;
 pub mod market_impact;
+pub mod market_impact_calibration;
 pub mod slippage;
