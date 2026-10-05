@@ -35,7 +35,8 @@ use nautilus_execution::{
     models::fill::FillModelHandle,
     python::{
         fee::pyobject_to_fee_model_handle, fill::pyobject_to_fill_model_handle,
-        latency::pyobject_to_latency_model_any, market_impact::pyobject_to_market_impact_model_any,
+        latency::pyobject_to_latency_model_any,
+        market_impact::pyobject_to_market_impact_model_handle,
         slippage::pyobject_to_slippage_model_any,
     },
 };
@@ -265,9 +266,8 @@ impl PyBacktestEngine {
             .transpose()?
             .map(Into::into);
         let market_impact_model = market_impact_model
-            .map(|obj| Python::attach(|py| pyobject_to_market_impact_model_any(obj.bind(py))))
-            .transpose()?
-            .map(Into::into);
+            .map(|obj| Python::attach(|py| pyobject_to_market_impact_model_handle(obj.bind(py))))
+            .transpose()?;
         let modules = modules
             .map(|objs| {
                 objs.into_iter()

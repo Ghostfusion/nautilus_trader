@@ -20,8 +20,8 @@ use nautilus_model::types::Quantity;
 use pyo3::prelude::*;
 
 use crate::models::market_impact::{
-    ImpactCalibrationSource, LinearMarketImpactModel, MarketImpactModelAny, PrefactorInterval,
-    SquareRootMarketImpactModel,
+    ImpactCalibrationSource, LinearMarketImpactModel, MarketImpactModel, MarketImpactModelAny,
+    MarketImpactModelHandle, PrefactorInterval, SquareRootMarketImpactModel,
 };
 
 #[pymethods]
@@ -204,6 +204,69 @@ pub fn market_impact_model_any_to_pyobject(
     }
 }
 
+/// A market impact model implemented in Python.
+///
+/// The adapter calls `impact_increments` on the Python object it holds with the fill's quantity and
+/// returns the whole number of price increments the object reports, so a caller can supply a model
+/// fitted from their own data without rebuilding the extension. The object is the caller's, so a
+/// raised exception, a missing method and a return that is not a whole number all surface as the
+/// error that reaches the caller rather than as a silently unchanged fill price.
+#[derive(Debug)]
+pub struct PythonMarketImpactModel {
+    obj: Py<PyAny>,
+}
+
+impl PythonMarketImpactModel {
+    /// Creates a new [`PythonMarketImpactModel`] from a Python object.
+    #[must_use]
+    pub fn new(obj: Py<PyAny>) -> Self {
+        Self { obj }
+    }
+}
+
+impl MarketImpactModel for PythonMarketImpactModel {
+    fn impact_increments(&mut self, fill_quantity: Quantity) -> anyhow::Result<u64> {
+        Python::attach(|py| -> anyhow::Result<u64> {
+            let quantity = Py::new(py, fill_quantity)?;
+            self.obj
+                .bind(py)
+                .call_method1("impact_increments", (quantity,))?
+                .extract()
+                .map_err(|e| anyhow::anyhow!("{e}"))
+        })
+        .map_err(|e| anyhow::anyhow!("Python MarketImpactModel.impact_increments failed: {e}"))
+    }
+}
+
+/// Extracts a Python market impact model object into a runtime [`MarketImpactModelHandle`].
+///
+/// A built-in model binding is converted as before. Any other object is accepted when it carries
+/// an `impact_increments` method, which is the whole protocol: the method takes the fill quantity
+/// and returns the number of price increments the fill price moves against the order direction.
+///
+/// # Errors
+///
+/// Returns an error if `obj` is neither a supported built-in model nor a Python object with an
+/// `impact_increments` method.
+pub fn pyobject_to_market_impact_model_handle(
+    obj: &Bound<'_, PyAny>,
+) -> PyResult<MarketImpactModelHandle> {
+    if let Ok(model) = pyobject_to_market_impact_model_any(obj) {
+        return Ok(model.into());
+    }
+
+    if !obj.hasattr("impact_increments")? {
+        let type_name = obj.get_type().name()?;
+        return Err(to_pytype_err(format!(
+            "Cannot convert {type_name} to MarketImpactModel"
+        )));
+    }
+
+    Ok(MarketImpactModelHandle::new(PythonMarketImpactModel::new(
+        obj.clone().unbind(),
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use pyo3::ffi::c_str;
@@ -234,6 +297,107 @@ mod tests {
         Python::attach(|py| {
             let obj = py.eval(c_str!("object()"), None, None).unwrap();
             assert!(pyobject_to_market_impact_model_any(&obj).is_err());
+        });
+    }
+
+    #[rstest]
+    fn test_pyobject_to_market_impact_model_handle_accepts_a_builtin() {
+        Python::initialize();
+
+        Python::attach(|py| {
+            let obj = Py::new(
+                py,
+                SquareRootMarketImpactModel::new(
+                    PrefactorInterval::point(4.0, ImpactCalibrationSource::Fills).unwrap(),
+                    Quantity::from("25"),
+                    25,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+            let mut handle = pyobject_to_market_impact_model_handle(obj.bind(py).as_any()).unwrap();
+            assert_eq!(handle.impact_increments(Quantity::from("25")).unwrap(), 4);
+        });
+    }
+
+    #[rstest]
+    fn test_pyobject_to_market_impact_model_handle_accepts_a_duck_typed_model() {
+        Python::initialize();
+
+        Python::attach(|py| {
+            let obj = py
+                .eval(
+                    c_str!("type('Model', (), {'impact_increments': lambda self, quantity: 3})()"),
+                    None,
+                    None,
+                )
+                .unwrap();
+
+            let mut handle = pyobject_to_market_impact_model_handle(&obj).unwrap();
+            assert_eq!(handle.impact_increments(Quantity::from("100")).unwrap(), 3);
+
+            // The protocol is the method alone: the same object answers for any fill size.
+            assert_eq!(handle.impact_increments(Quantity::from("1")).unwrap(), 3);
+        });
+    }
+
+    #[rstest]
+    fn test_pyobject_to_market_impact_model_handle_rejects_an_object_without_the_method() {
+        Python::initialize();
+
+        Python::attach(|py| {
+            let obj = py.eval(c_str!("object()"), None, None).unwrap();
+            assert!(pyobject_to_market_impact_model_handle(&obj).is_err());
+        });
+    }
+
+    #[rstest]
+    fn test_a_python_model_that_raises_surfaces_the_error() {
+        Python::initialize();
+
+        Python::attach(|py| {
+            let obj = py
+                .eval(
+                    c_str!(
+                        "type('Model', (), {'impact_increments': lambda self, quantity: (_ for _ in ()).throw(ValueError('no'))})()"
+                    ),
+                    None,
+                    None,
+                )
+                .unwrap();
+
+            let mut handle = pyobject_to_market_impact_model_handle(&obj).unwrap();
+            let error = handle.impact_increments(Quantity::from("100")).unwrap_err();
+
+            assert!(
+                error.to_string().contains("impact_increments failed"),
+                "the error must name the call, was {error}",
+            );
+            assert!(
+                error.to_string().contains("ValueError"),
+                "the error must carry the Python exception, was {error}",
+            );
+        });
+    }
+
+    #[rstest]
+    fn test_a_python_model_that_returns_a_non_integer_surfaces_the_error() {
+        Python::initialize();
+
+        Python::attach(|py| {
+            let obj = py
+                .eval(
+                    c_str!(
+                        "type('Model', (), {'impact_increments': lambda self, quantity: 'three'})()"
+                    ),
+                    None,
+                    None,
+                )
+                .unwrap();
+
+            let mut handle = pyobject_to_market_impact_model_handle(&obj).unwrap();
+            assert!(handle.impact_increments(Quantity::from("100")).is_err());
         });
     }
 }

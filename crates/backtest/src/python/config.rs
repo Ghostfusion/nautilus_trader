@@ -461,6 +461,8 @@ impl BacktestVenueConfig {
         let slippage_model = slippage_model
             .map(|obj| Python::attach(|py| pyobject_to_slippage_model_any(obj.bind(py))))
             .transpose()?;
+        // The declarative venue config carries built-in models, exactly as the fill model does; a
+        // Python model reaches a run through `BacktestEngine.add_venue`, which takes a handle.
         let market_impact_model = market_impact_model
             .map(|obj| Python::attach(|py| pyobject_to_market_impact_model_any(obj.bind(py))))
             .transpose()?;
