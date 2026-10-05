@@ -44,6 +44,15 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 /// The concern composes after the slippage adjustment: fill eligibility, then fill quantity,
 /// then base fill price, then the slippage adjustment, then the market impact adjustment, then
 /// the final fill price, then fees.
+///
+/// # Scope
+///
+/// Impact applies to a liquidity-taking fill that consumes an `L1_MBP` book, and to no other fill.
+/// A book with more than one level prices its own depth through the levels a taker walks, so an
+/// increment-per-fill adjustment on top of it would count the same size twice, and the model is
+/// not consulted for a fill on a book of another type. A matching-engine test pins both halves:
+/// the L1 fill consults the model and moves by its adjustment, and the L2 fill leaves the price
+/// where the book put it.
 pub trait MarketImpactModel {
     /// Returns the number of price increments the fill price moves against the order direction.
     ///

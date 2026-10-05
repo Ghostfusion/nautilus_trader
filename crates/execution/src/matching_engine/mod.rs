@@ -7233,7 +7233,7 @@ mod tests {
         models::{
             fee::{FeeModel, FeeModelAny, FeeModelHandle, MakerTakerFeeModel},
             fill::{FillModel, FillModelHandle},
-            market_impact::{LinearMarketImpactModel, MarketImpactModelHandle},
+            market_impact::{LinearMarketImpactModel, MarketImpactModel, MarketImpactModelHandle},
         },
     };
 
@@ -12109,6 +12109,16 @@ mod tests {
     fn taker_market_fill_price(
         market_impact_model: Option<MarketImpactModelHandle>,
     ) -> Option<Price> {
+        taker_market_fill_price_on(BookType::L1_MBP, market_impact_model)
+    }
+
+    /// Runs a taker market order against the given book type, optionally with an impact model.
+    ///
+    /// Returns the fill price of the resulting `OrderFilled` event, if one occurred.
+    fn taker_market_fill_price_on(
+        book_type: BookType,
+        market_impact_model: Option<MarketImpactModelHandle>,
+    ) -> Option<Price> {
         let instrument = InstrumentAny::CryptoPerpetual(crypto_perpetual_ethusdt());
         let instrument_id = instrument.id();
         let cache = Rc::new(RefCell::new(Cache::default()));
@@ -12117,7 +12127,7 @@ mod tests {
             1,
             FillModelHandle::default(),
             FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into(),
-            BookType::L1_MBP,
+            book_type,
             OmsType::Netting,
             AccountType::Margin,
             Rc::new(RefCell::new(VirtualClock::new())),
@@ -12190,5 +12200,61 @@ mod tests {
         )));
 
         assert_eq!(first, second);
+    }
+
+    /// A market impact model that records how often it is consulted.
+    #[derive(Debug)]
+    struct CountingMarketImpactModel {
+        calls: Rc<Cell<usize>>,
+        increments: u64,
+    }
+
+    impl MarketImpactModel for CountingMarketImpactModel {
+        fn impact_increments(&mut self, _fill_quantity: Quantity) -> anyhow::Result<u64> {
+            self.calls.set(self.calls.get() + 1);
+            Ok(self.increments)
+        }
+    }
+
+    #[rstest]
+    fn test_market_impact_applies_only_to_l1_taker_fills() {
+        // The decision this pins: impact adjusts a liquidity-taking fill that consumes an L1
+        // book, and no other fill. A deeper book prices its own depth through the levels a taker
+        // walks, so applying an increment-per-fill adjustment on top of it would count the same
+        // size twice, and the model is not consulted at all.
+        let l1_calls = Rc::new(Cell::new(0));
+        let l1 = taker_market_fill_price(Some(MarketImpactModelHandle::new(
+            CountingMarketImpactModel {
+                calls: Rc::clone(&l1_calls),
+                increments: 3,
+            },
+        )));
+
+        assert_eq!(l1, Some(Price::from("1500.03")));
+        assert_eq!(
+            l1_calls.get(),
+            1,
+            "an L1 taker fill consults the model once"
+        );
+
+        let l2_calls = Rc::new(Cell::new(0));
+        let l2 = taker_market_fill_price_on(
+            BookType::L2_MBP,
+            Some(MarketImpactModelHandle::new(CountingMarketImpactModel {
+                calls: Rc::clone(&l2_calls),
+                increments: 3,
+            })),
+        );
+        let l2_unimpacted = taker_market_fill_price_on(BookType::L2_MBP, None);
+
+        assert_eq!(
+            l2_calls.get(),
+            0,
+            "no fill on another book type consults the model"
+        );
+        assert_eq!(
+            l2, l2_unimpacted,
+            "the model cannot move a fill it is not asked about"
+        );
     }
 }
