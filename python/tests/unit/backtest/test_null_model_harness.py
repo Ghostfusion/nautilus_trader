@@ -59,6 +59,9 @@ BAR_COUNT = 512
 PERSISTENT_HURST = 0.6
 MEMORYLESS_HURST = 0.51
 SEEDS = (1, 2, 3, 4, 5, 6, 7, 8)
+SWEEP_BAR_COUNT = 256
+SWEEP_SEEDS = (1, 2, 3, 4, 5, 6)
+SWEEP_LOOKBACKS = (1, 8, 4096)
 
 
 class TrendProbe(Strategy):
@@ -73,15 +76,20 @@ class TrendProbe(Strategy):
         super().__init__(config)
         self.bar_type: BarType | None = None
         self.instrument_id: InstrumentId | None = None
-        self.previous_close: float | None = None
+        self.lookback = 1
+        self.closes: list[float] = []
         self.direction = 0
 
-    def configure(self, bar_type: str, instrument_id: str) -> None:
+    def configure(self, bar_type: str, instrument_id: str, lookback: int = 1) -> None:
         """
         Configure the probe before the run.
+
+        The lookback is the horizon rule: the direction is read against the close that many bars
+        back, so a longer lookback holds a direction longer.
         """
         self.bar_type = BarType.from_str(bar_type)
         self.instrument_id = InstrumentId.from_str(instrument_id)
+        self.lookback = lookback
 
     def on_start(self) -> None:
         """
@@ -96,8 +104,10 @@ class TrendProbe(Strategy):
         """
         assert self.instrument_id is not None
         close = bar.close.as_double()
-        if self.previous_close is not None:
-            direction = 1 if close > self.previous_close else -1
+        self.closes.append(close)
+        if len(self.closes) > self.lookback:
+            reference = self.closes[-1 - self.lookback]
+            direction = 1 if close > reference else -1
             if direction != self.direction:
                 self.close_all_positions(self.instrument_id)
                 self.direction = direction
@@ -108,7 +118,6 @@ class TrendProbe(Strategy):
                         quantity=TRADE_SIZE,
                     ),
                 )
-        self.previous_close = close
 
 
 def bars_from_prices(instrument: object, bar_type: BarType, prices: list[float]) -> list[Bar]:
@@ -143,12 +152,12 @@ def bars_from_prices(instrument: object, bar_type: BarType, prices: list[float])
     return bars
 
 
-def run_flow(hurst: float, seed: int) -> float:
+def run_flow(hurst: float, seed: int, bar_count: int = BAR_COUNT, lookback: int = 1) -> float:
     """
     Run the probe over a generated flow and return the result statistic as net PnL in USDT.
     """
     instrument = TestInstrumentProvider.btcusdt_binance()
-    flow = SyntheticFlowConfig(hurst, 0.5, BAR_COUNT, seed).generate()
+    flow = SyntheticFlowConfig(hurst, 0.5, bar_count, seed).generate()
     bar_type = BarType.from_str(f"{instrument.id}-1-MINUTE-LAST-EXTERNAL")
 
     engine = BacktestEngine(BacktestEngineConfig(bypass_logging=True, run_analysis=False))
@@ -164,7 +173,7 @@ def run_flow(hurst: float, seed: int) -> float:
     engine.add_data(bars_from_prices(instrument, bar_type, flow.prices))
 
     strategy = TrendProbe(StrategyConfig())
-    strategy.configure(str(bar_type), str(instrument.id))
+    strategy.configure(str(bar_type), str(instrument.id), lookback)
     engine.add_strategy(strategy)
     engine.run()
 
@@ -195,6 +204,46 @@ def report(label: str, values: list[float]) -> list[float]:
     return quartiles
 
 
+def sweep(
+    seeds: tuple[int, ...],
+    lookbacks: tuple[int, ...],
+    bar_count: int,
+) -> dict[int, list[float]]:
+    """
+    Run both regimes at every lookback and seed, and return the paired differences per lookback.
+    """
+    differences: dict[int, list[float]] = {}
+
+    for lookback in lookbacks:
+        persistent = [run_flow(PERSISTENT_HURST, seed, bar_count, lookback) for seed in seeds]
+        memoryless = [run_flow(MEMORYLESS_HURST, seed, bar_count, lookback) for seed in seeds]
+        report(f"lookback {lookback}, persistent", persistent)
+        report(f"lookback {lookback}, memoryless", memoryless)
+        differences[lookback] = [
+            paired - other for paired, other in zip(persistent, memoryless, strict=True)
+        ]
+        report(f"lookback {lookback}, difference", differences[lookback])
+
+    return differences
+
+
+def degeneracies(differences: list[float]) -> list[str]:
+    """
+    Return the reasons a parameter set's result is degenerate, if there are any.
+    """
+    flags = []
+    quartiles = quantiles(differences, n=4)
+
+    if max(differences) == min(differences):
+        flags.append("no movement across seeds")
+    elif quartiles[2] - quartiles[0] > abs(quartiles[1]):
+        flags.append("spread wider than the effect")
+    if min(differences) < 0 < max(differences):
+        flags.append("verdict flips between seeds")
+
+    return flags
+
+
 def test_the_same_seed_reproduces_the_same_result() -> None:
     """
     Test that a run is reproducible end to end from the engine seed.
@@ -220,3 +269,21 @@ def test_the_result_is_reported_as_a_distribution_over_seeds() -> None:
         f"memoryless median {memoryless_quartiles[1]:.2f}"
     )
     assert max(persistent) > min(persistent)
+
+
+def test_the_robustness_runner_reports_and_flags_degenerate_parameter_sets() -> None:
+    """
+    Test that every sweep cell is reported, and that a degenerate horizon rule is flagged.
+    """
+    differences = sweep(SWEEP_SEEDS, SWEEP_LOOKBACKS, SWEEP_BAR_COUNT)
+
+    assert set(differences) == set(SWEEP_LOOKBACKS)
+
+    for lookback, values in differences.items():
+        assert len(values) == len(SWEEP_SEEDS)
+        logger.info("lookback %d: flags=%s", lookback, degeneracies(values))
+
+    # A lookback longer than the sample never reaches a signal, so nothing moves across seeds
+    assert "no movement across seeds" in degeneracies(differences[SWEEP_LOOKBACKS[-1]])
+    # The shortest horizon rule does move, and its spread is reported rather than hidden
+    assert "no movement across seeds" not in degeneracies(differences[SWEEP_LOOKBACKS[0]])
