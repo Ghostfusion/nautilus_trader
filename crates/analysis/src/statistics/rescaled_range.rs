@@ -206,9 +206,11 @@ mod tests {
     fn test_a_linear_ramp_has_a_slope_near_one() {
         // A deterministic ramp has R/S growing proportionally to the window size, so the
         // log-log slope sits at one; the assertion band absorbs the finite-sample drift.
-        let ramp: Vec<f64> = (1..=64).map(|i| i as f64).collect();
+        let ramp: Vec<f64> = (1..=64).map(f64::from).collect();
         let statistic = RescaledRange::new();
-        let slope = statistic.calculate_from_returns(&create_returns(&ramp)).unwrap();
+        let slope = statistic
+            .calculate_from_returns(&create_returns(&ramp))
+            .unwrap();
         assert!(
             (0.9..=1.1).contains(&slope),
             "expected a slope near one, got {slope}"
@@ -225,7 +227,7 @@ mod tests {
     #[rstest]
     fn test_a_series_shorter_than_sixteen_is_undefined() {
         let statistic = RescaledRange::new();
-        let values: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let values: Vec<f64> = (0..10).map(f64::from).collect();
         let result = statistic.calculate_from_returns(&create_returns(&values));
         assert_eq!(result, None);
     }
@@ -242,7 +244,10 @@ mod tests {
         let slope = statistic
             .calculate_from_returns(&create_returns(&alternating))
             .unwrap();
-        assert!(slope < 0.6, "expected an anti-persistent slope, got {slope}");
+        assert!(
+            slope < 0.6,
+            "expected an anti-persistent slope, got {slope}"
+        );
     }
 
     #[rstest]
