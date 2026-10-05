@@ -121,12 +121,22 @@ call argument.
   read either field, `nautilus-analysis` cannot depend on the fee model or on the analytics
   module, and population would have added a field to `OrderFilled` to feed two unread duplicates
   of `commission`. The cost row of W1.2 reads `commission`; the slippage numbers belong to W1.1.
-- W1.4 Put the deflated Sharpe beside the gross and net figures, with the trial count that
-  produced it. Shared with W8.4.
+- W1.4 (done at revision 3) `DeflatedSharpeRatio` reports the correction as a portfolio statistic:
+  it takes the trial declaration, computes the value from the returns the analyzer feeds it, and
+  the run's report carries the row once it is registered. Two premises in this item did not hold.
+  There is no gross-return artifact to sit beside, so the row joins the returns statistics the
+  report already renders. And a count has no unit in `MetricUnits` (currency, fraction, ratio), so
+  the trial counts are stated in the row's name rather than as a second metric. The declaration is
+  extrinsic to a run, so one import and one registration remain necessary; what the item removes is
+  building a `SharpeSample` and calling the correction by hand. A run whose returns history falls
+  below the contract's declared minimums (20 periods and 10 trials by default) reports the row as
+  unavailable, and a Python statistic that returns nothing is omitted from the report rather than
+  shown as NaN. Shared with W8.4.
 
 **Acceptance.** With `MakerTakerFeeModel`, the report shows gross and net apart; setting both
-rates to zero moves net onto gross and leaves gross unchanged. A backtest can print the deflated
-Sharpe and the trial count without importing from `optimization` by hand.
+rates to zero moves net onto gross and leaves gross unchanged. Registering
+`DeflatedSharpeRatio` puts the corrected value and the trial counts into the run's returns
+statistics beside its other rows, without building a sample or calling the correction by hand.
 
 ### T2 Impact is concave near a square root, and the prefactor is uncertain (02, 07)
 
@@ -439,7 +449,8 @@ that is admissible per strategy but not in aggregate.
 
 ## 8. Revision history
 
-| Revision | Date       | Change                                                                                                                                      |
-| -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | 2026-10-05 | First plan, from the ten findings in `README.md` and a symbol-level survey of this repository.                                              |
-| 2        | 2026-10-05 | W1.3 done: `PeriodAccounting.fees` and `.slippage` are deleted. T1's Today line and the 2.2 net-of-cost row are rechecked against the tree. |
+| Revision | Date       | Change                                                                                                                                                                                                                                                                                                          |
+| -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | 2026-10-05 | First plan, from the ten findings in `README.md` and a symbol-level survey of this repository.                                                                                                                                                                                                                  |
+| 2        | 2026-10-05 | W1.3 done: `PeriodAccounting.fees` and `.slippage` are deleted. T1's Today line and the 2.2 net-of-cost row are rechecked against the tree.                                                                                                                                                                     |
+| 3        | 2026-10-05 | W1.4 done: the deflated Sharpe is a portfolio statistic, so a run's report carries the row. T1's W1.4 text records the premises that did not hold (no gross-return artifact exists, and the metric vocabulary has no count unit) and the contract minimums that make a short run report the row as unavailable. |

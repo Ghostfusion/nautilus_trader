@@ -42,6 +42,11 @@ Three boundaries are enforced rather than documented:
   is not a study with independent trials, and the correction states which count it used. A dependent
   study must supply its effective trial count; an independent study may not.
 
+A run's report carries the correction too: `DeflatedSharpeRatio` is a portfolio statistic that takes
+the trial declaration and computes the corrected value from the returns a backtest feeds it, so the
+value is printed beside the run's own statistics with the trial counts stated in the row's name.
+Nothing in a single run carries the search that produced it, so the declaration stays explicit.
+
 The value is reported, never a gate: this module has no decision authority, and nothing here is
 consulted by a strategy, an order or a risk check. The correction is deliberately outside the
 compiled kernels, in agreement with the analysis statistics: it is a study-level statistic, not a
@@ -53,12 +58,18 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from dataclasses import replace
 from enum import Enum
 from typing import TYPE_CHECKING
 from typing import cast
 
+from nautilus_trader._libnautilus.analysis import MetricDirection
+from nautilus_trader._libnautilus.analysis import MetricInput
+from nautilus_trader._libnautilus.analysis import MetricTag
+from nautilus_trader._libnautilus.analysis import MetricUnits
 from nautilus_trader.analysis import MetricReason
 from nautilus_trader.analysis import MetricStatus
+from nautilus_trader.analysis import PortfolioStatistic
 from nautilus_trader.optimization.identity import TrialIdentity
 from nautilus_trader.optimization.identity import TrialProvenance
 from nautilus_trader.optimization.identity import trial_identity
@@ -1093,3 +1104,176 @@ def significance_report(
         provenance=provenance,
         result=deflated_sharpe_ratio(sample, contract=contract),
     )
+
+
+class DeflatedSharpeRatio(PortfolioStatistic):
+    """
+    The deflated Sharpe ratio of a run's returns, for the trial set that produced them.
+
+    A single run carries its returns but not the search that selected it, so the trial set is
+    declared here while the sample's other fields come from the returns the analyzer feeds. Once
+    registered on a portfolio or an analyzer, the corrected value is reported beside the run's own
+    statistics, and the row's name states the trial counts the correction used, because a count is
+    provenance rather than a performance metric and the metric units the analysis surface declares
+    are financial.
+
+    The contract's declared minimum counts are enforced: a run whose horizon or trial set falls
+    below them is reported as unavailable rather than computed under unstated bounds.
+
+    The value is reported, never a gate.
+
+    Parameters
+    ----------
+    trial_sharpes : Sequence[float]
+        The per-period Sharpe ratio of every trial that produced an estimate.
+    dependence : TrialDependence, default INDEPENDENT
+        Whether the trials are independent draws.
+    effective_trials : int | None, default None
+        The effective trial count, required when the study declares dependence and refused when it
+        declares independence.
+    contract : StatisticalContract | None, default None
+        The contract to compute under, or None for the declared default.
+
+    Raises
+    ------
+    TypeError
+        If a declaration has the wrong type.
+    ValueError
+        If the declaration is incomplete or a trial Sharpe is not finite.
+
+    """
+
+    def __init__(
+        self,
+        trial_sharpes: Sequence[float],
+        *,
+        dependence: TrialDependence = TrialDependence.INDEPENDENT,
+        effective_trials: int | None = None,
+        contract: StatisticalContract | None = None,
+    ) -> None:
+        """
+        Initialize the statistic with the trial declaration it corrects for.
+        """
+        # A probe sample validates the declaration through the sample's own rules - the dependence
+        # declaration, the effective count and the trial Sharpes - and carries the trial counts.
+        # Every calculation replaces the fields the return series supplies.
+        self._declaration = SharpeSample(
+            sharpe=0.0,
+            trial_sharpes=tuple(trial_sharpes),
+            observations=_MINIMUM_MOMENT_OBSERVATIONS,
+            skew=0.0,
+            kurtosis=3.0,
+            dependence=dependence,
+            effective_trials=effective_trials,
+        )
+        self._contract = contract
+
+    @property
+    def name(self) -> str:
+        """
+        Return the name for the statistic, stating the trial counts it used.
+
+        Returns
+        -------
+        str
+
+        """
+        nominal = self._declaration.nominal_trials
+        counted = self._declaration.counted_trials
+
+        if counted == nominal:
+            return f"Deflated Sharpe Ratio ({nominal} trials)"
+        return f"Deflated Sharpe Ratio ({nominal} trials, {counted} effective)"
+
+    @property
+    def metric_id(self) -> str:
+        """
+        Return the stable identity, which does not carry the trial counts.
+
+        Returns
+        -------
+        str
+
+        """
+        return "deflated_sharpe_ratio"
+
+    @property
+    def units(self) -> MetricUnits:
+        """
+        Return the units the value is expressed in.
+
+        Returns
+        -------
+        MetricUnits
+
+        """
+        return MetricUnits.RATIO
+
+    @property
+    def tags(self) -> tuple[MetricTag, ...]:
+        """
+        Return the cross-cutting tags for the metric.
+
+        Returns
+        -------
+        tuple[MetricTag, ...]
+
+        """
+        return (MetricTag.RISK_ADJUSTED,)
+
+    @property
+    def direction(self) -> MetricDirection:
+        """
+        Return the direction in which a consumer rewards the value.
+
+        Returns
+        -------
+        MetricDirection
+
+        """
+        return MetricDirection.MAXIMIZE
+
+    @property
+    def inputs(self) -> tuple[MetricInput, ...]:
+        """
+        Return the inputs the definition requires.
+
+        Returns
+        -------
+        tuple[MetricInput, ...]
+
+        """
+        return (MetricInput.RETURNS,)
+
+    def calculate_from_returns(self, returns: dict[int, float]) -> float | None:
+        """
+        Calculate the deflated Sharpe ratio of the given returns.
+
+        Parameters
+        ----------
+        returns : dict[int, float]
+            The returns keyed by UNIX timestamp (nanoseconds).
+
+        Returns
+        -------
+        float or ``None``
+            The corrected value, or ``None`` when the series cannot produce one.
+
+        """
+        estimate = per_period_sharpe(returns)
+        if estimate.value is None:
+            return None
+
+        moments = return_moments(returns)
+        if moments is None:
+            return None
+
+        sample = replace(
+            self._declaration,
+            sharpe=estimate.value,
+            observations=estimate.observations,
+            skew=moments.skew,
+            kurtosis=moments.kurtosis,
+        )
+
+        return deflated_sharpe_ratio(sample, contract=self._contract).value

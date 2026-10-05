@@ -98,6 +98,7 @@ from nautilus_trader.optimization.search import EvolutionarySearch as Evolutiona
 from nautilus_trader.optimization.search import GridSearch as GridSearch
 from nautilus_trader.optimization.search import RandomSearch as RandomSearch
 from nautilus_trader.optimization.search import SearchStrategy as SearchStrategy
+from nautilus_trader.optimization.significance import DeflatedSharpeRatio as DeflatedSharpeRatio
 from nautilus_trader.optimization.significance import DivisorConvention as DivisorConvention
 from nautilus_trader.optimization.significance import ReturnCompounding as ReturnCompounding
 from nautilus_trader.optimization.significance import ReturnMoments as ReturnMoments
@@ -144,6 +145,7 @@ __all__ = [
     "ConcurrencyPolicy",
     "ConfigError",
     "DatasetIdentity",
+    "DeflatedSharpeRatio",
     "DivisorConvention",
     "Evaluation",
     "EvaluationCache",

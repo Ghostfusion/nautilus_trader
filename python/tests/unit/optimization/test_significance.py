@@ -25,10 +25,15 @@ from typing import cast
 
 import pytest
 
+from nautilus_trader._libnautilus.analysis import MetricDirection
+from nautilus_trader._libnautilus.analysis import MetricInput
+from nautilus_trader._libnautilus.analysis import MetricUnits
 from nautilus_trader.analysis import MetricReason
 from nautilus_trader.analysis import MetricStatus
+from nautilus_trader.analysis import PortfolioAnalyzer
 from nautilus_trader.optimization import CanonicalRun
 from nautilus_trader.optimization import DatasetIdentity
+from nautilus_trader.optimization import DeflatedSharpeRatio
 from nautilus_trader.optimization import DivisorConvention
 from nautilus_trader.optimization import Experiment
 from nautilus_trader.optimization import FailedExperiment
@@ -672,3 +677,144 @@ def test_the_estimation_chain_is_computable_from_a_return_series() -> None:
     assert result.is_computed
     assert result.value is not None
     assert 0.0 <= result.value <= 1.0
+
+
+def _statistic_trials() -> list[float]:
+    """
+    Return the trial Sharpe estimates a sweep produced, above the declared minimum trial count.
+    """
+    return [0.2, 0.5, 0.8, 1.0, 0.75, 0.6, 0.9, 1.2, 0.35, 0.55, 0.7, 1.1]
+
+
+def _statistic_returns() -> dict[int, float]:
+    """
+    Return a deterministic return series long enough for the declared minimum observation count.
+    """
+    values = [
+        0.012,
+        -0.004,
+        0.007,
+        0.002,
+        -0.006,
+        0.011,
+        0.003,
+        -0.002,
+        0.005,
+        0.009,
+        0.001,
+        0.004,
+        0.008,
+        -0.003,
+        0.006,
+        0.002,
+        -0.001,
+        0.010,
+        0.003,
+        -0.005,
+        0.007,
+        0.001,
+        0.004,
+        0.006,
+    ]
+
+    return {
+        1_600_000_000_000_000_000 + index * 86_400_000_000_000: value
+        for index, value in enumerate(values)
+    }
+
+
+def test_the_deflated_sharpe_statistic_matches_an_independent_recomputation() -> None:
+    """
+    Test the statistic corrects the run's own returns by the declared trial set.
+    """
+    returns = _statistic_returns()
+    statistic = DeflatedSharpeRatio(_statistic_trials())
+
+    estimate = per_period_sharpe(returns)
+    moments = return_moments(returns)
+    assert estimate.value is not None
+    assert moments is not None
+
+    expected = _reference_deflated_sharpe(
+        estimate.value,
+        _statistic_trials(),
+        estimate.observations,
+        moments.skew,
+        moments.kurtosis,
+        len(_statistic_trials()),
+    )
+
+    assert statistic.calculate_from_returns(returns) == pytest.approx(expected)
+
+
+def test_the_deflated_sharpe_statistic_states_the_trial_counts_it_used() -> None:
+    """
+    Test the row names the nominal and effective counts, which have no measurable unit.
+    """
+    independent = DeflatedSharpeRatio(_statistic_trials())
+    dependent = DeflatedSharpeRatio(
+        _statistic_trials(),
+        dependence=TrialDependence.DEPENDENT,
+        effective_trials=2,
+    )
+
+    assert independent.name == "Deflated Sharpe Ratio (12 trials)"
+    assert dependent.name == "Deflated Sharpe Ratio (12 trials, 2 effective)"
+    assert dependent.metric_id == independent.metric_id == "deflated_sharpe_ratio"
+    assert independent.inputs == (MetricInput.RETURNS,)
+    assert independent.units is MetricUnits.RATIO
+    assert independent.direction is MetricDirection.MAXIMIZE
+
+
+def test_the_deflated_sharpe_statistic_refuses_an_incomplete_declaration() -> None:
+    """
+    Test the declaration is validated when the statistic is built, not when it is calculated.
+    """
+    with pytest.raises(ValueError, match="dependent trials must declare"):
+        DeflatedSharpeRatio(_statistic_trials(), dependence=TrialDependence.DEPENDENT)
+
+    with pytest.raises(ValueError, match="independent trials must not declare"):
+        DeflatedSharpeRatio(_statistic_trials(), effective_trials=2)
+
+    with pytest.raises(ValueError, match="must be finite"):
+        DeflatedSharpeRatio([0.5, float("nan")])
+
+
+def test_the_deflated_sharpe_statistic_is_reported_beside_the_run_statistics() -> None:
+    """
+    Test a registered statistic reaches the analyzer's return statistics by its own name.
+    """
+    returns = _statistic_returns()
+    statistic = DeflatedSharpeRatio(_statistic_trials())
+
+    analyzer = PortfolioAnalyzer()
+    analyzer.register_statistic(statistic)
+    for timestamp, value in returns.items():
+        analyzer.add_return(timestamp, value)
+
+    value = statistic.calculate_from_returns(returns)
+    assert value is not None
+    assert analyzer.get_performance_stats_returns() == {statistic.name: pytest.approx(value)}
+
+
+def test_the_deflated_sharpe_statistic_is_unavailable_rather_than_zero() -> None:
+    """
+    Test a series the correction cannot compute from reports nothing rather than a zero.
+    """
+    statistic = DeflatedSharpeRatio(_statistic_trials())
+
+    # One period cannot produce a Sharpe ratio.
+    assert statistic.calculate_from_returns({1_600_000_000_000_000_000: 0.01}) is None
+
+    # A flat series has no dispersion, so there is no Sharpe ratio to correct.
+    flat = {1_600_000_000_000_000_000 + index: 0.0 for index in range(24)}
+
+    assert statistic.calculate_from_returns(flat) is None
+
+    # Below the default contract's minimum observation count the correction is not computed.
+    short = {
+        1_600_000_000_000_000_000 + index * 86_400_000_000_000: value
+        for index, value in enumerate([0.012, -0.004, 0.007, 0.002, 0.005, 0.001])
+    }
+
+    assert statistic.calculate_from_returns(short) is None
