@@ -860,6 +860,8 @@ class LiveRiskEngineConfig:
     @property
     def max_notional_per_order(self) -> dict[str, str]: ...
     @property
+    def count_caps(self) -> list[str]: ...
+    @property
     def full_position_exit_venues(self) -> list[model.Venue]: ...
     @property
     def debug(self) -> bool: ...
@@ -871,6 +873,7 @@ class LiveRiskEngineConfig:
         max_notional_per_order: typing.Mapping[str, typing.Any] | None = None,
         full_position_exit_venues: typing.Sequence[model.Venue] | None = None,
         debug: bool | None = None,
+        count_caps: typing.Sequence[str] | None = None,
     ) -> LiveRiskEngineConfig: ...
 
 @typing.final

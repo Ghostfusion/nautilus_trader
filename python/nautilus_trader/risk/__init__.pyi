@@ -9,6 +9,9 @@ from nautilus_trader import model
 __all__ = [
     "FixedRiskSizer",
     "PositionSizer",
+    "RiskCap",
+    "RiskCapMetric",
+    "RiskCapScope",
     "RiskEngineConfig",
 ]
 
@@ -47,6 +50,42 @@ class PositionSizer:
     ) -> model.Quantity: ...
 
 @typing.final
+class RiskCap:
+    @property
+    def metric(self) -> RiskCapMetric: ...
+    @property
+    def scope(self) -> RiskCapScope: ...
+    @property
+    def limit(self) -> int: ...
+    @property
+    def window(self) -> int | None: ...
+    def __new__(
+        cls, metric: RiskCapMetric, scope: RiskCapScope, limit: int, window: int | None = None
+    ) -> RiskCap: ...
+
+@typing.final
+class RiskCapMetric:
+    Active: RiskCapMetric
+    Submit: RiskCapMetric
+    Modify: RiskCapMetric
+    Cancel: RiskCapMetric
+    Fill: RiskCapMetric
+    RepeatedRequest: RiskCapMetric
+    @staticmethod
+    def from_str(value: str) -> RiskCapMetric: ...
+
+@typing.final
+class RiskCapScope:
+    Global: RiskCapScope
+    Strategy: RiskCapScope
+    Account: RiskCapScope
+    Instrument: RiskCapScope
+    Venue: RiskCapScope
+    StrategyInstrument: RiskCapScope
+    @staticmethod
+    def from_str(value: str) -> RiskCapScope: ...
+
+@typing.final
 class RiskEngineConfig:
     def __init__(
         self,
@@ -56,6 +95,7 @@ class RiskEngineConfig:
         max_notional_per_order: typing.Mapping[str, typing.Any] | None = None,
         full_position_exit_venues: typing.Sequence[model.Venue] | None = None,
         debug: bool | None = None,
+        count_caps: typing.Sequence[RiskCap] | None = None,
     ) -> None: ...
     @property
     def bypass(self) -> bool: ...
@@ -69,3 +109,5 @@ class RiskEngineConfig:
     def full_position_exit_venues(self) -> list[model.Venue]: ...
     @property
     def debug(self) -> bool: ...
+    @property
+    def count_caps(self) -> list[RiskCap]: ...

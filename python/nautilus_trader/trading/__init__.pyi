@@ -569,6 +569,7 @@ class Strategy:
     def submit_signals(
         self, signals: typing.Sequence[model.TradingSignal]
     ) -> list[model.ClientOrderId]: ...
+    def targets(self, signals: typing.Sequence[model.TradingSignal]) -> list[model.Target]: ...
     def modify_order(
         self,
         client_order_id: model.ClientOrderId,
