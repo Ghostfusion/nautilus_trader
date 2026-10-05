@@ -85,6 +85,7 @@ nautilus-model = { path = "crates/model", version = "0.65.0" }
 nautilus-network = { path = "crates/network", version = "0.65.0", default-features = false }
 nautilus-persistence = { path = "crates/persistence", version = "0.65.0" }
 nautilus-portfolio = { path = "crates/portfolio", version = "0.65.0" }
+nautilus-research = { path = "crates/research", version = "0.65.0" }
 nautilus-risk = { path = "crates/risk", version = "0.65.0" }
 nautilus-serialization = { path = "crates/serialization", version = "0.65.0" }
 nautilus-system = { path = "crates/system", version = "0.65.0" }

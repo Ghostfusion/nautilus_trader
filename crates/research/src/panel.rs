@@ -39,6 +39,14 @@ use crate::membership::MembershipSeries;
 
 /// A feature value together with the instant of the latest input it reads.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.research", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.research")
+)]
 pub struct FeatureValue {
     /// The feature value.
     pub value: f64,
@@ -56,6 +64,14 @@ impl FeatureValue {
 
 /// One row of a point-in-time panel.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.research", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.research")
+)]
 pub struct PanelRow {
     /// The instrument this row describes.
     pub instrument_id: InstrumentId,
@@ -147,6 +163,14 @@ pub enum PanelError {
 /// Construct with [`Panel::new`], which runs [`Panel::check`] so an invalid panel cannot be built
 /// through the public API.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.research", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.research")
+)]
 pub struct Panel {
     rows: Vec<PanelRow>,
     membership: MembershipSeries,

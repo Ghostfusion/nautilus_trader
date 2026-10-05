@@ -17,6 +17,7 @@ from . import model
 from . import network
 from . import persistence
 from . import portfolio
+from . import research
 from . import risk
 from . import serialization
 from . import testkit
@@ -39,6 +40,7 @@ __all__ = [
     "network",
     "persistence",
     "portfolio",
+    "research",
     "risk",
     "serialization",
     "testkit",

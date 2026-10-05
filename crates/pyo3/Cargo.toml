@@ -65,6 +65,7 @@ extension-module = [
   "nautilus-okx/extension-module",
   "nautilus-portfolio/extension-module",
   "nautilus-polymarket/extension-module",
+  "nautilus-research/extension-module",
   "nautilus-sandbox/extension-module",
   "nautilus-persistence/extension-module",
   "nautilus-risk/extension-module",
@@ -126,6 +127,7 @@ nautilus-network = { workspace = true, features = [
 ] }
 nautilus-persistence = { workspace = true, features = ["python"] }
 nautilus-portfolio = { workspace = true, features = ["python"] }
+nautilus-research = { workspace = true, features = ["python"] }
 nautilus-risk = { workspace = true, features = ["python"] }
 nautilus-serialization = { workspace = true, features = ["python"] }
 nautilus-system = { workspace = true, features = ["python"] }

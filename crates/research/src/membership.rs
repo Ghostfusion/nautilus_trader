@@ -44,6 +44,14 @@ use nautilus_serialization::{arrow::custom::ensure_custom_data_registered, arrow
 /// `ts_init` mirrors it so the record can be written and read back.
 #[arrow_custom_data]
 #[custom_data]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.research", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.research")
+)]
 pub struct MembershipInterval {
     /// The universe identity this interval belongs to.
     pub universe: String,
@@ -129,6 +137,14 @@ pub trait MembershipRule {
 /// The series is the authority for point-in-time membership once it has been written; it is
 /// persisted and read through the catalog's custom-data path.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.research", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.research")
+)]
 pub struct MembershipSeries {
     universe: String,
     source: String,

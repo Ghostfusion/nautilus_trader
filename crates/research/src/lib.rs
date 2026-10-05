@@ -56,6 +56,9 @@ pub mod membership;
 pub mod operators;
 pub mod panel;
 
+#[cfg(feature = "python")]
+pub mod python;
+
 pub use dataset::{
     DatasetDeclaration, DatasetSplit, Digest, DigestInput, MembershipSource, SourceInterval,
     TimeInterval,

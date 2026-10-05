@@ -96,6 +96,12 @@ fn _libnautilus(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_wrapped(submodule)?;
     sys_modules.set_item(format!("{module_name}.{n}"), m.getattr(n)?)?;
 
+    // nautilus-import-ok: wrap_pymodule! requires fully qualified paths
+    let n = "research";
+    let submodule = pyo3::wrap_pymodule!(nautilus_research::python::research);
+    m.add_wrapped(submodule)?;
+    sys_modules.set_item(format!("{module_name}.{n}"), m.getattr(n)?)?;
+
     let n = "core";
     let submodule = pyo3::wrap_pymodule!(nautilus_core::python::core);
     m.add_wrapped(submodule)?;
