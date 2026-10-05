@@ -24,6 +24,10 @@ units, so the first fill pins what the model returns for the reference quantity 
 increments, where the linear case beside this one returns two. The second is the exhausted-volume
 remainder, which fills at the first fill's price plus the book's one-increment step to its next
 level, so the pair pins the adjustment the model applied rather than only that it applied one.
+
+The prefactor is calibrated over 1.0 to 4.0 from an anonymous tape, so the committed digest also
+pins which bound of the interval the model applies: the four increments are the upper bound, and a
+model that applied the lower one would move the price by a single increment instead.
 """
 
 from __future__ import annotations
@@ -32,6 +36,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from nautilus_trader.execution import ImpactCalibrationSource
+from nautilus_trader.execution import PrefactorInterval
 from nautilus_trader.execution import SquareRootMarketImpactModel
 from nautilus_trader.model import Quantity
 from tests.regression.execution_realism import INSTRUMENT_ID_STR
@@ -44,10 +50,15 @@ NAME = "market_impact_square_root"
 # Fixed, because a canonical document records the run config ID and a generated one is random.
 RUN_CONFIG_ID = "c41f9a2b-7d38-4e5c-9b06-2af41d7c8e13"
 
-# Four increments at the reference quantity of 25 units, so a fill twice the reference moves by
+# Calibrated over 1.0 to 4.0 from an anonymous tape; the model applies the upper bound, so the
+# reference quantity of 25 units moves by four increments and a fill twice the reference moves by
 # fewer than eight: floor(4 * sqrt(2)) = 5 rather than 8.
 MARKET_IMPACT_MODEL = SquareRootMarketImpactModel(
-    prefactor=4.0,
+    prefactor=PrefactorInterval(
+        lower=1.0,
+        upper=4.0,
+        source=ImpactCalibrationSource.ANONYMOUS_TAPE_DEBIASED,
+    ),
     reference_quantity=Quantity.from_int(25),
     max_increments=25,
 )

@@ -44,7 +44,7 @@ Every "Today" line names the file and symbol that owns the behaviour, checked ag
 
 | Capability                 | Today                                                                                                                                                                                                                                                                            | Missing                                                                                                                                                                    |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Market impact              | `MarketImpactModel` with a linear variant and a concave square-root variant, both capped, both constructible from Python and selectable per venue                                                                                                                                | Prefactor calibration and an interval rather than a point (W2.2, W2.3); a Python extension point for a caller's own model (W2.4)                                           |
+| Market impact              | `MarketImpactModel` with a linear variant and a concave square-root variant, the latter carrying its prefactor as an interval with its calibration source and applying the upper bound, both capped, both constructible from Python and selectable per venue                     | Prefactor calibration tooling (W2.3); a Python extension point for a caller's own model (W2.4)                                                                             |
 | Passive fill realism       | Probabilistic fills; queue position and liquidity consumption exist but default false                                                                                                                                                                                            | Adverse-selection and size conditioning                                                                                                                                    |
 | Latency                    | `StaticLatencyModel` over three order legs plus a base                                                                                                                                                                                                                           | Market-data latency, competitor rank, a Python extension point                                                                                                             |
 | Data quality               | Bar sequence validation (off by default); Python array monotonicity; adapters log and substitute `ts_init`                                                                                                                                                                       | Quote and trade validation, crossed-print checks, feed-identity checks, offset estimation                                                                                  |
@@ -186,9 +186,10 @@ as of revision 9 (W2.1): `LinearMarketImpactModel`, whose adjustment is
 `floor(prefactor * sqrt(quantity / reference_quantity))` capped the same way.
 `MarketImpactModelAny` has both variants and the Python binding accepts both. Impact applies only
 to an `L1_MBP` taker fill, after the slippage adjustment
-(`crates/execution/src/matching_engine/mod.rs`). There is no calibration tooling, the prefactor
-travels as a point rather than as an interval, and a venue-specific model still needs a Rust
-rebuild.
+(`crates/execution/src/matching_engine/mod.rs`). The prefactor travels as an interval with the
+calibration source that produced it as of revision 10 (W2.2), and the concave model applies the
+interval's upper bound. There is no calibration tooling, and a venue-specific model still needs a
+Rust rebuild.
 
 **Work.**
 
@@ -209,8 +210,18 @@ rebuild.
   calls, and the test asserts that interleaving fills leaves every adjustment unchanged. The
   scenario lands in its own case module rather than in the linear one's, because the registry
   declares exactly one scenario per module.
-- W2.2 Make the model carry an interval, not a point, and make the report print both bounds with
-  the calibration source, so a tape-derived prefactor cannot be read as measured.
+- W2.2 (done at revision 10) The concave model carries its prefactor as a `PrefactorInterval`
+  rather than a number: `lower`, `upper`, and the `ImpactCalibrationSource` that produced it,
+  which is either fitted from the venue's own fills, reconstructed from an anonymous tape with or
+  without the de-bias applied, or declared by the caller. A bare float is no longer accepted, so a
+  tape-derived prefactor cannot be read as measured. The model applies the upper bound, which is
+  the decision taken here: the pessimistic bound is the one that cannot flatter a result, and the
+  regression case now calibrates its prefactor over 1.0 to 4.0 from an anonymous tape, so the
+  committed fingerprint also pins which bound was applied. An interval with equal bounds is
+  allowed, because a prefactor fitted from observable fills really is a point, and the source is
+  what records which of the two a reader has. Both bounds and the source appear in the interval's
+  display and in the model's, and the Python binding exposes the interval, so a report that prints
+  the model prints what the calibration is worth.
 - W2.3 Add calibration tooling that fits the prefactor from fills or a tape and applies the
   anonymous-tape de-bias as an explicit step.
 - W2.4 Add a Python protocol for impact models, mirroring the duck typing already used for fill
@@ -536,3 +547,4 @@ that is admissible per strategy but not in aggregate.
 | 7        | 2026-10-05 | W1.1 done: the execution analytics observer, its observations and its metric vocabulary are callable from Python, with the declaration travelling beside every value and unavailability reported as `None` plus a reason. A new 2.2 row records what the access is and what is still missing, a collector binding and the report row of W1.2. T1's Today line is corrected, including a constant count that said fifteen where the module declares sixteen.                                                                                              |
 | 8        | 2026-10-05 | W1.2 done: the default analyzer carries a cost row of six period statistics, commissions, turnover, gross and net return, and the cost and breakeven rates in basis points of turnover, with the frame reduced once and the four new kernels classified as normalizations. `MetricUnits` gained `BasisPoints`, because a basis-point value had no honest unit. The net-of-cost row's missing column narrows to the fill assumption of W4.3, and the pinned built-in count and objective metric-name set move with the four new built-ins.                |
 | 9        | 2026-10-05 | W2.1 done: a concave square-root impact model joins the trait and the composition slot, with a prefactor, a reference quantity and the same cap as the linear model, constructible from Python and carrying its own fingerprint scenario over the same synthetic book. The market-impact row's missing column narrows to the interval and the calibration work, and the acceptance's schedule-invariance is read as the model holding no state between fills. The scenario is its own case module because the registry declares one scenario per module. |
+| 10       | 2026-10-05 | W2.2 done: the concave prefactor is a `PrefactorInterval` with its calibration source rather than a number, and the model applies the interval's upper bound, so a tape-derived prefactor cannot be read as measured or flatter a result. The regression case calibrates over a tape-derived 1.0 to 4.0 interval, so its fingerprint also pins the bound applied. The market-impact row's missing column narrows to the calibration tooling and the Python extension point.                                                                              |

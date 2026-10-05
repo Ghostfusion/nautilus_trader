@@ -58,5 +58,7 @@ pub fn execution(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::models::slippage::ProbabilisticSlippageModel>()?;
     m.add_class::<crate::models::market_impact::LinearMarketImpactModel>()?;
     m.add_class::<crate::models::market_impact::SquareRootMarketImpactModel>()?;
+    m.add_class::<crate::models::market_impact::PrefactorInterval>()?;
+    m.add_class::<crate::models::market_impact::ImpactCalibrationSource>()?;
     Ok(())
 }

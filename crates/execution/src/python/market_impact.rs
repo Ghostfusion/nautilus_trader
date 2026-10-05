@@ -15,12 +15,13 @@
 
 //! Python bindings for market impact model types.
 
-use nautilus_core::python::{to_pyruntime_err, to_pytype_err};
+use nautilus_core::python::{to_pyruntime_err, to_pytype_err, to_pyvalue_err};
 use nautilus_model::types::Quantity;
 use pyo3::prelude::*;
 
 use crate::models::market_impact::{
-    LinearMarketImpactModel, MarketImpactModelAny, SquareRootMarketImpactModel,
+    ImpactCalibrationSource, LinearMarketImpactModel, MarketImpactModelAny, PrefactorInterval,
+    SquareRootMarketImpactModel,
 };
 
 #[pymethods]
@@ -49,25 +50,111 @@ impl LinearMarketImpactModel {
 
 #[pymethods]
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
+impl PrefactorInterval {
+    /// A calibrated prefactor with the interval it was measured over and its provenance.
+    ///
+    /// An interval whose bounds are equal is a point calibration, which is honest only when the
+    /// prefactor really was measured; `source` records which of the two a caller is looking at. A
+    /// model applies the upper bound, so an uncertain prefactor cannot flatter a simulated result.
+    #[new]
+    #[pyo3(signature = (lower, upper, source))]
+    fn py_new(lower: f64, upper: f64, source: ImpactCalibrationSource) -> PyResult<Self> {
+        Self::new(lower, upper, source).map_err(to_pyvalue_err)
+    }
+
+    /// Creates a point calibration from a single prefactor.
+    #[staticmethod]
+    #[pyo3(name = "point")]
+    fn py_point(prefactor: f64, source: ImpactCalibrationSource) -> PyResult<Self> {
+        Self::point(prefactor, source).map_err(to_pyvalue_err)
+    }
+
+    /// The lower bound of the calibrated prefactor.
+    #[getter]
+    #[pyo3(name = "lower")]
+    fn py_lower(&self) -> f64 {
+        self.lower()
+    }
+
+    /// The upper bound of the calibrated prefactor.
+    #[getter]
+    #[pyo3(name = "upper")]
+    fn py_upper(&self) -> f64 {
+        self.upper()
+    }
+
+    /// The bound a model applies, which is the upper one.
+    #[getter]
+    #[pyo3(name = "applied")]
+    fn py_applied(&self) -> f64 {
+        self.applied()
+    }
+
+    /// Where the interval came from.
+    #[getter]
+    #[pyo3(name = "source")]
+    fn py_source(&self) -> ImpactCalibrationSource {
+        self.source()
+    }
+
+    /// Whether the interval is a point.
+    #[getter]
+    #[pyo3(name = "is_point")]
+    fn py_is_point(&self) -> bool {
+        self.is_point()
+    }
+
+    fn __repr__(&self) -> String {
+        self.to_string()
+    }
+}
+
+#[pymethods]
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
 impl SquareRootMarketImpactModel {
     /// A concave market impact model with a square-root shape.
     ///
-    /// The model moves the fill price against the order direction by `prefactor` times the square
-    /// root of the fill's size relative to `reference_quantity`, capped at `max_increments`: a fill
-    /// equal to the reference quantity moves by the prefactor's worth of increments, and doubling
-    /// the size less than doubles the adjustment. The exponent is fixed at one half because the
-    /// corpus finds it robust while the prefactor is not, so the prefactor is the parameter that
-    /// carries the calibration's uncertainty.
+    /// The model moves the fill price against the order direction by the interval's upper bound
+    /// times the square root of the fill's size relative to `reference_quantity`, capped at
+    /// `max_increments`: a fill equal to the reference quantity moves by the applied prefactor's
+    /// worth of increments, and doubling the size less than doubles the adjustment. The exponent is
+    /// fixed at one half because the corpus finds it robust while the prefactor is not, which is
+    /// why the prefactor arrives as an interval with its calibration source rather than as a number.
     ///
     /// The model is a pure function of the fill quantity and takes no random seed.
     #[new]
     #[pyo3(signature = (prefactor, reference_quantity, max_increments))]
-    fn py_new(prefactor: f64, reference_quantity: Quantity, max_increments: u64) -> PyResult<Self> {
+    fn py_new(
+        prefactor: PrefactorInterval,
+        reference_quantity: Quantity,
+        max_increments: u64,
+    ) -> PyResult<Self> {
         Self::new(prefactor, reference_quantity, max_increments).map_err(to_pyruntime_err)
     }
 
+    /// The calibrated prefactor, with its bounds and its source.
+    #[getter]
+    #[pyo3(name = "prefactor")]
+    fn py_prefactor(&self) -> PrefactorInterval {
+        self.prefactor()
+    }
+
+    /// The fill quantity that moves the fill price by the prefactor's worth of increments.
+    #[getter]
+    #[pyo3(name = "reference_quantity")]
+    fn py_reference_quantity(&self) -> Quantity {
+        self.reference_quantity()
+    }
+
+    /// The maximum number of price increments a fill price may move.
+    #[getter]
+    #[pyo3(name = "max_increments")]
+    fn py_max_increments(&self) -> u64 {
+        self.max_increments()
+    }
+
     fn __repr__(&self) -> String {
-        format!("{self:?}")
+        self.to_string()
     }
 }
 

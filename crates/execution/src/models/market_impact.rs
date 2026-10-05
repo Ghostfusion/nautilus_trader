@@ -166,6 +166,158 @@ impl MarketImpactModel for LinearMarketImpactModel {
     }
 }
 
+/// Where a calibrated prefactor came from.
+///
+/// The provenance travels with the value because the same number means different things depending
+/// on how it was obtained: a prefactor fitted from the venue's own fills is measured, because the
+/// aggressor and the metaorder are observable, while one reconstructed from an anonymous tape is
+/// inferred, and reconstructing metaorders from an anonymous tape inflates it about twofold unless
+/// the de-bias is applied as an explicit step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        frozen,
+        eq,
+        eq_int,
+        module = "nautilus_trader.execution",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.execution")
+)]
+pub enum ImpactCalibrationSource {
+    /// Fitted from the venue's own fills, where the aggressor and the metaorder are observable.
+    Fills,
+    /// Reconstructed from an anonymous tape, with the de-bias applied as an explicit step.
+    AnonymousTapeDebiased,
+    /// Reconstructed from an anonymous tape without the de-bias, so the value is inflated.
+    AnonymousTape,
+    /// Declared by the caller rather than fitted, e.g. a range read from the literature.
+    Assumed,
+}
+
+impl Display for ImpactCalibrationSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Fills => "fitted from fills",
+            Self::AnonymousTapeDebiased => "anonymous tape, de-biased",
+            Self::AnonymousTape => "anonymous tape, not de-biased",
+            Self::Assumed => "assumed",
+        })
+    }
+}
+
+/// A calibrated prefactor with the interval it was measured over and its provenance.
+///
+/// The prefactor is uncertain by nature: the corpus finds it running from 0.34 to 1.50 across
+/// markets, and reconstructing metaorders from an anonymous tape inflates it about twofold, so the
+/// honest output is a bounded range rather than a point. An interval whose bounds are equal is a
+/// point calibration and is allowed, because a prefactor fitted from observable fills really is a
+/// point; the source is what records which of the two a caller is looking at.
+///
+/// A model applies [`Self::applied`], which is the upper bound, so an uncertain prefactor cannot
+/// flatter a simulated result.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.execution", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.execution")
+)]
+pub struct PrefactorInterval {
+    lower: f64,
+    upper: f64,
+    source: ImpactCalibrationSource,
+}
+
+impl PrefactorInterval {
+    /// Creates a new [`PrefactorInterval`] instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either bound is not finite and greater than zero, or if `lower` is
+    /// greater than `upper`.
+    pub fn new(lower: f64, upper: f64, source: ImpactCalibrationSource) -> anyhow::Result<Self> {
+        if !lower.is_finite() || lower <= 0.0 {
+            anyhow::bail!("prefactor lower bound must be finite and greater than zero");
+        }
+        if !upper.is_finite() || upper <= 0.0 {
+            anyhow::bail!("prefactor upper bound must be finite and greater than zero");
+        }
+        if lower > upper {
+            anyhow::bail!("prefactor lower bound must not exceed the upper bound");
+        }
+        Ok(Self {
+            lower,
+            upper,
+            source,
+        })
+    }
+
+    /// Creates a point calibration from a single prefactor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `prefactor` is not finite and greater than zero.
+    pub fn point(prefactor: f64, source: ImpactCalibrationSource) -> anyhow::Result<Self> {
+        Self::new(prefactor, prefactor, source)
+    }
+
+    /// Returns the lower bound of the calibrated prefactor.
+    #[must_use]
+    pub const fn lower(&self) -> f64 {
+        self.lower
+    }
+
+    /// Returns the upper bound of the calibrated prefactor.
+    #[must_use]
+    pub const fn upper(&self) -> f64 {
+        self.upper
+    }
+
+    /// Returns the bound a model applies, which is the upper one.
+    #[must_use]
+    pub const fn applied(&self) -> f64 {
+        self.upper
+    }
+
+    /// Returns where the interval came from.
+    #[must_use]
+    pub const fn source(&self) -> ImpactCalibrationSource {
+        self.source
+    }
+
+    /// Returns whether the interval is a point.
+    #[must_use]
+    #[expect(
+        clippy::float_cmp,
+        reason = "a point calibration is constructed with equal bounds, so this comparison is exact by construction"
+    )]
+    pub fn is_point(&self) -> bool {
+        self.lower == self.upper
+    }
+}
+
+impl Display for PrefactorInterval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_point() {
+            write!(f, "prefactor {} ({})", self.upper, self.source)
+        } else {
+            write!(
+                f,
+                "prefactor {} to {} ({})",
+                self.lower, self.upper, self.source
+            )
+        }
+    }
+}
+
 /// A concave market impact model with a square-root shape.
 ///
 /// The model moves the fill price against the order direction by the prefactor times the square
@@ -175,11 +327,15 @@ impl MarketImpactModel for LinearMarketImpactModel {
 /// increments = floor(prefactor * sqrt(fill_quantity / reference_quantity))
 /// ```
 ///
+/// The prefactor is a [`PrefactorInterval`] rather than a number, and the model applies its upper
+/// bound, so a prefactor inferred from an anonymous tape cannot be read as measured and cannot
+/// flatter a result. The interval's bounds and source are part of the model's display, so a report
+/// that prints the model prints what the calibration is worth.
+///
 /// The exponent is fixed at one half rather than exposed as a parameter, because the corpus finds
 /// the exponent robust across markets while the prefactor is not: a tape-derived calibration
 /// reports the exponent as 0.489 +/- 0.0015 and 0.50 [0.32, 0.66], against a prefactor running
-/// from 0.34 to 1.50 across three markets. The parameter that carries the uncertainty is therefore
-/// the prefactor, which the calibration tooling reports as an interval rather than a point.
+/// from 0.34 to 1.50 across three markets.
 ///
 /// The shape is what makes the model concave: doubling the filled quantity multiplies the impact
 /// by the square root of two rather than by two, so a larger fill is filled less far through the
@@ -199,7 +355,7 @@ impl MarketImpactModel for LinearMarketImpactModel {
     pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.execution")
 )]
 pub struct SquareRootMarketImpactModel {
-    prefactor: f64,
+    prefactor: PrefactorInterval,
     reference_quantity: Quantity,
     max_increments: u64,
 }
@@ -209,16 +365,13 @@ impl SquareRootMarketImpactModel {
     ///
     /// # Errors
     ///
-    /// Returns an error if `prefactor` is not finite and greater than zero, if
-    /// `reference_quantity` is zero, or if `max_increments` is zero.
+    /// Returns an error if `reference_quantity` or `max_increments` is zero. The interval
+    /// validates its own bounds when it is constructed.
     pub fn new(
-        prefactor: f64,
+        prefactor: PrefactorInterval,
         reference_quantity: Quantity,
         max_increments: u64,
     ) -> anyhow::Result<Self> {
-        if !prefactor.is_finite() || prefactor <= 0.0 {
-            anyhow::bail!("prefactor must be finite and greater than zero");
-        }
         if reference_quantity.is_zero() {
             anyhow::bail!("reference_quantity must be greater than zero");
         }
@@ -232,10 +385,16 @@ impl SquareRootMarketImpactModel {
         })
     }
 
-    /// Returns the dimensionless prefactor applied to the square root of the relative size.
+    /// Returns the calibrated prefactor, with its bounds and its source.
     #[must_use]
-    pub const fn prefactor(&self) -> f64 {
+    pub const fn prefactor(&self) -> PrefactorInterval {
         self.prefactor
+    }
+
+    /// Returns the prefactor bound the model applies, which is the interval's upper bound.
+    #[must_use]
+    pub fn applied_prefactor(&self) -> f64 {
+        self.prefactor.applied()
     }
 
     /// Returns the fill quantity that moves the fill price by the prefactor's worth of increments.
@@ -253,7 +412,7 @@ impl SquareRootMarketImpactModel {
 
 impl Display for SquareRootMarketImpactModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SquareRootMarketImpactModel")
+        write!(f, "SquareRootMarketImpactModel, {}", self.prefactor)
     }
 }
 
@@ -273,7 +432,7 @@ impl MarketImpactModel for SquareRootMarketImpactModel {
             return Ok(0);
         }
 
-        let increments = (self.prefactor * relative.sqrt()).floor();
+        let increments = (self.prefactor.applied() * relative.sqrt()).floor();
         if !increments.is_finite() {
             return Ok(self.max_increments);
         }
@@ -399,10 +558,101 @@ mod tests {
         assert_eq!(any.impact_increments(Quantity::from("30")).unwrap(), 3);
     }
 
+    /// Returns a point prefactor interval for the tests that only exercise the model's shape.
+    fn point(prefactor: f64) -> PrefactorInterval {
+        PrefactorInterval::point(prefactor, ImpactCalibrationSource::Assumed).expect("valid point")
+    }
+
+    #[rstest]
+    fn test_prefactor_interval_rejects_invalid_bounds() {
+        assert!(
+            PrefactorInterval::new(0.0, 1.0, ImpactCalibrationSource::Assumed).is_err(),
+            "a zero lower bound must be rejected",
+        );
+        assert!(
+            PrefactorInterval::new(1.0, -1.0, ImpactCalibrationSource::Assumed).is_err(),
+            "a negative upper bound must be rejected",
+        );
+        assert!(
+            PrefactorInterval::new(f64::NAN, 1.0, ImpactCalibrationSource::Assumed).is_err(),
+            "a NaN bound must be rejected",
+        );
+        assert!(
+            PrefactorInterval::new(1.0, f64::INFINITY, ImpactCalibrationSource::Assumed).is_err(),
+            "an infinite bound must be rejected",
+        );
+        assert!(
+            PrefactorInterval::new(0.69, 0.34, ImpactCalibrationSource::Assumed).is_err(),
+            "a lower bound above the upper bound must be rejected",
+        );
+    }
+
+    #[rstest]
+    fn test_a_point_calibration_applies_its_value() {
+        let interval =
+            PrefactorInterval::point(4.0, ImpactCalibrationSource::Fills).expect("valid point");
+
+        assert!(interval.is_point());
+        assert_eq!(interval.lower(), 4.0);
+        assert_eq!(interval.upper(), 4.0);
+        assert_eq!(interval.source(), ImpactCalibrationSource::Fills);
+
+        let mut model = SquareRootMarketImpactModel::new(interval, Quantity::from("100"), 10)
+            .expect("valid model");
+
+        assert_eq!(model.impact_increments(Quantity::from("100")).unwrap(), 4);
+    }
+
+    #[rstest]
+    fn test_the_model_applies_the_upper_bound_of_the_interval() {
+        let interval =
+            PrefactorInterval::new(1.0, 4.0, ImpactCalibrationSource::AnonymousTapeDebiased)
+                .expect("valid interval");
+        let mut model = SquareRootMarketImpactModel::new(interval, Quantity::from("100"), 10)
+            .expect("valid model");
+
+        assert!((model.applied_prefactor() - 4.0).abs() < f64::EPSILON);
+        assert_eq!(model.prefactor(), interval);
+
+        // The upper bound is what moves the price: at the reference quantity the model returns
+        // four increments, not the one the lower bound would have moved it by, so an inferred
+        // prefactor cannot flatter a result.
+        assert_eq!(model.impact_increments(Quantity::from("100")).unwrap(), 4);
+    }
+
+    #[rstest]
+    fn test_the_interval_prints_both_bounds_with_its_source() {
+        let interval =
+            PrefactorInterval::new(0.34, 0.69, ImpactCalibrationSource::AnonymousTapeDebiased)
+                .expect("valid interval");
+
+        assert_eq!(
+            interval.to_string(),
+            "prefactor 0.34 to 0.69 (anonymous tape, de-biased)",
+        );
+
+        let point = PrefactorInterval::point(0.5, ImpactCalibrationSource::Fills).expect("valid");
+        assert_eq!(point.to_string(), "prefactor 0.5 (fitted from fills)");
+    }
+
+    #[rstest]
+    fn test_the_model_prints_the_interval_it_applies() {
+        let interval = PrefactorInterval::new(0.34, 0.69, ImpactCalibrationSource::AnonymousTape)
+            .expect("valid interval");
+        let model = SquareRootMarketImpactModel::new(interval, Quantity::from("100"), 10)
+            .expect("valid model");
+
+        assert_eq!(
+            model.to_string(),
+            "SquareRootMarketImpactModel, prefactor 0.34 to 0.69 (anonymous tape, not de-biased)",
+        );
+    }
+
     #[rstest]
     fn test_square_root_impact_is_concave_in_the_fill_quantity() {
         let mut model =
-            SquareRootMarketImpactModel::new(100.0, Quantity::from("100"), 1_000).expect("valid");
+            SquareRootMarketImpactModel::new(point(100.0), Quantity::from("100"), 1_000)
+                .expect("valid model");
 
         let base = model.impact_increments(Quantity::from("100")).unwrap();
         let doubled = model.impact_increments(Quantity::from("200")).unwrap();
@@ -426,15 +676,15 @@ mod tests {
     #[rstest]
     fn test_square_root_impact_is_capped() {
         let mut model =
-            SquareRootMarketImpactModel::new(10.0, Quantity::from("1"), 3).expect("valid");
+            SquareRootMarketImpactModel::new(point(10.0), Quantity::from("1"), 3).expect("valid");
 
         assert_eq!(model.impact_increments(Quantity::from("10000")).unwrap(), 3);
     }
 
     #[rstest]
     fn test_square_root_impact_leaves_a_fill_below_one_increment_unchanged() {
-        let mut model =
-            SquareRootMarketImpactModel::new(2.0, Quantity::from("100"), 10).expect("valid");
+        let mut model = SquareRootMarketImpactModel::new(point(2.0), Quantity::from("100"), 10)
+            .expect("valid model");
 
         // floor(2 * sqrt(1 / 100)) = 0.
         assert_eq!(model.impact_increments(Quantity::from("1")).unwrap(), 0);
@@ -443,8 +693,8 @@ mod tests {
 
     #[rstest]
     fn test_square_root_impact_carries_decimal_quantity_exactly() {
-        let mut model =
-            SquareRootMarketImpactModel::new(1.0, Quantity::from("0.1"), 10).expect("valid");
+        let mut model = SquareRootMarketImpactModel::new(point(1.0), Quantity::from("0.1"), 10)
+            .expect("valid model");
 
         // floor(sqrt(2.5)) = 1.
         assert_eq!(model.impact_increments(Quantity::from("0.25")).unwrap(), 1);
@@ -453,9 +703,11 @@ mod tests {
     #[rstest]
     fn test_square_root_impact_is_schedule_invariant() {
         let mut model =
-            SquareRootMarketImpactModel::new(100.0, Quantity::from("100"), 1_000).expect("valid");
+            SquareRootMarketImpactModel::new(point(100.0), Quantity::from("100"), 1_000)
+                .expect("valid model");
         let mut reference =
-            SquareRootMarketImpactModel::new(100.0, Quantity::from("100"), 1_000).expect("valid");
+            SquareRootMarketImpactModel::new(point(100.0), Quantity::from("100"), 1_000)
+                .expect("valid model");
 
         // The adjustment a fill receives does not depend on the fills observed around it, so the
         // interleaved order returns the same values as the isolated one.
@@ -478,37 +730,23 @@ mod tests {
     #[rstest]
     fn test_square_root_impact_rejects_invalid_parameters() {
         assert!(
-            SquareRootMarketImpactModel::new(0.0, Quantity::from("1"), 1).is_err(),
-            "a zero prefactor must be rejected",
-        );
-        assert!(
-            SquareRootMarketImpactModel::new(-1.0, Quantity::from("1"), 1).is_err(),
-            "a negative prefactor must be rejected",
-        );
-        assert!(
-            SquareRootMarketImpactModel::new(f64::NAN, Quantity::from("1"), 1).is_err(),
-            "a NaN prefactor must be rejected",
-        );
-        assert!(
-            SquareRootMarketImpactModel::new(f64::INFINITY, Quantity::from("1"), 1).is_err(),
-            "an infinite prefactor must be rejected",
-        );
-        assert!(
-            SquareRootMarketImpactModel::new(1.0, Quantity::from("0"), 1).is_err(),
+            SquareRootMarketImpactModel::new(point(1.0), Quantity::from("0"), 1).is_err(),
             "a zero reference quantity must be rejected",
         );
         assert!(
-            SquareRootMarketImpactModel::new(1.0, Quantity::from("1"), 0).is_err(),
+            SquareRootMarketImpactModel::new(point(1.0), Quantity::from("1"), 0).is_err(),
             "zero max_increments must be rejected",
         );
     }
 
     #[rstest]
     fn test_square_root_impact_exposes_parameters() {
-        let model =
-            SquareRootMarketImpactModel::new(0.69, Quantity::from("500"), 12).expect("valid");
+        let interval = PrefactorInterval::new(0.34, 0.69, ImpactCalibrationSource::Assumed)
+            .expect("valid interval");
+        let model = SquareRootMarketImpactModel::new(interval, Quantity::from("500"), 12)
+            .expect("valid model");
 
-        assert!((model.prefactor() - 0.69).abs() < f64::EPSILON);
+        assert_eq!(model.prefactor(), interval);
         assert_eq!(model.reference_quantity(), Quantity::from("500"));
         assert_eq!(model.max_increments(), 12);
     }
@@ -516,7 +754,8 @@ mod tests {
     #[rstest]
     fn test_any_dispatches_to_square_root_model() {
         let mut any = MarketImpactModelAny::SquareRoot(
-            SquareRootMarketImpactModel::new(30.0, Quantity::from("100"), 50).expect("valid"),
+            SquareRootMarketImpactModel::new(point(30.0), Quantity::from("100"), 50)
+                .expect("valid model"),
         );
 
         // floor(30 * sqrt(4)) = 60, capped at 50.
