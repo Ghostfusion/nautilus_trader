@@ -132,6 +132,8 @@ class BacktestEngineConfig:
     @property
     def instance_id(self) -> core.UUID4 | None: ...
     @property
+    def random_seed(self) -> int | None: ...
+    @property
     def cache(self) -> common.CacheConfig | None: ...
     @property
     def msgbus(self) -> common.MessageBusConfig | None: ...
@@ -165,6 +167,7 @@ class BacktestEngineConfig:
         timeout_shutdown: int | None = None,
         logging: common.LoggerConfig | None = None,
         instance_id: core.UUID4 | None = None,
+        random_seed: int | None = None,
         cache: common.CacheConfig | None = None,
         msgbus: common.MessageBusConfig | None = None,
         data_engine: data.DataEngineConfig | None = None,

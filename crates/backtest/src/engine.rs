@@ -299,6 +299,9 @@ impl BacktestEngine {
             anyhow::bail!("Venue {venue} is already registered");
         }
 
+        // Seed any simulation component that declared no seed of its own.
+        config.seed_fill_models(self.config.random_seed);
+
         let routing = Some(config.routing);
         let frozen_account = Some(config.frozen_account);
         let use_message_queue = config.use_message_queue;

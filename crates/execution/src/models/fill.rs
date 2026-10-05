@@ -73,6 +73,23 @@ pub trait FillModel {
         Ok(false)
     }
 
+    /// Returns the random seed this model declares, or `None` if unseeded.
+    ///
+    /// Models that make no random draws, or that rely on an unseeded source,
+    /// return `None`.
+    fn random_seed(&self) -> Option<u64> {
+        None
+    }
+
+    /// Seeds this model if it declares no seed of its own.
+    ///
+    /// Called before the venue is constructed so that a run is reproducible. An
+    /// implementation that cannot be seeded simply leaves the model unchanged;
+    /// the default does nothing.
+    fn seed_if_unset(&mut self, seed: u64) {
+        let _ = seed;
+    }
+
     /// Returns a simulated `OrderBook` for fill simulation.
     ///
     /// Custom fill models provide their own liquidity simulation by returning an
@@ -114,6 +131,20 @@ impl FillModelHandle {
     pub fn from_rc(model: Rc<RefCell<dyn FillModel>>) -> Self {
         Self(model)
     }
+
+    /// Returns the random seed declared by the wrapped fill model, if any.
+    #[must_use]
+    pub fn random_seed(&self) -> Option<u64> {
+        self.0.borrow().random_seed()
+    }
+
+    /// Seeds the wrapped fill model if it declares no seed of its own.
+    ///
+    /// The handle may be shared, so the model is updated through its interior
+    /// mutability. Seeding is expected before the venue is constructed.
+    pub fn seed_if_unset(&self, seed: u64) {
+        self.0.borrow_mut().seed_if_unset(seed);
+    }
 }
 
 impl Debug for FillModelHandle {
@@ -135,6 +166,14 @@ impl FillModel for FillModelHandle {
 
     fn fill_limit_inside_spread(&self) -> anyhow::Result<bool> {
         self.0.borrow().fill_limit_inside_spread()
+    }
+
+    fn random_seed(&self) -> Option<u64> {
+        self.0.borrow().random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        self.0.borrow_mut().seed_if_unset(seed);
     }
 
     fn get_orderbook_for_fill_simulation(
@@ -193,6 +232,22 @@ impl ProbabilisticFillState {
             random_seed,
             rng,
         })
+    }
+
+    /// Returns the declared random seed, or `None` if the state is unseeded.
+    #[must_use]
+    pub fn random_seed(&self) -> Option<u64> {
+        self.random_seed
+    }
+
+    /// Reseeds the state with the given `seed`.
+    ///
+    /// Intended for a component that declared no seed of its own: it records
+    /// `seed` and rebuilds the random source from it. The draw probabilities are
+    /// unchanged.
+    pub fn reseed(&mut self, seed: u64) {
+        self.random_seed = Some(seed);
+        self.rng = StdRng::seed_from_u64(seed);
     }
 
     pub fn is_limit_filled(&mut self) -> bool {
@@ -316,6 +371,16 @@ impl FillModel for DefaultFillModel {
         Ok(self.state.is_slipped())
     }
 
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
+    }
+
     fn get_orderbook_for_fill_simulation(
         &mut self,
         _instrument: &InstrumentAny,
@@ -379,6 +444,16 @@ impl FillModel for BestPriceFillModel {
 
     fn is_slipped(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_slipped())
+    }
+
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
     }
 
     fn fill_limit_inside_spread(&self) -> anyhow::Result<bool> {
@@ -470,6 +545,16 @@ impl FillModel for OneTickSlippageFillModel {
         Ok(self.state.is_slipped())
     }
 
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
+    }
+
     fn get_orderbook_for_fill_simulation(
         &mut self,
         instrument: &InstrumentAny,
@@ -555,6 +640,16 @@ impl FillModel for ProbabilisticFillModel {
 
     fn is_slipped(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_slipped())
+    }
+
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
     }
 
     fn get_orderbook_for_fill_simulation(
@@ -661,6 +756,16 @@ impl FillModel for TwoTierFillModel {
         Ok(self.state.is_slipped())
     }
 
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
+    }
+
     fn get_orderbook_for_fill_simulation(
         &mut self,
         instrument: &InstrumentAny,
@@ -760,6 +865,16 @@ impl FillModel for ThreeTierFillModel {
 
     fn is_slipped(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_slipped())
+    }
+
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
     }
 
     fn get_orderbook_for_fill_simulation(
@@ -878,6 +993,16 @@ impl FillModel for LimitOrderPartialFillModel {
         Ok(self.state.is_slipped())
     }
 
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
+    }
+
     fn get_orderbook_for_fill_simulation(
         &mut self,
         instrument: &InstrumentAny,
@@ -978,6 +1103,16 @@ impl FillModel for SizeAwareFillModel {
 
     fn is_slipped(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_slipped())
+    }
+
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
     }
 
     fn get_orderbook_for_fill_simulation(
@@ -1086,6 +1221,16 @@ impl FillModel for CompetitionAwareFillModel {
         Ok(self.state.is_slipped())
     }
 
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
+    }
+
     fn get_orderbook_for_fill_simulation(
         &mut self,
         instrument: &InstrumentAny,
@@ -1172,6 +1317,16 @@ impl FillModel for VolumeSensitiveFillModel {
 
     fn is_slipped(&mut self) -> anyhow::Result<bool> {
         Ok(self.state.is_slipped())
+    }
+
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
     }
 
     fn get_orderbook_for_fill_simulation(
@@ -1282,6 +1437,16 @@ impl FillModel for MarketHoursFillModel {
         Ok(self.state.is_slipped())
     }
 
+    fn random_seed(&self) -> Option<u64> {
+        self.state.random_seed()
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        if self.state.random_seed().is_none() {
+            self.state.reseed(seed);
+        }
+    }
+
     fn get_orderbook_for_fill_simulation(
         &mut self,
         instrument: &InstrumentAny,
@@ -1378,6 +1543,38 @@ impl FillModel for FillModelAny {
             Self::CompetitionAware(m) => m.fill_limit_inside_spread(),
             Self::VolumeSensitive(m) => m.fill_limit_inside_spread(),
             Self::MarketHours(m) => m.fill_limit_inside_spread(),
+        }
+    }
+
+    fn random_seed(&self) -> Option<u64> {
+        match self {
+            Self::Default(m) => m.random_seed(),
+            Self::BestPrice(m) => m.random_seed(),
+            Self::OneTickSlippage(m) => m.random_seed(),
+            Self::Probabilistic(m) => m.random_seed(),
+            Self::TwoTier(m) => m.random_seed(),
+            Self::ThreeTier(m) => m.random_seed(),
+            Self::LimitOrderPartialFill(m) => m.random_seed(),
+            Self::SizeAware(m) => m.random_seed(),
+            Self::CompetitionAware(m) => m.random_seed(),
+            Self::VolumeSensitive(m) => m.random_seed(),
+            Self::MarketHours(m) => m.random_seed(),
+        }
+    }
+
+    fn seed_if_unset(&mut self, seed: u64) {
+        match self {
+            Self::Default(m) => m.seed_if_unset(seed),
+            Self::BestPrice(m) => m.seed_if_unset(seed),
+            Self::OneTickSlippage(m) => m.seed_if_unset(seed),
+            Self::Probabilistic(m) => m.seed_if_unset(seed),
+            Self::TwoTier(m) => m.seed_if_unset(seed),
+            Self::ThreeTier(m) => m.seed_if_unset(seed),
+            Self::LimitOrderPartialFill(m) => m.seed_if_unset(seed),
+            Self::SizeAware(m) => m.seed_if_unset(seed),
+            Self::CompetitionAware(m) => m.seed_if_unset(seed),
+            Self::VolumeSensitive(m) => m.seed_if_unset(seed),
+            Self::MarketHours(m) => m.seed_if_unset(seed),
         }
     }
 
@@ -2454,5 +2651,48 @@ mod tests {
                 .fill_limit_inside_spread()
                 .unwrap()
         );
+    }
+
+    #[rstest]
+    fn test_seeding_two_unseeded_probabilistic_models_reproduces_their_draws() {
+        let mut first =
+            FillModelAny::Probabilistic(ProbabilisticFillModel::new(0.5, 0.5, None).unwrap());
+        let mut second =
+            FillModelAny::Probabilistic(ProbabilisticFillModel::new(0.5, 0.5, None).unwrap());
+
+        assert_eq!(first.random_seed(), None);
+        assert_eq!(second.random_seed(), None);
+
+        first.seed_if_unset(11);
+        second.seed_if_unset(11);
+
+        assert_eq!(first.random_seed(), Some(11));
+        assert_eq!(second.random_seed(), Some(11));
+
+        for _ in 0..32 {
+            assert_eq!(
+                first.is_limit_filled().unwrap(),
+                second.is_limit_filled().unwrap()
+            );
+            assert_eq!(first.is_slipped().unwrap(), second.is_slipped().unwrap());
+        }
+    }
+
+    #[rstest]
+    fn test_a_fill_model_declaring_no_seed_stays_unseeded_until_it_is_seeded() {
+        let model =
+            FillModelAny::Probabilistic(ProbabilisticFillModel::new(0.5, 0.5, None).unwrap());
+
+        assert_eq!(model.random_seed(), None);
+    }
+
+    #[rstest]
+    fn test_a_fill_model_declaring_its_own_seed_keeps_it_when_seeded() {
+        let mut model =
+            FillModelAny::Probabilistic(ProbabilisticFillModel::new(0.5, 0.5, Some(4)).unwrap());
+
+        model.seed_if_unset(9);
+
+        assert_eq!(model.random_seed(), Some(4));
     }
 }

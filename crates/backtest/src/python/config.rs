@@ -94,6 +94,7 @@ impl BacktestEngineConfig {
         timeout_shutdown = None,
         logging = None,
         instance_id = None,
+        random_seed = None,
         cache = None,
         msgbus = None,
         data_engine = None,
@@ -120,6 +121,7 @@ impl BacktestEngineConfig {
         timeout_shutdown: Option<u64>,
         logging: Option<LoggerConfig>,
         instance_id: Option<UUID4>,
+        random_seed: Option<u64>,
         cache: Option<CacheConfig>,
         msgbus: Option<MessageBusConfig>,
         data_engine: Option<DataEngineConfig>,
@@ -147,6 +149,7 @@ impl BacktestEngineConfig {
             timeout_shutdown: Duration::from_secs(timeout_shutdown.unwrap_or(5)),
             logging: logging.unwrap_or_default(),
             instance_id,
+            random_seed,
             cache,
             msgbus,
             data_engine,
@@ -241,6 +244,13 @@ impl BacktestEngineConfig {
     #[pyo3(name = "instance_id")]
     const fn py_instance_id(&self) -> Option<UUID4> {
         self.instance_id
+    }
+
+    /// Returns the optional random seed for simulation components.
+    #[getter]
+    #[pyo3(name = "random_seed")]
+    const fn py_random_seed(&self) -> Option<u64> {
+        self.random_seed
     }
 
     #[getter]

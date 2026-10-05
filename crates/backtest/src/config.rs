@@ -111,6 +111,12 @@ pub struct BacktestEngineConfig {
     pub logging: LoggerConfig,
     /// The unique instance identifier for the kernel.
     pub instance_id: Option<UUID4>,
+    /// The optional random seed for simulation components.
+    ///
+    /// Seeds simulation components that declare no seed of their own; a
+    /// component declaring its own seed keeps it. When unset, the draws stay
+    /// unseeded.
+    pub random_seed: Option<u64>,
     /// The timeout for all clients to connect and initialize.
     #[builder(default = Duration::from_mins(1))]
     pub timeout_connection: Duration,
@@ -460,6 +466,21 @@ impl SimulatedVenueConfig {
         );
 
         errors.into_result()
+    }
+
+    /// Applies an optional engine-level `seed` to the venue's fill models.
+    ///
+    /// Seeds the venue default model and every per-instrument override
+    /// independently; a model that already declares a seed keeps it. When
+    /// `seed` is `None` the models are left untouched.
+    pub(crate) fn seed_fill_models(&self, seed: Option<u64>) {
+        let Some(seed) = seed else {
+            return;
+        };
+        self.fill_model.seed_if_unset(seed);
+        for model in self.instrument_fill_models.values() {
+            model.seed_if_unset(seed);
+        }
     }
 }
 
@@ -1365,7 +1386,7 @@ impl BacktestRunConfig {
 mod tests {
     use std::collections::BTreeSet;
 
-    use nautilus_execution::models::fee::MakerTakerFeeModel;
+    use nautilus_execution::models::{fee::MakerTakerFeeModel, fill::ProbabilisticFillModel};
     use nautilus_system::config_file::{load_config, save_config};
     use rstest::rstest;
 
@@ -1794,6 +1815,37 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[case(Some(7), Some(7))]
+    #[case(None, None)]
+    fn test_seed_fill_models_propagates_the_engine_seed_to_unset_models(
+        #[case] seed: Option<u64>,
+        #[case] expected: Option<u64>,
+    ) {
+        let instrument_id = InstrumentId::from("ETHUSDT.BINANCE");
+        let venue_model =
+            FillModelHandle::new(ProbabilisticFillModel::new(0.5, 0.5, None).unwrap());
+        let instrument_model =
+            FillModelHandle::new(ProbabilisticFillModel::new(0.5, 0.5, None).unwrap());
+        let config = minimal_sim_builder!()
+            .fill_model(venue_model)
+            .instrument_fill_models(AHashMap::from_iter([(instrument_id, instrument_model)]))
+            .build()
+            .unwrap();
+
+        config.seed_fill_models(seed);
+
+        assert_eq!(config.fill_model.random_seed(), expected);
+        assert_eq!(
+            config
+                .instrument_fill_models
+                .get(&instrument_id)
+                .unwrap()
+                .random_seed(),
+            expected,
+        );
+    }
+
     fn minimal_venue() -> BacktestVenueConfig {
         minimal_builder!().build().unwrap()
     }
@@ -1917,6 +1969,7 @@ mod tests {
             "logging",
             "msgbus",
             "portfolio",
+            "random_seed",
             "risk_engine",
             "run_analysis",
             "save_state",
