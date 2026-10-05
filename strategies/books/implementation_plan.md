@@ -291,9 +291,17 @@ feature-gated examples.
   powers-of-two ladder). Each returns nothing rather than a number when the series cannot support
   it. All three read the daily-binned returns the crate's other statistics read, so the aggregation
   period counts days and not raw observations.
-- W3.2 Make the linear model's failure mode observable: a test and a documented scenario in which
-  a persistent synthetic flow plus linear impact yields a variance ratio above one, so the
-  artifact is named rather than mistaken for a result.
+- W3.2 (done at revision 20, and it corrected the plan rather than confirming it)
+  `python/tests/unit/analysis/test_variance_ratio_impact.py` is the documented scenario: a persistent
+  flow from the W7.4 generator priced with a linear impact response reports a variance ratio of 1.533
+  at period 20, so the artifact is named rather than mistaken for a result. Measuring the concave
+  response on the same flow showed the previous acceptance was wrong: the concave path is also above
+  one (1.391), because the flow is persistent by construction and every monotone impact response
+  leaves the induced price positively autocorrelated. What separates the models is the size of the
+  inflation, which the test asserts, and the T3 acceptance above now says that instead. The
+  diffusiveness condition bounds the exponent the generator accepts, not the variance ratio a
+  persistent flow produces, and the linear path had to be constructed in the test because the
+  generator refuses the exponent a linear model implies.
 - W3.3 (done at revision 19, satisfied by W7.4 rather than reimplemented) `SyntheticFlowConfig::new`
   takes the target Hurst exponent and the impact exponent, refuses a Hurst exponent at or below one
   half and an impact exponent above one half with the diffusiveness reason, and
@@ -301,8 +309,10 @@ feature-gated examples.
   a reading of the shipped constructor and its test, not new code: the requirement is W7.4's own
   validation.
 
-**Acceptance.** The variance-ratio tool reports above one for the linear-impact synthetic run and
-does not for the concave model on the same flow. The same tool is callable from Python.
+**Acceptance.** The variance-ratio tool reports above one for the linear-impact synthetic run, and
+reports less inflation for the concave model on the same flow (also above one, because the flow is
+persistent by construction and every monotone response leaves the induced price autocorrelated).
+The same tool is callable from Python.
 
 ### T4 Passive fills are adversely selected (03, 04)
 
@@ -689,3 +699,4 @@ that is admissible per strategy but not in aggregate.
 | 17       | 2026-10-05 | W6.3 done: the gate's vocabulary carries two feed-identity kinds and the pure validators that produce them, for the checks the engine cannot make because it never sees the numbers. The fork has no open-interest data type, so the open-interest check is the conservation identity an adapter can evaluate from two reports (open interest moves only through trades, and one traded unit moves it by at most one, so the absolute change cannot exceed the traded volume); the settlement check reconciles a reported total against the sum of its components within a tolerance and refuses a component in another currency. `DataQualityCounts::record` is public so an adapter's own check is counted in the same totals. The data-quality row's missing column is now only the clock-offset estimate and the counted `ts_init` substitution.                                                                                                                                                                                                                                                                                                                                                                |
 | 18       | 2026-10-05 | W6.4 done, in two halves. `ClockOffsetEstimator` lives with the clock in `nautilus-common` so any crate holding a clock can reach it: it applies a minimum filter per bucket, reports the spread of the bucket minima over a twelve-bucket window as the drift bound, refuses to estimate below three completed buckets, and discards a pair whose difference cannot be a clock offset. The counted substitution landed at the bybit wallet path, which already carries dispatch state: the fallback to `ts_init` increments a counter, the warning names the running count, and the count is readable through `WsDispatchState::timestamp_substitutions`. The remaining adapters that fall back to `ts_init` still only log, and the architect_ax overflow sites fall back to zero; the data-quality row names both as its remaining gap, so P2 closes with a stated inventory rather than a silent one. The estimator's own tests could not run on this machine because `nautilus-common`'s test target does not compile here for a pre-existing reason, so its behaviour was exercised through a temporary probe in `nautilus-data` (a crate whose test target does compile), which passed and was then removed. |
 | 19       | 2026-10-05 | W3.3 marked done without new code: `SyntheticFlowConfig::new` already takes the target Hurst exponent and the impact exponent, refuses a Hurst exponent at or below one half and an exponent above one half with the diffusiveness reason, and its refusal test ships with it. The confirmation is a reading of the shipped constructor and test, recorded here rather than reimplemented, which is what the item asked for once W7.4 landed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 20       | 2026-10-05 | W3.2 done as a Python test over the shipped generator and the shipped statistic, and it **corrected the plan**. Measured at a Hurst exponent of 0.6, four thousand periods and a scale of twenty: the linear impact response reports a variance ratio of 1.533 while the concave response reports 1.391 on the same flow and seed. The plan's acceptance said the concave model would not be above one; it is, because a flow that is persistent by construction leaves any monotone impact response positively autocorrelated, and the concave response only inflates less. The acceptance now states the comparison that is true and the numbers behind it, and the diffusiveness condition is recorded as bounding the exponent the generator accepts rather than the variance ratio a persistent flow produces. The linear path is built inside the test because the generator refuses the exponent a linear model implies.                                                                                                                                                                                                                                                                                     |
