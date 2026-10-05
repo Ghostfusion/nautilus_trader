@@ -105,6 +105,13 @@ from nautilus_trader.decision_bridge.ledger import UNATTRIBUTED as UNATTRIBUTED
 from nautilus_trader.decision_bridge.ledger import AdmissionLedger as AdmissionLedger
 from nautilus_trader.decision_bridge.ledger import DecisionRecord as DecisionRecord
 from nautilus_trader.decision_bridge.ledger import DuplicateArrival as DuplicateArrival
+from nautilus_trader.decision_bridge.masking import DATE_MASK as DATE_MASK
+from nautilus_trader.decision_bridge.masking import IDENTIFIER_MASK as IDENTIFIER_MASK
+from nautilus_trader.decision_bridge.masking import MaskedReplayReport as MaskedReplayReport
+from nautilus_trader.decision_bridge.masking import date_only as date_only
+from nautilus_trader.decision_bridge.masking import mask_dates as mask_dates
+from nautilus_trader.decision_bridge.masking import mask_identifiers as mask_identifiers
+from nautilus_trader.decision_bridge.masking import masked_replay as masked_replay
 from nautilus_trader.decision_bridge.news import NewsItem as NewsItem
 from nautilus_trader.decision_bridge.numeric import DEFAULT_SCALES as DEFAULT_SCALES
 from nautilus_trader.decision_bridge.numeric import DeclaredScales as DeclaredScales
@@ -143,10 +150,12 @@ from nautilus_trader.decision_bridge.tradability import require as require
 
 __all__ = [
     "ADMISSION_RESULTS",
+    "DATE_MASK",
     "DEFAULT_SCALES",
     "DENIAL_CODES",
     "EXPOSURE_STAGES",
     "GATE_SEVERITY_MAPPING",
+    "IDENTIFIER_MASK",
     "KNOWLEDGE_DATE_FIELD",
     "KNOWN_FIELDS",
     "ORDER_ID_MAX_LENGTH",
@@ -168,6 +177,7 @@ __all__ = [
     "GateResolution",
     "JsonCalendarView",
     "KnowledgeCounts",
+    "MaskedReplayReport",
     "NewsItem",
     "OrderIdentity",
     "OrderRole",
@@ -200,6 +210,7 @@ __all__ = [
     "build_risk_engine_config",
     "classify_engine_message",
     "combine",
+    "date_only",
     "decide_rating",
     "from_status",
     "gate_severity",
@@ -209,6 +220,9 @@ __all__ = [
     "iso_to_unix_nanos",
     "knowledge_date_of",
     "leading_denial_code",
+    "mask_dates",
+    "mask_identifiers",
+    "masked_replay",
     "most_restrictive",
     "order_identity",
     "pipeline_config_for",
