@@ -25,6 +25,7 @@ from nautilus_trader.analysis import MaxDrawdown
 from nautilus_trader.analysis import MetricDirection
 from nautilus_trader.analysis import MetricInput
 from nautilus_trader.analysis import MetricReason
+from nautilus_trader.analysis import MetricStage
 from nautilus_trader.analysis import MetricStatus
 from nautilus_trader.analysis import MetricTag
 from nautilus_trader.analysis import MetricUnits
@@ -179,6 +180,7 @@ def test_metric_definitions_declare_the_metadata_of_every_registered_statistic()
         "annualisation": "252",
         "compounding": "simple",
         "divisor": "sample",
+        "stage": "account",
     }
     assert sharpe.units == MetricUnits.RATIO
     assert MetricTag.RISK_ADJUSTED in sharpe.tags
@@ -269,8 +271,9 @@ def test_metric_vocabularies_are_closed() -> None:
     assert MetricTag.RISK_ADJUSTED != MetricTag.ANNUALISED
     assert MetricInput.BENCHMARK != MetricInput.POSITIONS
     assert MetricReason.NON_FINITE_INPUT != MetricReason.UNDEFINED_RESULT
+    assert MetricStage.FORECAST != MetricStage.ACCOUNT
 
-    # A member outside the vocabulary does not exist, on any of the six sets.
+    # A member outside the vocabulary does not exist, on any of the seven sets.
     for vocabulary, attribute in (
         (MetricUnits, "UNKNOWN"),
         (MetricTag, "UNKNOWN"),
@@ -278,6 +281,7 @@ def test_metric_vocabularies_are_closed() -> None:
         (MetricInput, "UNKNOWN"),
         (MetricStatus, "UNKNOWN"),
         (MetricReason, "UNKNOWN"),
+        (MetricStage, "UNKNOWN"),
     ):
         with pytest.raises(AttributeError):
             getattr(vocabulary, attribute)

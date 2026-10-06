@@ -15,7 +15,7 @@
 
 //! Python bindings from [PyO3](https://pyo3.rs).
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use indexmap::{IndexMap, IndexSet};
 use nautilus_analysis::{
@@ -492,6 +492,21 @@ impl PyPortfolio {
     #[pyo3(name = "statistics")]
     fn py_statistics(&self) -> PortfolioStatistics {
         self.0.borrow().statistics()
+    }
+
+    /// Returns the scoring-chain stage of every registered statistic that declares one.
+    ///
+    /// The mapping is keyed by the statistic's rendered name, which is the key its rows carry
+    /// in a report, and the value is the stage's stable string (`forecast`, `decision` or
+    /// `account`). A statistic that declares no stage is absent rather than defaulted.
+    #[pyo3(name = "metric_stages")]
+    fn py_metric_stages(&self) -> HashMap<String, String> {
+        self.0
+            .borrow()
+            .metric_stages()
+            .into_iter()
+            .map(|(name, stage)| (name, stage.as_str().to_string()))
+            .collect()
     }
 
     /// Registers a portfolio statistic for inclusion in portfolio and backtest analysis.

@@ -22,7 +22,7 @@ use nautilus_model::position::Position;
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
 };
 
@@ -98,6 +98,7 @@ impl PortfolioStatistic for Autocorrelation {
         .with_parameter("compounding", "simple")
         .with_count("lag", self.lag)
         .with_tags([MetricTag::Returns, MetricTag::Distribution])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

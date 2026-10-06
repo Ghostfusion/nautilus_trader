@@ -17,7 +17,7 @@ use nautilus_model::position::Position;
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     period::{PerformancePeriod, PeriodFrameTotals, single_currency_share},
     statistic::PortfolioStatistic,
 };
@@ -82,6 +82,7 @@ impl PortfolioStatistic for NetReturn {
             [MetricInput::PerformancePeriods],
         )
         .with_tags([MetricTag::Returns])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

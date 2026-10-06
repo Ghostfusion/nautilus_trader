@@ -28,11 +28,24 @@ impl VarianceRatio {
     /// Calculates the variance ratio of portfolio returns over an aggregation scale `q`.
     ///
     /// The variance ratio compares the variance of `q`-period aggregated returns to `q`
-    /// times the variance of one-period returns, with overlapping aggregation sums and the
-    /// population divisor for both variances (the finite-sample estimator). The diffusive
-    /// value is `1.0`; above `1.0` indicates persistence on the scale `q` and below `1.0`
-    /// indicates anti-persistence. Returns `None` when `n < 2q` or the series has zero
-    /// dispersion.
+    /// times the variance of one-period returns. With `Var_1 = (1/n) * sum (x_t - mu)^2`,
+    /// `mu` the full-series mean, and `S_t = sum_{i=t..t+q-1} x_i` the overlapping `q`-period
+    /// sums for `t = 1..=n-q+1`:
+    ///
+    /// `VR(q) = [ (1/(n-q+1)) * sum_t (S_t - q*mu)^2 ] / (q * Var_1)`
+    ///
+    /// The aggregation sums `S_t` overlap rather than tile the series, which keeps every
+    /// observation in the estimate. Both variances divide by the number of observations
+    /// (the population divisor), so this is the finite-sample (biased) estimator rather than
+    /// an unbiased correction.
+    ///
+    /// The diffusive value of the tool is `1.0`. A value above `1.0` indicates persistence on
+    /// the aggregation scale `q` (aggregated variance grows faster than linearly in `q`, as a
+    /// trend or momentum would produce), and a value below `1.0` indicates anti-persistence
+    /// (mean reversion, as an alternating series would produce).
+    ///
+    /// Returns `None` when `n < 2q` (too few observations to aggregate) or when `Var_1` is
+    /// zero (the ratio is undefined).
     #[new]
     #[pyo3(signature = (period=None))]
     fn py_new(period: Option<usize>) -> PyResult<Self> {

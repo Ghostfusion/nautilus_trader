@@ -21,7 +21,7 @@ use nautilus_model::position::Position;
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
     statistics::tracking_error::active_return_stats,
 };
@@ -98,6 +98,7 @@ impl PortfolioStatistic for InformationRatio {
             MetricTag::BenchmarkRelative,
             MetricTag::Annualised,
         ])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

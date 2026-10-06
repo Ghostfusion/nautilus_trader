@@ -19,7 +19,7 @@ use nautilus_model::position::Position;
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
 };
 
@@ -80,6 +80,7 @@ impl PortfolioStatistic for ReturnsKurtosis {
         .with_parameter("compounding", "simple")
         .with_parameter("divisor", "sample")
         .with_tags([MetricTag::Distribution, MetricTag::Returns])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

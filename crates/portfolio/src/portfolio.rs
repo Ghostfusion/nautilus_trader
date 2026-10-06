@@ -26,6 +26,7 @@ use ahash::{AHashMap, AHashSet};
 use indexmap::{IndexMap, IndexSet};
 use nautilus_analysis::{
     analyzer::{PortfolioAnalyzer, Statistic},
+    metric::MetricStage,
     period::{
         CurrencyTotals, PerformancePeriod, PerformancePeriodReducer, PeriodKind, PeriodObservation,
     },
@@ -2258,6 +2259,21 @@ impl Portfolio {
     #[must_use]
     pub fn registered_statistics(&self) -> AHashMap<String, Statistic> {
         self.inner.borrow().analyzer.statistics.clone()
+    }
+
+    /// Returns the scoring-chain stage of every registered statistic that declares one.
+    ///
+    /// Keyed by the statistic's rendered name, which is the key its rows carry in a report. A
+    /// statistic that declares no stage is absent rather than defaulted, so a consumer can tell
+    /// an undeclared metric from a declared one.
+    #[must_use]
+    pub fn metric_stages(&self) -> BTreeMap<String, MetricStage> {
+        self.registered_statistics()
+            .into_iter()
+            .filter_map(|(name, statistic)| {
+                statistic.definition().stage().map(|stage| (name, stage))
+            })
+            .collect()
     }
 
     /// Registers `statistic` for inclusion in portfolio and backtest analysis.

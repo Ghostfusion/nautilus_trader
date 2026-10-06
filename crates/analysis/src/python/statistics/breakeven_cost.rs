@@ -26,12 +26,21 @@ use crate::{
 #[pymethods]
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 impl BreakevenCost {
-    /// Calculates the breakeven cost over a performance-period frame, in basis points of turnover.
+    /// Calculates the breakeven cost over a performance-period frame in basis points of turnover.
     ///
-    /// The figure is the frame's gross PnL over its notional turnover: the cost rate the strategy
-    /// could have paid and still broken even, measured on the same basis as the cost it paid. The
-    /// rate is defined only when the turnover and the PnL resolve to the same single currency and
-    /// the turnover is not zero.
+    /// The figure is the frame's gross PnL over its notional turnover: the cost rate the strategy could
+    /// have paid and still broken even, which is the edge the frame actually earned per unit traded,
+    /// measured on the same basis as the `CostBasisPoints` it is read against. A strategy whose
+    /// breakeven cost sits below the cost it pays is losing money to its costs, whatever its gross
+    /// return says, and a result above the cost it pays is not evidence of an edge until the estimate
+    /// carries its own uncertainty.
+    ///
+    /// `Maximize` is the direction because the value states how much cost the frame's edge can absorb:
+    /// a higher breakeven is a more robust result, and a negative one means the frame traded at a loss
+    /// before costs.
+    ///
+    /// The rate is defined only when the turnover and the PnL resolve to the same single currency and
+    /// the turnover is not zero. An empty frame and a frame that traded nothing have no defined rate.
     #[new]
     fn py_new() -> Self {
         Self::new()

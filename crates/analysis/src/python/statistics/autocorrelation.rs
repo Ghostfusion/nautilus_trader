@@ -33,11 +33,18 @@ impl Autocorrelation {
     ///
     /// `rho_k = sum_{t=1..n-k} (x_t - mu)(x_{t+k} - mu) / sum_{t=1..n} (x_t - mu)^2`
     ///
-    /// where `mu` is the mean of the whole series and `n` is the number of returns. The
-    /// mean and the denominator use the full series, while the numerator uses the `n - k`
-    /// overlapping pairs. A positive value indicates persistence, a negative value indicates
-    /// mean reversion, and zero indicates no linear dependence at that lag. Returns `None`
-    /// for a series too short for the lag or with zero dispersion.
+    /// where `mu` is the mean of the whole series and `n` is the number of returns. Two
+    /// choices follow from that definition and are deliberate: both the mean `mu` and the
+    /// denominator sum over the full series, while the numerator uses only the `n - k`
+    /// overlapping pairs `(x_t, x_{t+k})` that a lag-`k` shift admits. Using the full-series
+    /// dispersion in the denominator keeps the measure bounded to the unit interval.
+    ///
+    /// A positive value indicates persistence (a return above the mean tends to be followed
+    /// by another), a negative value indicates mean reversion, and zero indicates no linear
+    /// dependence at that lag.
+    ///
+    /// Returns `None` for a series with `n <= k + 1` observations (too few overlapping pairs)
+    /// or with zero dispersion (the denominator is zero).
     #[new]
     #[pyo3(signature = (lag=None))]
     fn py_new(lag: Option<usize>) -> PyResult<Self> {

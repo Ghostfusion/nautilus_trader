@@ -26,9 +26,10 @@ use pyo3::prelude::*;
 use crate::{
     Returns,
     analyzer::PortfolioAnalyzer,
-    metric::{MetricDefinition, MetricReport},
+    metric::{MetricDefinition, MetricReport, MetricStage},
     period::PerformancePeriod,
     python::statistic::statistic_from_pyobject,
+    snapshot::PortfolioStatistics,
 };
 
 #[pymethods]
@@ -123,6 +124,26 @@ impl PortfolioAnalyzer {
         self.get_performance_stats_general().into_iter().collect()
     }
 
+    /// Collects an owned `PortfolioStatistics` snapshot from the current analyzer state.
+    ///
+    /// The period frame's rows are merged in beside the returns and general rows. A row is
+    /// grouped by its registered statistic's declared units: a `MetricUnits.Currency` amount
+    /// is a money total and belongs in `general`, while every other unit (`Ratio`, `Fraction`,
+    /// `BasisPoints`) is a dimensionless figure and belongs in `returns`. The frame's cost and
+    /// return metrics are ratios and rates, so they read beside the return statistics; only the
+    /// money totals are general.
+    ///
+    /// With an empty frame no period row is produced (`calculate_from_periods` returns `None`),
+    /// so the two maps are exactly what the returns and general calculations yield on their own.
+    ///
+    /// When stages have been declared with `Self.set_declared_stages`, a declared stage that
+    /// produced no rendered row is reported as one row in `general`, named for the stage, so a
+    /// chain that intends a stage it never scores is visible rather than silent.
+    #[pyo3(name = "statistics")]
+    fn py_statistics(&self) -> PortfolioStatistics {
+        self.statistics()
+    }
+
     /// Returns the metric definition of every registered statistic, ordered by identity.
     ///
     /// This is the declarative metadata behind a report: the stable identity, the title
@@ -137,6 +158,35 @@ impl PortfolioAnalyzer {
         definitions.sort_by(|a, b| a.id().cmp(b.id()));
 
         definitions
+    }
+
+    /// Returns the scoring-chain stage of every registered statistic that declares one.
+    ///
+    /// Keyed by the statistic's rendered name, which is the key its rows carry in a report. A
+    /// statistic that declares no stage is absent rather than defaulted, so a consumer can tell
+    /// an undeclared metric from a declared one.
+    #[pyo3(name = "metric_stages")]
+    fn py_metric_stages(&self) -> HashMap<String, String> {
+        self.metric_stages()
+            .into_iter()
+            .map(|(name, stage)| (name, stage.as_str().to_string()))
+            .collect()
+    }
+
+    /// Sets the scoring-chain stages this run declares it intends to report.
+    ///
+    /// Replaces any declaration already held. An empty declaration leaves every stage unclaimed,
+    /// so `Self.statistics` adds no missing-stage row and the report is what it was before the
+    /// chain existed.
+    #[pyo3(name = "set_declared_stages")]
+    fn py_set_declared_stages(&mut self, stages: Vec<MetricStage>) {
+        self.set_declared_stages(stages);
+    }
+
+    /// Returns the scoring-chain stages this run has declared.
+    #[pyo3(name = "declared_stages")]
+    fn py_declared_stages(&self) -> Vec<MetricStage> {
+        self.declared_stages().to_vec()
     }
 
     /// Reports the requested return-based metrics, one result per request.

@@ -21,7 +21,7 @@ use nautilus_core::UnixNanos;
 use nautilus_model::position::Position;
 
 use crate::{
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
 };
 
@@ -82,6 +82,7 @@ impl PortfolioStatistic for CAGR {
         .with_parameter("compounding", "simple")
         .with_count("annualisation", self.period)
         .with_tags([MetricTag::Returns, MetricTag::Annualised])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, returns: &BTreeMap<UnixNanos, f64>) -> Option<Self::Item> {

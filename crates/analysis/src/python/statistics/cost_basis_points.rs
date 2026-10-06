@@ -26,12 +26,17 @@ use crate::{
 #[pymethods]
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 impl CostBasisPoints {
-    /// Calculates the commission over a performance-period frame in basis points of turnover.
+    /// Calculates the commission paid over a performance-period frame in basis points of turnover.
     ///
-    /// The figure is the frame's commission over its notional turnover: the effective all-in cost
-    /// rate it paid per unit traded, comparable with the breakeven cost of the same frame. The
-    /// rate is defined only when the turnover and the commission resolve to the same single
-    /// currency and the turnover is not zero.
+    /// The figure is the frame's commission over its notional turnover, which is the effective all-in
+    /// cost rate the frame paid per unit traded rather than the drag on the period's return. It is
+    /// directly comparable with the `BreakevenCost` of the same frame, which reports the rate the
+    /// frame's gross edge could have paid, and it is the number a cost study reads against the edge a
+    /// signal is claimed to have.
+    ///
+    /// The rate is defined only when the turnover and the commission resolve to the same single
+    /// currency and the turnover is not zero. An empty frame and a frame that traded nothing have no
+    /// defined rate; a frame that traded and paid no commission has a genuine rate of zero.
     #[new]
     fn py_new() -> Self {
         Self::new()

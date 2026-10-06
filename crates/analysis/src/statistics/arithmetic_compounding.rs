@@ -49,7 +49,7 @@ use rust_decimal::prelude::ToPrimitive;
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     period::PerformancePeriod,
     statistic::PortfolioStatistic,
 };
@@ -202,6 +202,7 @@ impl PortfolioStatistic for ArithmeticCompoundingImpliedEquity {
         )
         .with_number("tolerance", self.tolerance)
         .with_tags([MetricTag::Returns])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {
@@ -276,6 +277,7 @@ impl PortfolioStatistic for ArithmeticCompoundingRealisedEquity {
             [MetricInput::PerformancePeriods],
         )
         .with_tags([MetricTag::Returns])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {
@@ -367,6 +369,7 @@ impl PortfolioStatistic for ArithmeticCompoundingRatio {
         )
         .with_number("tolerance", self.tolerance)
         .with_tags([MetricTag::Returns])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {
@@ -458,6 +461,7 @@ impl PortfolioStatistic for ArithmeticCompoundingFlagged {
         )
         .with_number("tolerance", self.tolerance)
         .with_tags([MetricTag::Returns])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

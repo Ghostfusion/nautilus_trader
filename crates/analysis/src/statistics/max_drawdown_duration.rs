@@ -17,7 +17,7 @@ use nautilus_model::position::Position;
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     period::PerformancePeriod,
     statistic::PortfolioStatistic,
 };
@@ -81,6 +81,7 @@ impl PortfolioStatistic for MaxDrawdownDuration {
         )
         .with_parameter("unit", "days")
         .with_tags([MetricTag::Drawdown])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

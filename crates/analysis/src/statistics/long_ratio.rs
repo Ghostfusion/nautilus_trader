@@ -19,7 +19,7 @@ use nautilus_model::{enums::OrderSide, position::Position};
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
 };
 
@@ -76,6 +76,7 @@ impl PortfolioStatistic for LongRatio {
         )
         .with_count("precision", self.precision)
         .with_tags([MetricTag::Exposure])
+        .with_stage(MetricStage::Decision)
     }
 
     fn calculate_from_positions(&self, positions: &[Position]) -> Option<Self::Item> {

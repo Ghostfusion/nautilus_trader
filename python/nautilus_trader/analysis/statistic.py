@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from nautilus_trader._libnautilus.analysis import MetricDirection
 from nautilus_trader._libnautilus.analysis import MetricInput
+from nautilus_trader._libnautilus.analysis import MetricStage
 from nautilus_trader._libnautilus.analysis import MetricTag
 from nautilus_trader._libnautilus.analysis import MetricUnits
 
@@ -162,6 +163,22 @@ class PortfolioStatistic:
             MetricInput.REALIZED_PNLS,
             MetricInput.POSITIONS,
         )
+
+    @property
+    def stage(self) -> MetricStage | None:
+        """
+        Return the scoring-chain stage the metric belongs to.
+
+        The default is `None`, which claims no stage. Override this to declare whether the
+        metric is a `MetricStage.FORECAST` score, a `MetricStage.DECISION` trade outcome, or
+        an `MetricStage.ACCOUNT` ledger figure, so a report can say which it is reading.
+
+        Returns
+        -------
+        MetricStage or ``None``
+
+        """
+        return None
 
     def calculate_from_returns(self, returns: dict[int, float]) -> float | None:
         """

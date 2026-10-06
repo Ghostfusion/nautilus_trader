@@ -18,7 +18,7 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     period::PerformancePeriod,
     statistic::PortfolioStatistic,
 };
@@ -77,6 +77,7 @@ impl PortfolioStatistic for TotalCommissions {
             [MetricInput::PerformancePeriods],
         )
         .with_tags([MetricTag::Trade])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

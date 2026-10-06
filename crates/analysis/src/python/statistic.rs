@@ -26,26 +26,52 @@ use pyo3::{
 use crate::{
     Returns,
     analyzer::Statistic,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     period::PerformancePeriod,
     statistic::PortfolioStatistic,
     statistics::{
-        alpha::Alpha, beta_ratio::BetaRatio, cagr::CAGR, calmar_ratio::CalmarRatio,
-        down_capture_ratio::DownCaptureRatio, expectancy::Expectancy,
+        alpha::Alpha,
+        arithmetic_compounding::{
+            ArithmeticCompoundingFlagged, ArithmeticCompoundingImpliedEquity,
+            ArithmeticCompoundingRatio, ArithmeticCompoundingRealisedEquity,
+        },
+        beta_ratio::BetaRatio,
+        cagr::CAGR,
+        calmar_ratio::CalmarRatio,
+        down_capture_ratio::DownCaptureRatio,
+        expectancy::Expectancy,
         expected_shortfall::ExpectedShortfall,
         exponentially_weighted_sharpe::ExponentiallyWeightedSharpe,
-        information_ratio::InformationRatio, long_ratio::LongRatio, loser_avg::AvgLoser,
-        loser_max::MaxLoser, loser_min::MinLoser, max_drawdown::MaxDrawdown,
-        max_drawdown_duration::MaxDrawdownDuration, omega_ratio::OmegaRatio,
-        profit_factor::ProfitFactor, returns_avg::ReturnsAverage,
-        returns_avg_loss::ReturnsAverageLoss, returns_avg_win::ReturnsAverageWin,
-        returns_kurtosis::ReturnsKurtosis, returns_skewness::ReturnsSkewness,
-        returns_volatility::ReturnsVolatility, risk_return_ratio::RiskReturnRatio,
-        sharpe_ratio::SharpeRatio, sortino_ratio::SortinoRatio, tail_ratio::TailRatio,
-        total_commissions::TotalCommissions, total_turnover::TotalTurnover,
-        tracking_error::TrackingError, treynor_ratio::TreynorRatio, ulcer_index::UlcerIndex,
-        up_capture_ratio::UpCaptureRatio, value_at_risk::ValueAtRisk, win_rate::WinRate,
-        winner_avg::AvgWinner, winner_max::MaxWinner, winner_min::MinWinner,
+        information_ratio::InformationRatio,
+        long_ratio::LongRatio,
+        loser_avg::AvgLoser,
+        loser_max::MaxLoser,
+        loser_min::MinLoser,
+        max_drawdown::MaxDrawdown,
+        max_drawdown_duration::MaxDrawdownDuration,
+        omega_ratio::OmegaRatio,
+        profit_factor::ProfitFactor,
+        returns_avg::ReturnsAverage,
+        returns_avg_loss::ReturnsAverageLoss,
+        returns_avg_win::ReturnsAverageWin,
+        returns_kurtosis::ReturnsKurtosis,
+        returns_skewness::ReturnsSkewness,
+        returns_volatility::ReturnsVolatility,
+        risk_return_ratio::RiskReturnRatio,
+        sharpe_ratio::SharpeRatio,
+        sortino_ratio::SortinoRatio,
+        tail_ratio::TailRatio,
+        total_commissions::TotalCommissions,
+        total_turnover::TotalTurnover,
+        tracking_error::TrackingError,
+        treynor_ratio::TreynorRatio,
+        ulcer_index::UlcerIndex,
+        up_capture_ratio::UpCaptureRatio,
+        value_at_risk::ValueAtRisk,
+        win_rate::WinRate,
+        winner_avg::AvgWinner,
+        winner_max::MaxWinner,
+        winner_min::MinWinner,
     },
 };
 
@@ -198,6 +224,17 @@ impl PythonStatistic {
                 None => None,
             };
 
+        // `stage` is optional by definition, so its absence derives nothing: a statistic that
+        // declares none is simply not placed on the chain.
+        let stage = match attribute("stage")? {
+            Some(value) => Some(
+                value
+                    .extract::<Option<MetricStage>>()
+                    .map_err(|e| Self::invalid_attribute("stage", "a MetricStage or None", e))?,
+            ),
+            None => None,
+        };
+
         // `target` is optional by definition, so its absence derives nothing.
         let derived = id.is_none()
             || units.is_none()
@@ -216,6 +253,11 @@ impl PythonStatistic {
 
         let definition = match target.flatten() {
             Some(target) => definition.with_target(target),
+            None => definition,
+        };
+
+        let definition = match stage.flatten() {
+            Some(stage) => definition.with_stage(stage),
             None => definition,
         };
 
@@ -495,6 +537,14 @@ fn native_statistic(py: Python<'_>, statistic: &Py<PyAny>, type_name: &str) -> O
         "ValueAtRisk" => extract::<ValueAtRisk>(py, statistic),
         "ExpectedShortfall" => extract::<ExpectedShortfall>(py, statistic),
         "UpCaptureRatio" => extract::<UpCaptureRatio>(py, statistic),
+        "ArithmeticCompoundingFlagged" => extract::<ArithmeticCompoundingFlagged>(py, statistic),
+        "ArithmeticCompoundingImpliedEquity" => {
+            extract::<ArithmeticCompoundingImpliedEquity>(py, statistic)
+        }
+        "ArithmeticCompoundingRatio" => extract::<ArithmeticCompoundingRatio>(py, statistic),
+        "ArithmeticCompoundingRealisedEquity" => {
+            extract::<ArithmeticCompoundingRealisedEquity>(py, statistic)
+        }
         _ => None,
     }
 }

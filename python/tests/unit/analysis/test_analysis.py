@@ -42,6 +42,7 @@ from nautilus_trader.analysis import MaxDrawdown
 from nautilus_trader.analysis import MaxDrawdownDuration
 from nautilus_trader.analysis import MaxLoser
 from nautilus_trader.analysis import MaxWinner
+from nautilus_trader.analysis import MetricStage
 from nautilus_trader.analysis import MinLoser
 from nautilus_trader.analysis import MinWinner
 from nautilus_trader.analysis import NetReturn
@@ -69,6 +70,7 @@ from nautilus_trader.analysis import UpCaptureRatio
 from nautilus_trader.analysis import ValueAtRisk
 from nautilus_trader.analysis import VarianceRatio
 from nautilus_trader.analysis import WinRate
+from nautilus_trader.analysis import tearsheet
 from nautilus_trader.model import Currency
 from nautilus_trader.model import Money
 from nautilus_trader.model import Position
@@ -929,3 +931,86 @@ def test_register_statistic_rejects_invalid_name(statistic: object) -> None:
 
     with pytest.raises(ValueError, match="Invalid statistic"):
         analyzer.register_statistic(statistic)
+
+
+@pytest.mark.skipif(not tearsheet.PLOTLY_AVAILABLE, reason="plotly is not installed")
+def test_declared_scoring_chain_prints_each_stage_and_flags_a_missing_stage() -> None:
+    """
+    Test a declared scoring chain renders each metric in its stage and flags a missing stage.
+    """
+
+    class ForecastScore(PortfolioStatistic):
+        """
+        A forecast-stage metric, scored against labels.
+        """
+
+        @property
+        def name(self) -> str:
+            return "Forecast Score"
+
+        @property
+        def stage(self) -> MetricStage:
+            return MetricStage.FORECAST
+
+        def calculate_from_returns(self, returns: dict[int, float]) -> float | None:
+            return float(len(returns))
+
+    class AccountOutcome(PortfolioStatistic):
+        """
+        An account-stage metric, scored against the ledger.
+        """
+
+        @property
+        def name(self) -> str:
+            return "Account Outcome"
+
+        @property
+        def stage(self) -> MetricStage:
+            return MetricStage.ACCOUNT
+
+        def calculate_from_returns(self, returns: dict[int, float]) -> float | None:
+            return sum(returns.values())
+
+    analyzer = PortfolioAnalyzer()
+    analyzer.deregister_statistics()
+    analyzer.register_statistic(ForecastScore())
+    analyzer.register_statistic(AccountOutcome())
+    analyzer.add_return(1_000_000_000, 0.01)
+    analyzer.add_return(2_000_000_000, -0.005)
+    analyzer.set_declared_stages([MetricStage.FORECAST, MetricStage.ACCOUNT])
+
+    assert analyzer.declared_stages() == [MetricStage.FORECAST, MetricStage.ACCOUNT]
+    assert analyzer.metric_stages() == {
+        "Forecast Score": "forecast",
+        "Account Outcome": "account",
+    }
+
+    stats = analyzer.statistics()
+
+    assert stats.returns["Forecast Score"] == 2.0
+    assert stats.returns["Account Outcome"] == pytest.approx(0.005)
+    assert not any(key.startswith("Metric Chain") for key in stats.general)
+
+    # Each rendered metric is grouped under its declared stage.
+    table = tearsheet._create_stats_table(
+        {},
+        stats.returns,
+        stats.general,
+        metric_stages=analyzer.metric_stages(),
+    )
+    labels = list(table.cells.values[0])
+    assert "<b>Forecast Metrics</b>" in labels
+    assert "<b>Account Metrics</b>" in labels
+    assert labels[labels.index("<b>Forecast Metrics</b>") + 1] == "Forecast Score"
+    assert labels[labels.index("<b>Account Metrics</b>") + 1] == "Account Outcome"
+    assert "<b>Returns Statistics</b>" not in labels
+
+    # The same run with the account metric removed flags the missing account stage, and does
+    # not flag the forecast stage that still rendered.
+    analyzer.deregister_statistic(AccountOutcome())
+    stats = analyzer.statistics()
+
+    assert stats.general["Metric Chain: account stage has no metric"] == 1.0
+    assert "Metric Chain: forecast stage has no metric" not in stats.general
+    assert "Account Outcome" not in stats.returns
+    assert "Forecast Score" in stats.returns

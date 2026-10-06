@@ -53,6 +53,7 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::metric::MetricTag>()?;
     m.add_class::<crate::metric::MetricDirection>()?;
     m.add_class::<crate::metric::MetricInput>()?;
+    m.add_class::<crate::metric::MetricStage>()?;
     m.add_class::<crate::metric::MetricStatus>()?;
     m.add_class::<crate::metric::MetricReason>()?;
     m.add_class::<crate::metric::MetricDefinition>()?;
@@ -90,6 +91,11 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::statistics::rescaled_range::RescaledRange>()?;
 
     // Statistics - Frame-based
+    m.add_class::<crate::statistics::arithmetic_compounding::ArithmeticCompoundingFlagged>()?;
+    m.add_class::<crate::statistics::arithmetic_compounding::ArithmeticCompoundingImpliedEquity>()?;
+    m.add_class::<crate::statistics::arithmetic_compounding::ArithmeticCompoundingRatio>()?;
+    m.add_class::<crate::statistics::arithmetic_compounding::ArithmeticCompoundingRealisedEquity>(
+    )?;
     m.add_class::<crate::statistics::breakeven_cost::BreakevenCost>()?;
     m.add_class::<crate::statistics::cost_basis_points::CostBasisPoints>()?;
     m.add_class::<crate::statistics::gross_return::GrossReturn>()?;

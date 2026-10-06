@@ -27,10 +27,16 @@ use crate::{
 impl NetReturn {
     /// Calculates the net return over a performance-period frame.
     ///
-    /// The return is the frame's net PnL over the starting equity of its first period, with the
-    /// commission already netted into the equity the PnL is derived from. It is defined only when
-    /// the starting equity and the summed PnL resolve to the same single currency and the starting
-    /// equity is not zero.
+    /// The return is the frame's net PnL over the starting equity of its first period, which is the
+    /// figure the frame's per-period returns accumulate to. Commission is already netted into the
+    /// equity the PnL is derived from, which is what makes the return net; the `GrossReturn` statistic
+    /// reports the same frame with the commission added back, so the two rows differ by exactly the
+    /// cost the frame paid.
+    ///
+    /// The return is defined only when the starting equity and the summed PnL resolve to the same
+    /// single currency and the starting equity is not zero. An empty frame, a frame whose starting
+    /// equity is zero, and a frame whose PnL spans more than one currency all have no defined return;
+    /// a frame that recorded no PnL has a genuine return of zero.
     #[new]
     fn py_new() -> Self {
         Self::new()

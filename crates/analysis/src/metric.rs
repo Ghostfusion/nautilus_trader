@@ -38,7 +38,7 @@
 //! so a reported value is checkable rather than a spelling competition.
 
 use nautilus_core::capability::Capability;
-use std::{collections::BTreeMap, fmt::Display};
+use std::{collections::BTreeMap, fmt::Display, str::FromStr};
 
 /// The number of basis points in one unit of the ratio a basis-point value is measured against.
 pub(crate) const BASIS_POINTS_PER_UNIT: f64 = 10_000.0;
@@ -308,6 +308,97 @@ impl Display for MetricInput {
     }
 }
 
+/// The stage of the scoring chain a metric belongs to.
+///
+/// The set is closed and ordered along the chain: a `Forecast` is scored against labels, a
+/// `Decision` against realised outcomes, and an `Account` against the ledger. A report that
+/// reads a metric must be able to say which of the three it is reading, so a proxy that improves
+/// without moving an account metric is not read as an improvement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(
+        eq,
+        eq_int,
+        frozen,
+        hash,
+        module = "nautilus_trader.analysis",
+        from_py_object,
+        rename_all = "SCREAMING_SNAKE_CASE",
+    )
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass_enum(module = "nautilus_trader.analysis")
+)]
+pub enum MetricStage {
+    /// A score against labels, e.g. a model prediction.
+    Forecast,
+    /// A metric of the trading decision, scored against realised trade outcomes.
+    Decision,
+    /// A metric of the portfolio ledger, scored against the account or its frame.
+    Account,
+}
+
+impl MetricStage {
+    /// All variants of the closed vocabulary.
+    pub const ALL: &'static [Self] = &[Self::Forecast, Self::Decision, Self::Account];
+
+    /// Returns the stable string for this stage.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Forecast => "forecast",
+            Self::Decision => "decision",
+            Self::Account => "account",
+        }
+    }
+}
+
+impl Display for MetricStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for MetricStage {
+    type Err = MetricStageParseError;
+
+    /// Parses a stage from its stable string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `s` is not one of the closed vocabulary's stable strings.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "forecast" => Ok(Self::Forecast),
+            "decision" => Ok(Self::Decision),
+            "account" => Ok(Self::Account),
+            _ => Err(MetricStageParseError {
+                value: s.to_string(),
+            }),
+        }
+    }
+}
+
+/// The error returned when a string is not a [`MetricStage`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetricStageParseError {
+    value: String,
+}
+
+impl Display for MetricStageParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "unknown metric stage `{}`, expected one of forecast, decision, account",
+            self.value
+        )
+    }
+}
+
+impl std::error::Error for MetricStageParseError {}
+
 /// The status of a metric in a report.
 ///
 /// Four states, not three: `Unavailable` is an applicability judgement about an absent input,
@@ -531,6 +622,18 @@ impl MetricDefinition {
         self
     }
 
+    /// Declares the stage of the scoring chain the metric belongs to.
+    ///
+    /// The stage is stored as the `stage` parameter, so it is part of the definition's declared
+    /// metadata and cannot be spelled two ways: [`Self::stage`] reads it back through the same
+    /// closed vocabulary.
+    #[must_use]
+    pub fn with_stage(mut self, stage: MetricStage) -> Self {
+        self.parameters
+            .insert("stage".to_string(), stage.as_str().to_string());
+        self
+    }
+
     /// Declares a named parameter, which the title template may render.
     #[must_use]
     pub fn with_parameter(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
@@ -602,6 +705,14 @@ impl MetricDefinition {
     #[must_use]
     pub const fn is_derived(&self) -> bool {
         self.derived
+    }
+
+    /// Returns the declared scoring-chain stage, if the definition declares one.
+    #[must_use]
+    pub fn stage(&self) -> Option<MetricStage> {
+        self.parameters
+            .get("stage")
+            .and_then(|stage| stage.parse().ok())
     }
 
     /// Returns whether the definition is declared over `input`.
@@ -860,6 +971,12 @@ mod tests {
             assert_eq!(input.to_string(), input.as_str());
         }
 
+        assert_eq!(MetricStage::ALL.len(), 3);
+        for stage in MetricStage::ALL {
+            assert!(!stage.as_str().is_empty());
+            assert_eq!(stage.to_string(), stage.as_str());
+        }
+
         assert_eq!(MetricStatus::ALL.len(), 4);
         for status in MetricStatus::ALL {
             assert!(!status.as_str().is_empty());
@@ -964,6 +1081,57 @@ mod tests {
         assert_eq!(definition.target(), Some(0.0));
         assert!(definition.is_defined_over(MetricInput::Benchmark));
         assert!(!definition.is_defined_over(MetricInput::Positions));
+    }
+
+    #[rstest]
+    fn test_every_stage_parses_from_its_own_string() {
+        for stage in MetricStage::ALL {
+            assert_eq!(stage.as_str().parse::<MetricStage>(), Ok(*stage));
+            assert_eq!(stage.to_string(), stage.as_str());
+        }
+    }
+
+    #[rstest]
+    fn test_an_unknown_stage_string_is_refused() {
+        let error = "score".parse::<MetricStage>().unwrap_err();
+
+        assert_eq!(error.value, "score");
+        assert!(error.to_string().contains("unknown metric stage `score`"));
+    }
+
+    #[rstest]
+    fn test_with_stage_declares_and_reads_back_the_stage() {
+        let definition = MetricDefinition::new(
+            "sharpe_ratio",
+            "Sharpe Ratio (simple, sample, 252 days)",
+            MetricUnits::Ratio,
+            MetricDirection::Maximize,
+            [MetricInput::Returns],
+        )
+        .with_stage(MetricStage::Account);
+
+        assert_eq!(definition.stage(), Some(MetricStage::Account));
+        assert_eq!(definition.parameters().get("stage").unwrap(), "account");
+        // The stage is metadata, not presentation: it does not alter the rendered title.
+        assert_eq!(
+            definition.title(),
+            "Sharpe Ratio (simple, sample, 252 days)"
+        );
+        assert_eq!(definition.id(), "sharpe_ratio");
+    }
+
+    #[rstest]
+    fn test_a_definition_without_a_stage_reports_none() {
+        let definition = MetricDefinition::new(
+            "custom",
+            "Custom",
+            MetricUnits::Ratio,
+            MetricDirection::Informational,
+            [MetricInput::Returns],
+        );
+
+        assert_eq!(definition.stage(), None);
+        assert!(!definition.parameters().contains_key("stage"));
     }
 
     #[rstest]

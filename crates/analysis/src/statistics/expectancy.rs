@@ -20,7 +20,7 @@ use nautilus_model::position::Position;
 use super::{loser_avg::AvgLoser, winner_avg::AvgWinner};
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
 };
 
@@ -72,6 +72,7 @@ impl PortfolioStatistic for Expectancy {
             [MetricInput::RealizedPnls],
         )
         .with_tags([MetricTag::Trade])
+        .with_stage(MetricStage::Decision)
     }
 
     fn calculate_from_realized_pnls(&self, realized_pnls: &[f64]) -> Option<Self::Item> {

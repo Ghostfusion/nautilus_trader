@@ -21,7 +21,7 @@ use nautilus_core::UnixNanos;
 use nautilus_model::position::Position;
 
 use crate::{
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
 };
 
@@ -88,6 +88,7 @@ impl PortfolioStatistic for UlcerIndex {
         .with_parameter("compounding", "simple")
         .with_parameter("divisor", "population")
         .with_tags([MetricTag::Drawdown, MetricTag::Risk])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, returns: &BTreeMap<UnixNanos, f64>) -> Option<Self::Item> {

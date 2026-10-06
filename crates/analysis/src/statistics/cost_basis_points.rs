@@ -18,8 +18,8 @@ use nautilus_model::position::Position;
 use crate::{
     Returns,
     metric::{
-        BASIS_POINTS_PER_UNIT, MetricDefinition, MetricDirection, MetricInput, MetricTag,
-        MetricUnits,
+        BASIS_POINTS_PER_UNIT, MetricDefinition, MetricDirection, MetricInput, MetricStage,
+        MetricTag, MetricUnits,
     },
     period::{PerformancePeriod, PeriodFrameTotals, single_currency_share},
     statistic::PortfolioStatistic,
@@ -84,6 +84,7 @@ impl PortfolioStatistic for CostBasisPoints {
             [MetricInput::PerformancePeriods],
         )
         .with_tags([MetricTag::Trade])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, _returns: &Returns) -> Option<Self::Item> {

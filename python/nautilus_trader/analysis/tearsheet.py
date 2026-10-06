@@ -99,6 +99,13 @@ _GRID_DEFAULT_ROWS = 4
 
 _STATIC_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".svg", ".pdf"})
 
+# The scoring-chain stages, in chain order, with the section title each renders under.
+_STAGE_GROUPS: tuple[tuple[str, str], ...] = (
+    ("forecast", "Forecast Metrics"),
+    ("decision", "Decision Metrics"),
+    ("account", "Account Metrics"),
+)
+
 _CHART_REGISTRY: dict[str, Callable] = {}
 
 
@@ -1722,6 +1729,70 @@ def _create_tearsheet_figure(
     return fig
 
 
+def _resolve_metric_stages(engine: object) -> dict[str, str] | None:
+    """
+    Return the scoring-chain stage of each registered metric, keyed by rendered name.
+
+    The mapping is read from the engine's portfolio when it exposes one. An engine that has no
+    portfolio, or a portfolio that does not expose ``metric_stages``, resolves nothing, so the
+    statistics table keeps its existing sections exactly.
+
+    Parameters
+    ----------
+    engine : object
+        The engine passed to the statistics-table renderer, if any.
+
+    Returns
+    -------
+    dict[str, str] or None
+        The rendered name to stage mapping, or None when it cannot be resolved.
+
+    """
+    if engine is None:
+        return None
+
+    portfolio = getattr(engine, "portfolio", None)
+    getter = getattr(portfolio, "metric_stages", None)
+    if not callable(getter):
+        return None
+
+    stages = getter()
+    return dict(stages) if stages else None
+
+
+def _apply_stage_groups(
+    sections: list[tuple[str, dict[str, Any]]],
+    metric_stages: Mapping[str, str],
+) -> list[tuple[str, dict[str, Any]]]:
+    """
+    Group the statistics sections by scoring-chain stage.
+
+    A row whose rendered name resolves to a stage moves into that stage's group; every row that
+    cannot be resolved stays in the section it was in. Stage groups are ordered along the chain
+    and rendered before the remaining sections, so a metric that resolved is not repeated in its
+    old section.
+
+    """
+    stage_rows: dict[str, dict[str, Any]] = {key: {} for key, _ in _STAGE_GROUPS}
+    remaining_sections: list[tuple[str, dict[str, Any]]] = []
+
+    for title, rows in sections:
+        remaining: dict[str, Any] = {}
+        for name, value in rows.items():
+            stage = metric_stages.get(name)
+            if stage in stage_rows:
+                stage_rows[stage][name] = value
+            else:
+                remaining[name] = value
+        remaining_sections.append((title, remaining))
+
+    grouped: list[tuple[str, dict[str, Any]]] = [
+        (title, stage_rows[key]) for key, title in _STAGE_GROUPS if stage_rows[key]
+    ]
+    grouped.extend((title, rows) for title, rows in remaining_sections if rows)
+    return grouped
+
+
 def _create_stats_table(  # noqa: C901
     stats_pnls: dict[str, Any] | dict[str, dict[str, Any]],
     stats_returns: dict[str, Any],
@@ -1729,6 +1800,7 @@ def _create_stats_table(  # noqa: C901
     theme_config: dict[str, Any] | None = None,
     run_info: dict[str, Any] | None = None,
     account_info: dict[str, Any] | None = None,
+    metric_stages: Mapping[str, str] | None = None,
 ) -> go.Table:
     """
     Create performance statistics table with section headers.
@@ -1747,6 +1819,10 @@ def _create_stats_table(  # noqa: C901
         Run metadata (run ID, timestamps, backtest period, event counts).
     account_info : dict[str, Any], optional
         Account information (starting/ending balances per currency).
+    metric_stages : Mapping[str, str], optional
+        The scoring-chain stage of each rendered statistic, keyed by its rendered name. When
+        supplied, rows that resolve to a stage are grouped under that stage and rows that do
+        not stay in the section they are in. When None, the sections are unchanged.
 
     Returns
     -------
@@ -1781,23 +1857,31 @@ def _create_stats_table(  # noqa: C901
             else:
                 fill_colors.append(theme_config["colors"]["table_row_even"])
 
+    sections: list[tuple[str, dict[str, Any]]] = []
+
     if run_info:
-        add_section("Run Information", run_info)
+        sections.append(("Run Information", run_info))
 
     if account_info:
-        add_section("Account Summary", account_info)
+        sections.append(("Account Summary", account_info))
 
     if stats_pnls:
         first_value = next(iter(stats_pnls.values()), None) if stats_pnls else None
         if first_value is not None and isinstance(first_value, dict):
             for currency, curr_stats in stats_pnls.items():
-                add_section(f"PnL Statistics ({currency})", curr_stats)
+                sections.append((f"PnL Statistics ({currency})", curr_stats))
         else:
-            add_section("PnL Statistics", stats_pnls)
+            sections.append(("PnL Statistics", stats_pnls))
 
-    add_section("Returns Statistics", stats_returns)
+    sections.append(("Returns Statistics", stats_returns))
 
-    add_section("General Statistics", stats_general)
+    sections.append(("General Statistics", stats_general))
+
+    if metric_stages:
+        sections = _apply_stage_groups(sections, metric_stages)
+
+    for title, section_stats in sections:
+        add_section(title, section_stats)
 
     return go.Table(
         header={
@@ -1884,10 +1968,14 @@ def _render_stats_table(
     stats_returns: dict[str, Any],
     stats_general: dict[str, Any],
     theme_config: dict[str, Any],
+    engine: object = None,
     **_kwargs: Any,
 ) -> None:
     """
     Render performance statistics table (PnL, Returns, General).
+
+    When the engine exposes a portfolio with a ``metric_stages`` mapping, the rendered rows are
+    grouped by scoring-chain stage; otherwise the sections are unchanged.
     """
     stats_table = _create_stats_table(
         stats_pnls,
@@ -1896,6 +1984,7 @@ def _render_stats_table(
         theme_config,
         run_info=None,
         account_info=None,
+        metric_stages=_resolve_metric_stages(engine),
     )
     fig.add_trace(stats_table, row=row, col=col)
 

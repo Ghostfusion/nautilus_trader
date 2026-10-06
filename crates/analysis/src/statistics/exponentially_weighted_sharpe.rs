@@ -17,7 +17,7 @@ use nautilus_model::position::Position;
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     period::PerformancePeriod,
     statistic::PortfolioStatistic,
 };
@@ -99,6 +99,7 @@ impl PortfolioStatistic for ExponentiallyWeightedSharpe {
         .with_count("annualisation", self.annualisation)
         .with_count("halflife", self.halflife)
         .with_tags([MetricTag::RiskAdjusted, MetricTag::Annualised])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

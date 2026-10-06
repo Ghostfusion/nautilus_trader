@@ -61,9 +61,10 @@ provider explaining 33.4 percent of score variance against 34.4 percent for the 
 
 **Decision.** A metric declares its stage: forecast (scored against labels), decision (scored
 against realized outcomes), or account (scored against the ledger). The stage is a declared
-parameter on `MetricDefinition`, so it renders in the row's title, and a run that declares a chain
-must render at least one row per declared stage. A run that declares a forecast metric with no
-decision or account metric is flagged in the report rather than being read as an improvement.
+parameter on `MetricDefinition`, so a report can group each row under the stage it belongs to, and a
+run that declares a chain must render at least one row per declared stage. A run that declares a
+forecast metric with no decision or account metric is flagged in the report rather than being read
+as an improvement.
 
 **Where it lands.** `crates/analysis/src/metric.rs` (the declaration), `crates/analysis/src/statistics/`
 (the built-ins declare their stage), `python/nautilus_trader/analysis/tearsheet.py` (the render).

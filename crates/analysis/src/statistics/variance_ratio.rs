@@ -22,7 +22,7 @@ use nautilus_model::position::Position;
 
 use crate::{
     Returns,
-    metric::{MetricDefinition, MetricDirection, MetricInput, MetricTag, MetricUnits},
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricStage, MetricTag, MetricUnits},
     statistic::PortfolioStatistic,
 };
 
@@ -104,6 +104,7 @@ impl PortfolioStatistic for VarianceRatio {
         .with_parameter("divisor", "population")
         .with_count("period", self.period)
         .with_tags([MetricTag::Returns, MetricTag::Distribution])
+        .with_stage(MetricStage::Account)
     }
 
     fn calculate_from_returns(&self, raw_returns: &Returns) -> Option<Self::Item> {

@@ -13,7 +13,11 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Debug,
+    sync::Arc,
+};
 
 use ahash::AHashMap;
 use indexmap::{IndexMap, IndexSet};
@@ -30,8 +34,8 @@ use rust_decimal::Decimal;
 use crate::{
     Returns,
     metric::{
-        MetricDefinition, MetricInput, MetricReason, MetricReport, MetricResult, MetricStatus,
-        MetricUnits,
+        MetricDefinition, MetricInput, MetricReason, MetricReport, MetricResult, MetricStage,
+        MetricStatus, MetricUnits,
     },
     period::PerformancePeriod,
     snapshot::PortfolioStatistics,
@@ -104,6 +108,12 @@ pub struct PortfolioAnalyzer {
     /// [`Self::set_performance_periods`] and only the period-defined statistics read it. It is
     /// deliberately not exposed as a Python getter.
     periods: Vec<PerformancePeriod>,
+    /// The scoring-chain stages the caller declares this run intends to report.
+    ///
+    /// The declaration is an input, not a derived set: it is set with
+    /// [`Self::set_declared_stages`] and read only by [`Self::statistics`], which reports a
+    /// declared stage that produced no rendered metric rather than letting the gap pass silently.
+    declared_stages: Vec<MetricStage>,
 }
 
 impl Default for PortfolioAnalyzer {
@@ -169,6 +179,7 @@ impl PortfolioAnalyzer {
             portfolio_returns: BTreeMap::new(),
             returns: BTreeMap::new(),
             periods: Vec::new(),
+            declared_stages: Vec::new(),
         }
     }
 
@@ -208,6 +219,7 @@ impl PortfolioAnalyzer {
         self.portfolio_returns.clear();
         self.returns.clear();
         self.periods.clear();
+        self.declared_stages.clear();
     }
 
     /// Returns all tracked currencies.
@@ -249,6 +261,39 @@ impl PortfolioAnalyzer {
     /// without a value, so no period row is added and the other maps are unchanged.
     pub fn set_performance_periods(&mut self, periods: Vec<PerformancePeriod>) {
         self.periods = periods;
+    }
+
+    /// Sets the scoring-chain stages this run declares it intends to report.
+    ///
+    /// Replaces any declaration already held. An empty declaration leaves every stage unclaimed,
+    /// so [`Self::statistics`] adds no missing-stage row and the report is what it was before the
+    /// chain existed.
+    pub fn set_declared_stages(&mut self, stages: Vec<MetricStage>) {
+        self.declared_stages = stages;
+    }
+
+    /// Returns the scoring-chain stages this run has declared.
+    #[must_use]
+    pub fn declared_stages(&self) -> &[MetricStage] {
+        &self.declared_stages
+    }
+
+    /// Returns the scoring-chain stage of every registered statistic that declares one.
+    ///
+    /// Keyed by the statistic's rendered name, which is the key its rows carry in a report. A
+    /// statistic that declares no stage is absent rather than defaulted, so a consumer can tell
+    /// an undeclared metric from a declared one.
+    #[must_use]
+    pub fn metric_stages(&self) -> BTreeMap<String, MetricStage> {
+        self.statistics
+            .iter()
+            .filter_map(|(name, statistic)| {
+                statistic
+                    .definition()
+                    .stage()
+                    .map(|stage| (name.clone(), stage))
+            })
+            .collect()
     }
 
     /// Returns the period-defined statistics calculated over the currently held frame.
@@ -383,6 +428,10 @@ impl PortfolioAnalyzer {
     ///
     /// With an empty frame no period row is produced (`calculate_from_periods` returns `None`),
     /// so the two maps are exactly what the returns and general calculations yield on their own.
+    ///
+    /// When stages have been declared with [`Self::set_declared_stages`], a declared stage that
+    /// produced no rendered row is reported as one row in `general`, named for the stage, so a
+    /// chain that intends a stage it never scores is visible rather than silent.
     #[must_use]
     pub fn statistics(&self) -> PortfolioStatistics {
         let mut pnls = AHashMap::new();
@@ -411,12 +460,55 @@ impl PortfolioAnalyzer {
             }
         }
 
+        if !self.declared_stages.is_empty() {
+            let rendered = self.rendered_stages(&pnls, &returns, &general);
+
+            for stage in &self.declared_stages {
+                if !rendered.contains(stage) {
+                    general.insert(
+                        format!("Metric Chain: {} stage has no metric", stage.as_str()),
+                        1.0,
+                    );
+                }
+            }
+        }
+
         PortfolioStatistics {
             pnls,
             returns,
             general,
             returns_series: self.returns.clone(),
         }
+    }
+
+    /// Returns the scoring-chain stages that produced at least one rendered row in a report.
+    ///
+    /// A row is attributed to the stage its registered statistic declares; a row with no
+    /// registered statistic, or whose statistic declares no stage, attributes nothing.
+    fn rendered_stages(
+        &self,
+        pnls: &AHashMap<String, AHashMap<String, f64>>,
+        returns: &AHashMap<String, f64>,
+        general: &AHashMap<String, f64>,
+    ) -> BTreeSet<MetricStage> {
+        let mut rendered = BTreeSet::new();
+
+        let names = returns
+            .keys()
+            .chain(general.keys())
+            .chain(pnls.values().flat_map(|stats| stats.keys()));
+
+        for name in names {
+            if let Some(stage) = self
+                .statistics
+                .get(name)
+                .and_then(|statistic| statistic.definition().stage())
+            {
+                rendered.insert(stage);
+            }
+        }
+
+        rendered
     }
 
     /// Adds new positions for analysis.
@@ -1540,6 +1632,54 @@ mod tests {
 
         fn calculate_from_positions(&self, _positions: &[Position]) -> Option<f64> {
             Some(self.value)
+        }
+    }
+
+    /// Mock implementation that declares a scoring-chain stage and a returns-based value.
+    #[derive(Debug)]
+    struct StagedStatistic {
+        name: String,
+        stage: MetricStage,
+    }
+
+    impl StagedStatistic {
+        fn new(name: &str, stage: MetricStage) -> Self {
+            Self {
+                name: name.to_string(),
+                stage,
+            }
+        }
+    }
+
+    impl PortfolioStatistic for StagedStatistic {
+        type Item = f64;
+
+        fn name(&self) -> String {
+            self.name.clone()
+        }
+
+        fn definition(&self) -> MetricDefinition {
+            MetricDefinition::new(
+                "staged_statistic",
+                "{title}",
+                MetricUnits::Ratio,
+                MetricDirection::Informational,
+                [MetricInput::Returns],
+            )
+            .with_parameter("title", self.name.clone())
+            .with_stage(self.stage)
+        }
+
+        fn calculate_from_returns(&self, returns: &Returns) -> Option<f64> {
+            (!returns.is_empty()).then_some(1.0)
+        }
+
+        fn calculate_from_realized_pnls(&self, _pnls: &[f64]) -> Option<f64> {
+            None
+        }
+
+        fn calculate_from_positions(&self, _positions: &[Position]) -> Option<f64> {
+            None
         }
     }
 
@@ -3472,5 +3612,118 @@ mod tests {
         assert!(!stats.returns.contains_key(realised));
         assert!(!stats.general.contains_key(ratio));
         assert!(!stats.general.contains_key(flagged));
+    }
+
+    #[rstest]
+    fn test_a_declared_stage_with_no_metric_is_flagged() {
+        let mut analyzer = PortfolioAnalyzer::new();
+        analyzer.register_statistic(Arc::new(StagedStatistic::new(
+            "Account Return",
+            MetricStage::Account,
+        )));
+        analyzer.add_return(UnixNanos::from(1), 0.01);
+        analyzer.add_return(UnixNanos::from(2), -0.005);
+        analyzer.set_declared_stages(vec![
+            MetricStage::Forecast,
+            MetricStage::Decision,
+            MetricStage::Account,
+        ]);
+
+        let stats = analyzer.statistics();
+
+        // The account stage rendered a metric; the forecast and decision stages rendered none
+        // and are each flagged under their own stable stage string.
+        assert!(stats.returns.contains_key("Account Return"));
+        assert_eq!(
+            stats.general["Metric Chain: forecast stage has no metric"],
+            1.0
+        );
+        assert_eq!(
+            stats.general["Metric Chain: decision stage has no metric"],
+            1.0
+        );
+        assert!(
+            !stats
+                .general
+                .contains_key("Metric Chain: account stage has no metric")
+        );
+    }
+
+    #[rstest]
+    fn test_a_declared_chain_with_both_stages_emits_no_flag() {
+        let mut analyzer = PortfolioAnalyzer::new();
+        analyzer.register_statistic(Arc::new(StagedStatistic::new(
+            "Forecast Score",
+            MetricStage::Forecast,
+        )));
+        analyzer.register_statistic(Arc::new(StagedStatistic::new(
+            "Account Return",
+            MetricStage::Account,
+        )));
+        analyzer.add_return(UnixNanos::from(1), 0.01);
+        analyzer.add_return(UnixNanos::from(2), -0.005);
+        analyzer.set_declared_stages(vec![MetricStage::Forecast, MetricStage::Account]);
+
+        let stats = analyzer.statistics();
+
+        assert!(stats.returns.contains_key("Forecast Score"));
+        assert!(stats.returns.contains_key("Account Return"));
+        assert!(
+            !stats
+                .general
+                .keys()
+                .any(|key| key.starts_with("Metric Chain"))
+        );
+    }
+
+    #[rstest]
+    fn test_no_declared_stages_emits_no_chain_row() {
+        let analyzer = PortfolioAnalyzer::default();
+        let stats = analyzer.statistics();
+
+        assert!(
+            !stats
+                .general
+                .keys()
+                .any(|key| key.starts_with("Metric Chain"))
+        );
+    }
+
+    #[rstest]
+    fn test_reset_clears_the_declared_chain() {
+        let mut analyzer = PortfolioAnalyzer::new();
+        analyzer.set_declared_stages(vec![MetricStage::Forecast, MetricStage::Account]);
+
+        assert_eq!(
+            analyzer.declared_stages(),
+            &[MetricStage::Forecast, MetricStage::Account]
+        );
+
+        analyzer.reset();
+
+        assert!(analyzer.declared_stages().is_empty());
+        let stats = analyzer.statistics();
+        assert!(
+            !stats
+                .general
+                .keys()
+                .any(|key| key.starts_with("Metric Chain"))
+        );
+    }
+
+    #[rstest]
+    fn test_metric_stages_map_every_registered_statistic_that_declares_one() {
+        let mut analyzer = PortfolioAnalyzer::new();
+        analyzer.register_statistic(Arc::new(StagedStatistic::new(
+            "Forecast Score",
+            MetricStage::Forecast,
+        )));
+        analyzer.register_statistic(Arc::new(MockStatistic::new("Undeclared")));
+
+        let stages = analyzer.metric_stages();
+
+        assert_eq!(stages.len(), 1);
+        assert_eq!(stages["Forecast Score"], MetricStage::Forecast);
+        assert!(!stages.contains_key("Undeclared"));
     }
 }
