@@ -23,6 +23,7 @@ use nautilus_core::{DurationNanos, python::to_pyvalue_err};
 use nautilus_model::{
     identifiers::{InstrumentId, Venue},
     risk::{RiskCapMetric, RiskCapScope},
+    types::Currency,
 };
 use pyo3::{Py, PyAny, PyResult, Python, prelude::PyAnyMethods, pymethods};
 use rust_decimal::Decimal;
@@ -167,6 +168,17 @@ impl PyRiskCapMetric {
     )]
     fn Inventory() -> PyRiskCapMetric {
         Self::new(RiskCapMetric::Inventory)
+    }
+
+    /// The net exposure of the portfolio, in money; takes a money limit and a currency.
+    #[classattr]
+    #[expect(
+        non_snake_case,
+        clippy::use_self,
+        reason = "PyO3 stub generation needs the concrete Python enum type"
+    )]
+    fn NetExposure() -> PyRiskCapMetric {
+        Self::new(RiskCapMetric::NetExposure)
     }
 
     /// Orders admitted for submission.
@@ -421,8 +433,12 @@ impl PyRiskCap {
     ///
     /// `quantity_limit` is the limit for a `Participation` or `Inventory` cap, in the instrument's
     /// units, and replaces the occurrence `limit` rather than adding to it.
+    ///
+    /// `money_limit` and `money_currency` are the limit and the currency for a `NetExposure` cap,
+    /// and are set together rather than one without the other, because an amount without a
+    /// currency cannot be compared against an exposure.
     #[new]
-    #[pyo3(signature = (metric, scope, limit, window=None, quantity_limit=None))]
+    #[pyo3(signature = (metric, scope, limit, window=None, quantity_limit=None, money_limit=None, money_currency=None))]
     #[allow(
         clippy::needless_pass_by_value,
         reason = "PyO3 #[new] requires owned params"
@@ -433,15 +449,35 @@ impl PyRiskCap {
         limit: u32,
         window: Option<u64>,
         quantity_limit: Option<Decimal>,
-    ) -> Self {
+        money_limit: Option<Decimal>,
+        money_currency: Option<Currency>,
+    ) -> PyResult<Self> {
+        if money_limit.is_some() && window.is_some() {
+            return Err(to_pyvalue_err(
+                "a money-measured cap reads the portfolio and takes no window",
+            ));
+        }
+
         let window = window.map(DurationNanos::new);
 
-        Self::new(match quantity_limit {
-            Some(quantity_limit) => {
-                RiskCap::new_quantity(metric.inner(), scope.inner(), quantity_limit, window)
+        let inner = match (money_limit, money_currency) {
+            (Some(money_limit), Some(money_currency)) => {
+                RiskCap::new_money(metric.inner(), scope.inner(), money_limit, money_currency)
             }
-            None => RiskCap::new(metric.inner(), scope.inner(), limit, window),
-        })
+            (None, None) => match quantity_limit {
+                Some(quantity_limit) => {
+                    RiskCap::new_quantity(metric.inner(), scope.inner(), quantity_limit, window)
+                }
+                None => RiskCap::new(metric.inner(), scope.inner(), limit, window),
+            },
+            _ => {
+                return Err(to_pyvalue_err(
+                    "a money limit and a money currency are set together",
+                ));
+            }
+        };
+
+        Ok(Self::new(inner))
     }
 
     /// Returns the metric counted.
@@ -479,16 +515,39 @@ impl PyRiskCap {
         self.inner.quantity_limit
     }
 
+    /// Returns the money limit, `None` for a cap not measured in money.
+    #[getter]
+    #[pyo3(name = "money_limit")]
+    const fn py_money_limit(&self) -> Option<Decimal> {
+        self.inner.money_limit
+    }
+
+    /// Returns the currency the money limit is expressed in.
+    ///
+    /// `None` for a cap not measured in money.
+    #[getter]
+    #[pyo3(name = "money_currency")]
+    const fn py_money_currency(&self) -> Option<Currency> {
+        self.inner.money_currency
+    }
+
     fn __repr__(&self) -> String {
-        match self.inner.quantity_limit {
-            Some(quantity_limit) => format!(
-                "RiskCap(metric={}, scope={}, quantity_limit={quantity_limit}, window={:?})",
-                self.inner.metric, self.inner.scope, self.inner.window,
+        match (self.inner.money_limit, self.inner.money_currency) {
+            (Some(money_limit), Some(money_currency)) => format!(
+                "RiskCap(metric={}, scope={}, money_limit={money_limit}, \
+                 money_currency={money_currency})",
+                self.inner.metric, self.inner.scope,
             ),
-            None => format!(
-                "RiskCap(metric={}, scope={}, limit={}, window={:?})",
-                self.inner.metric, self.inner.scope, self.inner.limit, self.inner.window,
-            ),
+            _ => match self.inner.quantity_limit {
+                Some(quantity_limit) => format!(
+                    "RiskCap(metric={}, scope={}, quantity_limit={quantity_limit}, window={:?})",
+                    self.inner.metric, self.inner.scope, self.inner.window,
+                ),
+                None => format!(
+                    "RiskCap(metric={}, scope={}, limit={}, window={:?})",
+                    self.inner.metric, self.inner.scope, self.inner.limit, self.inner.window,
+                ),
+            },
         }
     }
 

@@ -23,7 +23,7 @@ use nautilus_common::{
 use nautilus_core::DurationNanos;
 use nautilus_model::{
     identifiers::{InstrumentId, Venue},
-    risk::RiskCapMetric,
+    risk::{RiskCapMetric, RiskCapScope},
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -126,9 +126,10 @@ impl RiskEngineConfig {
 
         for cap in &self.count_caps {
             validate_quantity_cap(cap, &mut errors);
+            validate_money_cap(cap, &mut errors);
 
             errors.check(
-                cap.limit > 0 || cap.measures_quantity(),
+                cap.limit > 0 || cap.measures_quantity() || cap.measures_money(),
                 ConfigError::range(
                     "count_caps",
                     format!(
@@ -139,7 +140,10 @@ impl RiskEngineConfig {
             );
 
             match (cap.metric, cap.window) {
-                (RiskCapMetric::Active | RiskCapMetric::Inventory, None) => {}
+                (
+                    RiskCapMetric::Active | RiskCapMetric::Inventory | RiskCapMetric::NetExposure,
+                    None,
+                ) => {}
                 (RiskCapMetric::Active, Some(window)) => errors.check(
                     false,
                     ConfigError::invalid_value(
@@ -156,6 +160,16 @@ impl RiskEngineConfig {
                         "count_caps",
                         format!(
                             "an INVENTORY cap reads the standing position and takes no window, was {} ns",
+                            window.as_u64()
+                        ),
+                    ),
+                ),
+                (RiskCapMetric::NetExposure, Some(window)) => errors.check(
+                    false,
+                    ConfigError::invalid_value(
+                        "count_caps",
+                        format!(
+                            "a NET_EXPOSURE cap reads the portfolio and takes no window, was {} ns",
                             window.as_u64()
                         ),
                     ),
@@ -240,6 +254,90 @@ fn validate_quantity_cap(cap: &RiskCap, errors: &mut ConfigErrorCollector) {
     }
 }
 
+/// Validates the money-limit half of a cap, which is a pair with the metric it measures.
+///
+/// A cap measured in money names the currency it is limited in, because an amount without a
+/// currency cannot be compared against an exposure, and it is scoped to an aggregation the
+/// portfolio can resolve, because the portfolio is what a money cap reads.
+fn validate_money_cap(cap: &RiskCap, errors: &mut ConfigErrorCollector) {
+    if let Some(money_limit) = cap.money_limit {
+        errors.check(
+            cap.metric == RiskCapMetric::NetExposure,
+            ConfigError::invalid_value(
+                "count_caps",
+                format!(
+                    "the {} metric is measured in occurrences, not money",
+                    cap.metric
+                ),
+            ),
+        );
+        errors.check(
+            cap.money_currency.is_some(),
+            ConfigError::invalid_value(
+                "count_caps",
+                format!("a {} cap measured in money requires a currency", cap.metric),
+            ),
+        );
+        errors.check(
+            money_limit > Decimal::ZERO,
+            ConfigError::range(
+                "count_caps",
+                format!(
+                    "the {} money limit for {} must be positive, was {money_limit}",
+                    cap.metric, cap.scope
+                ),
+            ),
+        );
+        errors.check(
+            cap.limit == 0,
+            ConfigError::invalid_value(
+                "count_caps",
+                format!(
+                    "a {} cap measured in money carries no occurrence limit, was {}",
+                    cap.metric, cap.limit
+                ),
+            ),
+        );
+        errors.check(
+            cap.quantity_limit.is_none(),
+            ConfigError::invalid_value(
+                "count_caps",
+                format!(
+                    "a {} cap measured in money carries no quantity limit",
+                    cap.metric
+                ),
+            ),
+        );
+    } else {
+        errors.check(
+            cap.metric != RiskCapMetric::NetExposure,
+            ConfigError::invalid_value(
+                "count_caps",
+                format!("the {} metric requires a money limit", cap.metric),
+            ),
+        );
+        errors.check(
+            cap.money_currency.is_none(),
+            ConfigError::invalid_value(
+                "count_caps",
+                format!("the {} metric does not take a currency", cap.metric),
+            ),
+        );
+    }
+
+    errors.check(
+        cap.metric != RiskCapMetric::NetExposure
+            || matches!(cap.scope, RiskCapScope::Global | RiskCapScope::Account),
+        ConfigError::invalid_value(
+            "count_caps",
+            format!(
+                "a {} cap aggregates the portfolio, so it is scoped to GLOBAL or ACCOUNT, was {}",
+                cap.metric, cap.scope
+            ),
+        ),
+    );
+}
+
 impl Default for RiskEngineConfig {
     fn default() -> Self {
         Self::builder()
@@ -250,11 +348,105 @@ impl Default for RiskEngineConfig {
 
 #[cfg(test)]
 mod tests {
-    use nautilus_model::risk::RiskCapScope;
+    use nautilus_model::{risk::RiskCapScope, types::Currency};
     use rstest::rstest;
     use rust_decimal_macros::dec;
 
     use super::*;
+
+    #[rstest]
+    fn test_money_caps_are_validated_as_a_pair_with_their_metric() {
+        // A money limit below or at zero is refused.
+        let zero = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new_money(
+                RiskCapMetric::NetExposure,
+                RiskCapScope::Global,
+                Decimal::ZERO,
+                Currency::USD(),
+            )])
+            .build();
+        assert!(matches!(zero, Err(ConfigError::Range { field, .. }) if field == "count_caps"));
+
+        // An occurrence metric cannot carry one.
+        let wrong_metric = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap {
+                money_limit: Some(dec!(1.0)),
+                money_currency: Some(Currency::USD()),
+                ..RiskCap::new(
+                    RiskCapMetric::Submit,
+                    RiskCapScope::Global,
+                    0,
+                    Some(DurationNanos::from_secs(60)),
+                )
+            }])
+            .build();
+        assert!(matches!(
+            wrong_metric,
+            Err(ConfigError::InvalidValue { .. })
+        ));
+
+        // A money metric must carry one.
+        let missing = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new(
+                RiskCapMetric::NetExposure,
+                RiskCapScope::Global,
+                10,
+                None,
+            )])
+            .build();
+        assert!(matches!(missing, Err(ConfigError::InvalidValue { .. })));
+
+        // A money limit without a currency cannot be compared against an exposure.
+        let without_currency = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap {
+                money_limit: Some(dec!(1.0)),
+                ..RiskCap::new(RiskCapMetric::NetExposure, RiskCapScope::Global, 0, None)
+            }])
+            .build();
+        assert!(matches!(
+            without_currency,
+            Err(ConfigError::InvalidValue { .. })
+        ));
+
+        // A net exposure cap aggregates the portfolio, so it is scoped to an aggregation the
+        // portfolio can resolve rather than to one strategy or instrument.
+        let wrong_scope = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new_money(
+                RiskCapMetric::NetExposure,
+                RiskCapScope::Instrument,
+                dec!(1.0),
+                Currency::USD(),
+            )])
+            .build();
+        assert!(matches!(wrong_scope, Err(ConfigError::InvalidValue { .. })));
+
+        // A net exposure cap reads the portfolio and takes no window.
+        let windowed = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap {
+                window: Some(DurationNanos::from_secs(60)),
+                ..RiskCap::new_money(
+                    RiskCapMetric::NetExposure,
+                    RiskCapScope::Global,
+                    dec!(1.0),
+                    Currency::USD(),
+                )
+            }])
+            .build();
+        assert!(matches!(windowed, Err(ConfigError::InvalidValue { .. })));
+
+        // Both aggregations the portfolio resolves are accepted in the shape the measurement needs.
+        for scope in [RiskCapScope::Global, RiskCapScope::Account] {
+            let accepted = RiskEngineConfig::builder()
+                .count_caps(vec![RiskCap::new_money(
+                    RiskCapMetric::NetExposure,
+                    scope,
+                    dec!(1000.0),
+                    Currency::USD(),
+                )])
+                .build();
+            assert!(accepted.is_ok(), "{scope} should be accepted");
+        }
+    }
 
     #[rstest]
     fn test_quantity_caps_are_validated_as_a_pair_with_their_metric() {

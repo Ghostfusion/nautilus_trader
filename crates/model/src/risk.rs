@@ -116,6 +116,17 @@ pub enum RiskCapMetric {
     /// inventory rather than occurrences over a window. It is measured in quantity, so it carries
     /// `RiskCap::quantity_limit`, must be scoped to an instrument, and takes no window.
     Inventory,
+    /// The net exposure of the portfolio, in money, aggregated across strategies and venues.
+    ///
+    /// Read from the portfolio's own aggregation at the moment an action is gated, so this is the
+    /// portfolio-level limit rather than a per-strategy one: a scope of `Global` aggregates every
+    /// strategy, account, instrument and venue the portfolio holds, and a scope of `Account`
+    /// aggregates one account's portfolio. Each position contributes the absolute notional the
+    /// portfolio values it at, so a long and a short in the same currency add rather than cancel
+    /// and the cap bounds crowding rather than net direction. It is measured in money, so it
+    /// carries `RiskCap::money_limit` and `RiskCap::money_currency`, is scoped to `Global` or
+    /// `Account` because those are the aggregations the portfolio resolves, and takes no window.
+    NetExposure,
 }
 
 /// The canonical identity of an order request, excluding the client order id.

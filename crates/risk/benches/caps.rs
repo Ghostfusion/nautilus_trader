@@ -15,10 +15,13 @@
 
 //! Benchmarks for count cap evaluation on the send path.
 
-use std::hint::black_box;
+use std::{cell::RefCell, hint::black_box, rc::Rc};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use nautilus_common::cache::Cache;
+use nautilus_common::{
+    cache::Cache,
+    clock::{Clock, VirtualClock},
+};
 use nautilus_core::{DurationNanos, UUID4, UnixNanos};
 use nautilus_model::{
     enums::{OrderSide, OrderType},
@@ -29,6 +32,7 @@ use nautilus_model::{
     risk::{RiskCapMetric, RiskCapScope},
     types::{Price, Quantity},
 };
+use nautilus_portfolio::Portfolio;
 use nautilus_risk::engine::cap::{RiskCap, RiskCounterKey, RiskCounters, RiskSubject, evaluate};
 
 const ACTIVE_ORDERS: usize = 64;
@@ -80,7 +84,7 @@ fn caps(active_order_limit: u32) -> Vec<RiskCap> {
 }
 
 /// A cache holding the instrument and `count` open orders.
-fn seeded_cache(count: usize) -> Cache {
+fn seeded_cache(count: usize) -> Rc<RefCell<Cache>> {
     let mut cache = Cache::default();
     cache
         .add_instrument(InstrumentAny::CurrencyPair(audusd_sim()))
@@ -113,7 +117,7 @@ fn seeded_cache(count: usize) -> Cache {
             .unwrap();
     }
 
-    cache
+    Rc::new(RefCell::new(cache))
 }
 
 fn seeded_counters(caps: &[RiskCap], subject: &RiskSubject) -> RiskCounters {
@@ -139,6 +143,13 @@ fn seeded_counters(caps: &[RiskCap], subject: &RiskSubject) -> RiskCounters {
 
 fn bench_caps_evaluate_send_path(c: &mut Criterion) {
     let cache = seeded_cache(ACTIVE_ORDERS);
+    let clock = Rc::new(RefCell::new(VirtualClock::new()));
+    let portfolio = Portfolio::new(
+        Rc::clone(&clock) as Rc<RefCell<dyn Clock>>,
+        Rc::clone(&cache),
+        None,
+    );
+    let cache = cache.borrow();
     let subject = RiskSubject::new(
         StrategyId::from("S-001"),
         InstrumentId::from("AUD/USD.SIM"),
@@ -153,7 +164,8 @@ fn bench_caps_evaluate_send_path(c: &mut Criterion) {
             black_box(evaluate(
                 black_box(&allow_caps),
                 &mut allow_counters,
-                black_box(&cache),
+                black_box(&*cache),
+                black_box(&portfolio),
                 RiskCapMetric::Submit,
                 black_box(&subject),
                 None,
@@ -170,7 +182,8 @@ fn bench_caps_evaluate_send_path(c: &mut Criterion) {
             black_box(evaluate(
                 black_box(&refuse_caps),
                 &mut refuse_counters,
-                black_box(&cache),
+                black_box(&*cache),
+                black_box(&portfolio),
                 RiskCapMetric::Submit,
                 black_box(&subject),
                 None,

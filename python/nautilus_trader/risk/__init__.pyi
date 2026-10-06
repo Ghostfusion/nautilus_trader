@@ -61,6 +61,10 @@ class RiskCap:
     def window(self) -> int | None: ...
     @property
     def quantity_limit(self) -> decimal.Decimal | None: ...
+    @property
+    def money_limit(self) -> decimal.Decimal | None: ...
+    @property
+    def money_currency(self) -> model.Currency | None: ...
     def __new__(
         cls,
         metric: RiskCapMetric,
@@ -68,6 +72,8 @@ class RiskCap:
         limit: int,
         window: int | None = None,
         quantity_limit: decimal.Decimal | None = None,
+        money_limit: decimal.Decimal | None = None,
+        money_currency: model.Currency | None = None,
     ) -> RiskCap: ...
 
 @typing.final
@@ -75,6 +81,7 @@ class RiskCapMetric:
     Active: RiskCapMetric
     Participation: RiskCapMetric
     Inventory: RiskCapMetric
+    NetExposure: RiskCapMetric
     Submit: RiskCapMetric
     Modify: RiskCapMetric
     Cancel: RiskCapMetric

@@ -28,7 +28,7 @@
 
 use std::collections::VecDeque;
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use nautilus_common::cache::Cache;
 use nautilus_core::{DurationNanos, UnixNanos};
 use nautilus_model::{
@@ -36,7 +36,9 @@ use nautilus_model::{
     identifiers::{AccountId, InstrumentId, StrategyId, Venue},
     orders::{Order, OrderAny},
     risk::{RiskCapMetric, RiskCapScope, RiskRequestKey},
+    types::Currency,
 };
+use nautilus_portfolio::Portfolio;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -62,11 +64,24 @@ pub struct RiskCap {
     /// of events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quantity_limit: Option<Decimal>,
+    /// The money allowed before the cap refuses an action, in [`Self::money_currency`].
+    ///
+    /// Set for [`RiskCapMetric::NetExposure`], which measures money rather than occurrences or a
+    /// size, so a configuration cannot read "no more than 1,000,000 USD" as a number of events and
+    /// a limit without a currency cannot be compared against an exposure at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub money_limit: Option<Decimal>,
+    /// The currency [`Self::money_limit`] is expressed in.
+    ///
+    /// Set for [`RiskCapMetric::NetExposure`] and `None` for every other metric, which measures in
+    /// occurrences or in the instrument's units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub money_currency: Option<Currency>,
     /// The rolling window the count is taken over, in nanoseconds.
     ///
     /// `None` for [`RiskCapMetric::Active`], which counts the open order set as it stands rather
-    /// than occurrences over a window, and for [`RiskCapMetric::Inventory`], which reads the
-    /// standing position.
+    /// than occurrences over a window, and for [`RiskCapMetric::Inventory`] and
+    /// [`RiskCapMetric::NetExposure`], which read the standing position and the portfolio.
     pub window: Option<DurationNanos>,
 }
 
@@ -84,6 +99,8 @@ impl RiskCap {
             scope,
             limit,
             quantity_limit: None,
+            money_limit: None,
+            money_currency: None,
             window,
         }
     }
@@ -101,7 +118,28 @@ impl RiskCap {
             scope,
             limit: 0,
             quantity_limit: Some(quantity_limit),
+            money_limit: None,
+            money_currency: None,
             window,
+        }
+    }
+
+    /// Creates a new [`RiskCap`] instance measured in money.
+    #[must_use]
+    pub const fn new_money(
+        metric: RiskCapMetric,
+        scope: RiskCapScope,
+        money_limit: Decimal,
+        money_currency: Currency,
+    ) -> Self {
+        Self {
+            metric,
+            scope,
+            limit: 0,
+            quantity_limit: None,
+            money_limit: Some(money_limit),
+            money_currency: Some(money_currency),
+            window: None,
         }
     }
 
@@ -109,6 +147,12 @@ impl RiskCap {
     #[must_use]
     pub const fn measures_quantity(&self) -> bool {
         self.quantity_limit.is_some()
+    }
+
+    /// Returns whether this cap is measured in money rather than in occurrences or quantity.
+    #[must_use]
+    pub const fn measures_money(&self) -> bool {
+        self.money_limit.is_some()
     }
 
     /// Returns whether this cap counts occurrences of `action`.
@@ -120,7 +164,7 @@ impl RiskCap {
     #[must_use]
     pub const fn counts(&self, action: RiskCapMetric) -> bool {
         match self.metric {
-            RiskCapMetric::Active | RiskCapMetric::Inventory => false,
+            RiskCapMetric::Active | RiskCapMetric::Inventory | RiskCapMetric::NetExposure => false,
             RiskCapMetric::Submit | RiskCapMetric::RepeatedRequest => {
                 matches!(action, RiskCapMetric::Submit)
             }
@@ -148,17 +192,22 @@ impl RiskCap {
                     | RiskCapMetric::RepeatedRequest
                     | RiskCapMetric::Participation
                     | RiskCapMetric::Inventory
+                    | RiskCapMetric::NetExposure
             ),
             RiskCapMetric::Modify => matches!(
                 self.metric,
-                RiskCapMetric::Modify | RiskCapMetric::Active | RiskCapMetric::Inventory
+                RiskCapMetric::Modify
+                    | RiskCapMetric::Active
+                    | RiskCapMetric::Inventory
+                    | RiskCapMetric::NetExposure
             ),
             RiskCapMetric::Cancel
             | RiskCapMetric::Fill
             | RiskCapMetric::Active
             | RiskCapMetric::Inventory
             | RiskCapMetric::Participation
-            | RiskCapMetric::RepeatedRequest => false,
+            | RiskCapMetric::RepeatedRequest
+            | RiskCapMetric::NetExposure => false,
         }
     }
 }
@@ -455,6 +504,15 @@ pub struct RiskCapDecision {
     pub observed_quantity: Option<Decimal>,
     /// The configured quantity limit, for a metric measured in quantity.
     pub limit_quantity: Option<Decimal>,
+    /// The money observed, for a metric measured in money.
+    ///
+    /// `None` on a money metric means the portfolio could not value the aggregate, so the refusal
+    /// records an unanswerable limit rather than a limit that was reached.
+    pub observed_money: Option<Decimal>,
+    /// The configured money limit, for a metric measured in money.
+    pub limit_money: Option<Decimal>,
+    /// The currency the money measurements are expressed in, for a metric measured in money.
+    pub money_currency: Option<Currency>,
     /// The rolling window the count was taken over.
     pub window: Option<DurationNanos>,
     /// The timestamp the refusal was evaluated at.
@@ -502,6 +560,20 @@ impl RiskCapDecision {
                 observed: self.observed_quantity.unwrap_or_default(),
                 limit: self.limit_quantity.unwrap_or_default(),
             },
+            RiskCapMetric::NetExposure => match self.observed_money {
+                Some(observed) => OrderDeniedReason::ExposureLimitReached {
+                    scope: self.scope,
+                    // A decision measured in money always carries the currency, so the fallback
+                    // keeps the rendering total rather than panicking on the engine's send path.
+                    currency: self.money_currency.unwrap_or_else(Currency::USD),
+                    observed,
+                    limit: self.limit_money.unwrap_or_default(),
+                },
+                None => OrderDeniedReason::ExposureLimitUnknown {
+                    scope: self.scope,
+                    currency: self.money_currency.unwrap_or_else(Currency::USD),
+                },
+            },
             metric => OrderDeniedReason::OrderCountLimitReached {
                 metric,
                 scope: self.scope,
@@ -522,10 +594,15 @@ impl RiskCapDecision {
 /// A cap that counts repeated requests is counted against the identity of the request being
 /// evaluated, so a caller that has no identity for the action skips that cap rather than counting
 /// every request together.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a cap is decidable against the counters, the cache and the portfolio"
+)]
 pub fn evaluate(
     caps: &[RiskCap],
     counters: &mut RiskCounters,
     cache: &Cache,
+    portfolio: &Portfolio,
     action: RiskCapMetric,
     subject: &RiskSubject,
     request: Option<&RiskRequestKey>,
@@ -541,6 +618,33 @@ pub fn evaluate(
         }
 
         let subject_key = subject.key(cap.scope)?;
+
+        if let Some(money_limit) = cap.money_limit {
+            let currency = cap.money_currency.unwrap_or_else(Currency::USD);
+            let observed = portfolio_exposure(portfolio, cache, cap.scope, subject, currency);
+
+            // An unanswerable limit is refused rather than read as zero, because a limit that
+            // cannot be evaluated must not be treated as one that was not reached.
+            if observed.is_none_or(|observed| observed >= money_limit) {
+                return Some(RiskCapDecision {
+                    metric: cap.metric,
+                    scope: cap.scope,
+                    subject: subject_key,
+                    request: None,
+                    observed: 0,
+                    limit: 0,
+                    observed_quantity: None,
+                    limit_quantity: None,
+                    observed_money: observed,
+                    limit_money: Some(money_limit),
+                    money_currency: Some(currency),
+                    window: cap.window,
+                    ts_event,
+                });
+            }
+
+            continue;
+        }
 
         if let Some(quantity_limit) = cap.quantity_limit {
             let observed = if cap.metric == RiskCapMetric::Inventory {
@@ -562,6 +666,9 @@ pub fn evaluate(
                     limit: 0,
                     observed_quantity: Some(observed),
                     limit_quantity: Some(quantity_limit),
+                    observed_money: None,
+                    limit_money: None,
+                    money_currency: None,
                     window: cap.window,
                     ts_event,
                 });
@@ -594,6 +701,9 @@ pub fn evaluate(
                 limit: cap.limit,
                 observed_quantity: None,
                 limit_quantity: None,
+                observed_money: None,
+                limit_money: None,
+                money_currency: None,
                 window: cap.window,
                 ts_event,
             });
@@ -636,6 +746,49 @@ fn inventory_quantity(cache: &Cache, selector: RiskCapScope, subject: &RiskSubje
         .sum()
 }
 
+/// Returns the portfolio's net exposure in `currency`, aggregated over the scope `subject` names.
+///
+/// Every venue that holds an open position is asked, so the aggregate spans venues as well as
+/// strategies: the same aggregation the portfolio publishes is the one enforced here, rather than a
+/// second reading of the positions that could disagree with it. A venue whose totals do not name
+/// `currency` contributes nothing, because that is a venue holding nothing in it, but a venue the
+/// portfolio cannot value at all leaves the aggregate unknown rather than partial.
+fn portfolio_exposure(
+    portfolio: &Portfolio,
+    cache: &Cache,
+    selector: RiskCapScope,
+    subject: &RiskSubject,
+    currency: Currency,
+) -> Option<Decimal> {
+    let account_id = match selector {
+        RiskCapScope::Account => subject.account_id.as_ref(),
+        _ => None,
+    };
+
+    let venues: AHashSet<Venue> = cache
+        .positions(None, None, None, None, None)
+        .iter()
+        .map(|position| position.instrument_id.venue)
+        .collect();
+
+    let mut total = Decimal::ZERO;
+
+    for venue in venues {
+        let exposures = portfolio.net_exposures(&venue, account_id, None)?;
+
+        match exposures.get(&currency) {
+            Some(exposure) => total = total.checked_add(exposure.as_decimal())?,
+            // A venue with no exposure in any currency contributes nothing. A venue with exposure
+            // in another currency leaves the aggregate unknown rather than dropping it: a total
+            // read from part of the portfolio is not the portfolio's exposure.
+            None if exposures.is_empty() => {}
+            None => return None,
+        }
+    }
+
+    Some(total)
+}
+
 /// Returns the number of open orders `subject` has for a cap scoped to `selector`.
 ///
 /// The count is the open order set, so an order that is partially filled still counts once and an
@@ -669,7 +822,10 @@ fn active_order_count(cache: &Cache, selector: RiskCapScope, subject: &RiskSubje
 
 #[cfg(test)]
 mod tests {
-    use nautilus_core::UnixNanos;
+    use std::{cell::RefCell, rc::Rc};
+
+    use nautilus_common::clock::{Clock, VirtualClock};
+    use nautilus_core::{UUID4, UnixNanos};
     use nautilus_model::{
         enums::{OrderSide, OrderType},
         identifiers::ClientOrderId,
@@ -677,8 +833,35 @@ mod tests {
         types::{Price, Quantity},
     };
     use rstest::rstest;
+    use rust_decimal_macros::dec;
 
     use super::*;
+
+    /// Evaluates caps against a portfolio that holds nothing.
+    ///
+    /// A test whose cap is measured in occurrences, quantity or standing inventory does not read
+    /// the portfolio, so it is given one over an empty cache rather than restating the parameter.
+    fn evaluate(
+        caps: &[RiskCap],
+        counters: &mut RiskCounters,
+        cache: &Cache,
+        action: RiskCapMetric,
+        subject: &RiskSubject,
+        request: Option<&RiskRequestKey>,
+        ts_event: UnixNanos,
+    ) -> Option<RiskCapDecision> {
+        let portfolio_cache = Rc::new(RefCell::new(Cache::default()));
+        let clock = Rc::new(RefCell::new(VirtualClock::new()));
+        let portfolio = Portfolio::new(
+            Rc::clone(&clock) as Rc<RefCell<dyn Clock>>,
+            portfolio_cache,
+            None,
+        );
+
+        super::evaluate(
+            caps, counters, cache, &portfolio, action, subject, request, ts_event,
+        )
+    }
 
     #[rstest]
     fn test_participation_cap_sums_fills_over_the_window_and_denies() {
@@ -1298,5 +1481,241 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[rstest]
+    fn test_exposure_cap_aggregates_across_strategies_and_venues_and_denies() {
+        let (cache, portfolio) = funded_portfolio(true);
+        let subject = subject(true);
+        let mut counters = RiskCounters::default();
+        let ts = UnixNanos::from(1);
+
+        let cap = RiskCap::new_money(
+            RiskCapMetric::NetExposure,
+            RiskCapScope::Global,
+            dec!(200_000),
+            Currency::USD(),
+        );
+        let decision = super::evaluate(
+            std::slice::from_ref(&cap),
+            &mut counters,
+            &cache.borrow(),
+            &portfolio,
+            RiskCapMetric::Submit,
+            &subject,
+            None,
+            ts,
+        )
+        .expect("a portfolio above the exposure limit should be refused");
+
+        // 100,000 AUD/USD on one venue and 1,000 AAPL on another, both owned by a different
+        // strategy than the one submitting: neither is above the limit alone.
+        assert_eq!(decision.observed_money, Some(dec!(250_000)));
+        assert_eq!(decision.limit_money, Some(dec!(200_000)));
+        assert_eq!(decision.money_currency, Some(Currency::USD()));
+
+        let rendered = decision.reason().to_string();
+        assert!(
+            rendered.starts_with("EXPOSURE_LIMIT_REACHED:")
+                && rendered.contains("currency=USD")
+                && rendered.contains("observed=250000"),
+            "{rendered}"
+        );
+
+        // The same portfolio passes a limit it does not reach.
+        let cap = RiskCap::new_money(
+            RiskCapMetric::NetExposure,
+            RiskCapScope::Global,
+            dec!(300_000),
+            Currency::USD(),
+        );
+        assert!(
+            super::evaluate(
+                std::slice::from_ref(&cap),
+                &mut counters,
+                &cache.borrow(),
+                &portfolio,
+                RiskCapMetric::Submit,
+                &subject,
+                None,
+                ts
+            )
+            .is_none()
+        );
+
+        // An account scope aggregates one account's portfolio rather than every account's, so the
+        // second venue's positions are not counted and the same limit is not reached.
+        let cap = RiskCap::new_money(
+            RiskCapMetric::NetExposure,
+            RiskCapScope::Account,
+            dec!(200_000),
+            Currency::USD(),
+        );
+        let sim_subject = RiskSubject::new(
+            StrategyId::from("S-1"),
+            InstrumentId::from("AUD/USD.SIM"),
+            Some(AccountId::from("SIM-001")),
+        );
+        assert!(
+            super::evaluate(
+                std::slice::from_ref(&cap),
+                &mut counters,
+                &cache.borrow(),
+                &portfolio,
+                RiskCapMetric::Submit,
+                &sim_subject,
+                None,
+                ts
+            )
+            .is_none()
+        );
+    }
+
+    #[rstest]
+    fn test_exposure_cap_refuses_when_the_portfolio_cannot_value_it() {
+        let (cache, portfolio) = funded_portfolio(false);
+        let mut counters = RiskCounters::default();
+
+        let cap = RiskCap::new_money(
+            RiskCapMetric::NetExposure,
+            RiskCapScope::Global,
+            dec!(1_000_000_000),
+            Currency::USD(),
+        );
+        let decision = super::evaluate(
+            std::slice::from_ref(&cap),
+            &mut counters,
+            &cache.borrow(),
+            &portfolio,
+            RiskCapMetric::Submit,
+            &subject(true),
+            None,
+            UnixNanos::from(1),
+        )
+        .expect("an unanswerable exposure limit should be refused");
+
+        assert_eq!(decision.observed_money, None);
+        assert_eq!(decision.limit_money, Some(dec!(1_000_000_000)));
+
+        let rendered = decision.reason().to_string();
+        assert!(
+            rendered.starts_with("EXPOSURE_LIMIT_UNKNOWN:") && rendered.contains("currency=USD"),
+            "{rendered}"
+        );
+    }
+
+    /// Returns a cache holding two positions in two venues under two strategies, and the portfolio
+    /// over it.
+    ///
+    /// `priced` adds the quotes the portfolio values the positions with, so a test can ask for the
+    /// same holdings with no price to read.
+    fn funded_portfolio(priced: bool) -> (Rc<RefCell<Cache>>, Portfolio) {
+        use nautilus_model::{
+            accounts::{AccountAny, CashAccount},
+            data::QuoteTick,
+            enums::{AccountType, LiquiditySide, OmsType},
+            events::{AccountState, OrderEventAny},
+            identifiers::{PositionId, TradeId},
+            instruments::{
+                Instrument, InstrumentAny,
+                stubs::{audusd_sim, equity_aapl},
+            },
+            orders::stubs::TestOrderEventStubs,
+            position::Position,
+            types::{AccountBalance, Money},
+        };
+
+        let audusd = InstrumentAny::CurrencyPair(audusd_sim());
+        let aapl = InstrumentAny::Equity(equity_aapl());
+
+        let cache = Rc::new(RefCell::new(Cache::default()));
+
+        for instrument in [&audusd, &aapl] {
+            cache
+                .borrow_mut()
+                .add_instrument(instrument.clone())
+                .unwrap();
+        }
+
+        for account_id in [AccountId::from("SIM-001"), AccountId::from("XNAS-001")] {
+            let state = AccountState::new(
+                account_id,
+                AccountType::Cash,
+                vec![AccountBalance::new(
+                    Money::from("1000000 USD"),
+                    Money::zero(Currency::USD()),
+                    Money::from("1000000 USD"),
+                )],
+                vec![],
+                true,
+                UUID4::new(),
+                UnixNanos::default(),
+                UnixNanos::default(),
+                Some(Currency::USD()),
+            );
+            cache
+                .borrow_mut()
+                .add_account(AccountAny::Cash(CashAccount::new(state, true, false)))
+                .unwrap();
+        }
+
+        if priced {
+            for (instrument, bid) in [(&audusd, "1.00000"), (&aapl, "150.00")] {
+                cache
+                    .borrow_mut()
+                    .add_quote(QuoteTick {
+                        instrument_id: instrument.id(),
+                        bid_price: Price::from(bid),
+                        ask_price: Price::from(bid),
+                        bid_size: Quantity::from("1"),
+                        ask_size: Quantity::from("1"),
+                        ts_event: UnixNanos::default(),
+                        ts_init: UnixNanos::from(1),
+                    })
+                    .unwrap();
+            }
+        }
+
+        for (instrument, strategy, quantity, price, position_id, account_id) in [
+            (&audusd, "S-1", "100000", "1.00000", "P-SIM-1", "SIM-001"),
+            (&aapl, "S-2", "1000", "150.00", "P-XNAS-1", "XNAS-001"),
+        ] {
+            let order = OrderTestBuilder::new(OrderType::Limit)
+                .instrument_id(instrument.id())
+                .strategy_id(StrategyId::from(strategy))
+                .side(OrderSide::Buy)
+                .quantity(Quantity::from(quantity))
+                .price(Price::from(price))
+                .build();
+            let filled = TestOrderEventStubs::filled(
+                &order,
+                instrument,
+                Some(TradeId::new(format!("T-{position_id}"))),
+                Some(PositionId::new(position_id)),
+                Some(Price::from(price)),
+                Some(Quantity::from(quantity)),
+                Some(LiquiditySide::Taker),
+                None,
+                None,
+                Some(AccountId::from(account_id)),
+            );
+            let OrderEventAny::Filled(filled) = filled else {
+                panic!("expected a filled order event")
+            };
+
+            cache
+                .borrow_mut()
+                .add_position(&Position::new(instrument, filled), OmsType::Netting)
+                .unwrap();
+        }
+
+        let clock = Rc::new(RefCell::new(VirtualClock::new()));
+        let portfolio = Portfolio::new(
+            Rc::clone(&clock) as Rc<RefCell<dyn Clock>>,
+            Rc::clone(&cache),
+            None,
+        );
+
+        (cache, portfolio)
     }
 }

@@ -39,6 +39,7 @@ use nautilus_model::{
     enums::{BarAggregation, BarIntervalType},
     identifiers::{ClientId, ClientOrderId, InstrumentId, TraderId, Venue},
     risk::{RiskCapMetric, RiskCapScope},
+    types::Currency,
 };
 use nautilus_portfolio::config::PortfolioConfig;
 use nautilus_risk::{engine::cap::RiskCap, engine::config::RiskEngineConfig};
@@ -57,7 +58,8 @@ pub use crate::execution::submission::SubmissionRecoveryPolicy;
 const DEFAULT_ORDER_RATE_LIMIT: &str = "100/00:00:01";
 const RUST_RUNTIME_UNSUPPORTED: &str = "not supported by the Rust live runtime yet";
 const RATE_LIMIT_FORMAT: &str = "expected 'limit/HH:MM:SS'";
-const COUNT_CAP_FORMAT: &str = "expected 'METRIC/SCOPE/LIMIT[/WINDOW_NS]'";
+const COUNT_CAP_FORMAT: &str =
+    "expected 'METRIC/SCOPE/LIMIT[/WINDOW_NS]', or 'NET_EXPOSURE/SCOPE/LIMIT/CURRENCY'";
 const LIVE_COUNT_CAP_FIELD: &str = "LiveRiskEngineConfig.count_caps";
 
 // Bound delays to keep both Duration conversion and Instant addition within range
@@ -204,7 +206,8 @@ pub struct LiveRiskEngineConfig {
     /// Entries map instrument ID strings to decimal notional strings.
     #[builder(default)]
     pub max_notional_per_order: HashMap<String, String>,
-    /// Count caps, each encoded as `METRIC/SCOPE/LIMIT` or `METRIC/SCOPE/LIMIT/WINDOW_NS`.
+    /// Count caps, each encoded as `METRIC/SCOPE/LIMIT`, `METRIC/SCOPE/LIMIT/WINDOW_NS` or, for the
+    /// money-measured metric, `NET_EXPOSURE/SCOPE/LIMIT/CURRENCY`.
     ///
     /// The metric and scope are the [`RiskCapMetric`] and [`RiskCapScope`] tokens, the window is a
     /// whole number of nanoseconds, and the window component is omitted for an `ACTIVE` cap, which
@@ -326,8 +329,9 @@ pub(crate) fn parse_rate_limit(field: impl Into<String>, input: &str) -> ConfigR
 ///
 /// # Errors
 ///
-/// Returns a [`ConfigError`] if an entry is not `METRIC/SCOPE/LIMIT` or
-/// `METRIC/SCOPE/LIMIT/WINDOW_NS`, or if a component does not parse.
+/// Returns a [`ConfigError`] if an entry is not `METRIC/SCOPE/LIMIT`,
+/// `METRIC/SCOPE/LIMIT/WINDOW_NS` or `NET_EXPOSURE/SCOPE/LIMIT/CURRENCY`, or if a component does
+/// not parse.
 pub(crate) fn parse_count_caps(field: &str, values: &[String]) -> ConfigResult<Vec<RiskCap>> {
     let mut caps = Vec::with_capacity(values.len());
 
@@ -345,6 +349,31 @@ pub(crate) fn parse_count_caps(field: &str, values: &[String]) -> ConfigResult<V
         let scope = parts[1]
             .parse::<RiskCapScope>()
             .map_err(|e| ConfigError::invalid_value(entry.clone(), format!("scope: {e}")))?;
+
+        // A metric measured in money takes its limit as a decimal and names its currency in the
+        // field that holds a window for the occurrence metrics, because a money cap takes no window
+        // and an amount without a currency cannot be compared against an exposure.
+        if metric == RiskCapMetric::NetExposure {
+            let [_, _, raw_limit, raw_currency] = parts[..] else {
+                return Err(ConfigError::invalid_format(entry, COUNT_CAP_FORMAT));
+            };
+
+            let money_limit = raw_limit.parse::<Decimal>().map_err(|e| {
+                ConfigError::invalid_value(entry.clone(), format!("money limit: {e}"))
+            })?;
+            let money_currency = raw_currency
+                .parse::<Currency>()
+                .map_err(|e| ConfigError::invalid_value(entry.clone(), format!("currency: {e}")))?;
+
+            caps.push(RiskCap::new_money(
+                metric,
+                scope,
+                money_limit,
+                money_currency,
+            ));
+            continue;
+        }
+
         // A metric measured in quantity takes its limit as a decimal in the instrument's units, so
         // the field that holds a count for the occurrence metrics holds a size here.
         let quantity_limit = if matches!(
@@ -1769,6 +1798,37 @@ mean_dispatch_ns_clear = 700
             converted.count_caps[1],
             RiskCap::new(RiskCapMetric::Active, RiskCapScope::Instrument, 50, None)
         );
+    }
+
+    #[rstest]
+    fn test_live_risk_engine_config_converts_a_money_measured_cap() {
+        let config = LiveRiskEngineConfig {
+            count_caps: vec!["NET_EXPOSURE/GLOBAL/1000000.00/USD".to_string()],
+            ..Default::default()
+        };
+
+        let converted: RiskEngineConfig = config.into();
+
+        assert_eq!(
+            converted.count_caps[0],
+            RiskCap::new_money(
+                RiskCapMetric::NetExposure,
+                RiskCapScope::Global,
+                Decimal::from_str("1000000.00").unwrap(),
+                Currency::USD(),
+            )
+        );
+
+        // A money-measured cap takes its currency where the occurrence metrics take a window.
+        let missing_currency = vec!["NET_EXPOSURE/GLOBAL/1000000.00".to_string()];
+        assert!(validate_count_caps(&missing_currency).is_err());
+
+        // An unknown currency is refused rather than read as a limit in some other one.
+        let unknown_currency = vec!["NET_EXPOSURE/GLOBAL/1000000.00/XYZ".to_string()];
+        let error = validate_count_caps(&unknown_currency)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("currency"), "{error}");
     }
 
     #[rstest]

@@ -231,11 +231,13 @@ is a predicate over four things:
 - **Scope**: global, strategy, account, instrument, venue, or strategy by instrument. Counters are
   keyed per rule and per concrete scope, so two rules over one scope with different windows are two
   rules.
-- **Metric**: active orders, submits, modifies, cancels, fills, or repeated requests.
-- **Limit**: the count the cap permits within the window.
+- **Metric**: active orders, submits, modifies, cancels, fills, repeated requests, the quantity
+  filled over the window, the standing inventory, or the portfolio's net exposure.
+- **Limit**: the count, the size or the money amount the cap permits.
 - **Window**: a rolling duration over event timestamps from the engine clock, half-open at its
   start. No reset boundary exists, so capacity returns as occurrences age out rather than at a
-  session change. An active-order cap takes no window; every other metric requires one.
+  session change. An active-order cap, an inventory cap and a net exposure cap take no window;
+  every other metric requires one.
 
 A cancel or a fill cap gates **submits** rather than itself: a cancellation is never refused by a
 cap, because refusing to cancel is the behaviour a risk limit must not have. A repeated-request cap
@@ -244,6 +246,35 @@ client order id, so each shape keeps its own counter and a legitimate repeat of 
 not blocked by an earlier one. A refusal is an `OrderDenied` whose reason is
 `ORDER_COUNT_LIMIT_REACHED`, `ACTIVE_ORDER_LIMIT_REACHED` or `REPEATED_REQUEST_LIMIT_REACHED`, and
 the structured decision record carries the observed count, the limit, the scope and the window.
+
+A cap can also measure something other than a count, and then it names what it measures rather than
+naming a number of events:
+
+- **Quantity**: `PARTICIPATION` is the size the scope has filled within the window, so it is a
+  volume budget rather than a share of the market - the engine observes this trader's fills and not
+  the venue's total traded volume, so a share would need a denominator that is not available here.
+  `INVENTORY` is the absolute position size the scope holds in the instrument it is trading, read
+  from the standing position rather than from occurrences. Both carry a `quantity_limit` and refuse
+  with `PARTICIPATION_LIMIT_REACHED` or `INVENTORY_LIMIT_REACHED`, naming the size observed and the
+  size crossed. Neither can express a money limit, and a cap measured in quantity carries no
+  occurrence limit, so a configuration cannot read "no more than 1.5 BTC" as a number of events.
+- **Money**: `NET_EXPOSURE` is the portfolio's own aggregation, the same number
+  `PortfolioManager.net_exposures` publishes, enforced before submission instead of only reported
+  afterwards. Each open position contributes the absolute notional the portfolio values it at in the
+  cap's currency, summed across every venue the portfolio holds a position on, so a long and a short
+  in one currency add rather than cancel and the cap bounds crowding rather than net direction. It
+  carries a `money_limit` and a `money_currency`, refuses with `EXPOSURE_LIMIT_REACHED`, and is
+  scoped to `GLOBAL` (every strategy, account, instrument and venue) or `ACCOUNT` (one account's
+  portfolio); a scope the portfolio cannot resolve is refused at construction rather than silently
+  reading as zero.
+
+An exposure cap reads a valuation, so it is answerable only while the portfolio can value what it
+holds. A venue the portfolio cannot value - no price for a position, or no account for it - leaves
+the aggregate unknown, and so does a venue whose exposure is expressed in another currency, because
+a total read from part of the portfolio is not the portfolio's exposure. An unknown aggregate denies
+with `EXPOSURE_LIMIT_UNKNOWN` rather than reading as zero: a limit that cannot be evaluated must not
+be reported as one that was not reached, so a deployment that cannot keep the cap answerable should
+remove it rather than leave it denying.
 
 **No cap is configured by default, and no default value or window duration is shipped.** An engine
 whose `RiskEngineConfig` declares no cap denies nothing. A default cannot be derived from the
@@ -271,16 +302,26 @@ the scope with the `RiskCapMetric` and `RiskCapScope` vocabularies in `nautilus_
 
 ```python
 RiskEngineConfig(
-    count_caps=[RiskCap(RiskCapMetric.Submit, RiskCapScope.Instrument, 2_000, 60_000_000_000)]
+    count_caps=[
+        RiskCap(RiskCapMetric.Submit, RiskCapScope.Instrument, 2_000, 60_000_000_000),
+        RiskCap(
+            RiskCapMetric.NetExposure,
+            RiskCapScope.Global,
+            0,
+            money_limit=Decimal("1000000.00"),
+            money_currency=Currency.from_str("USD"),
+        ),
+    ]
 )
 ```
 
 `LiveRiskEngineConfig` carries the same caps, each entry encoded as `METRIC/SCOPE/LIMIT` or
-`METRIC/SCOPE/LIMIT/WINDOW_NS` with the window in nanoseconds:
+`METRIC/SCOPE/LIMIT/WINDOW_NS` with the window in nanoseconds, and a money-measured cap encoded as
+`NET_EXPOSURE/SCOPE/LIMIT/CURRENCY` with the currency where the others carry a window:
 
 ```toml
 [risk_engine]
-count_caps = ["SUBMIT/INSTRUMENT/2000/60000000000"]
+count_caps = ["SUBMIT/INSTRUMENT/2000/60000000000", "NET_EXPOSURE/GLOBAL/1000000.00/USD"]
 ```
 
 ### Tick alignment
@@ -558,6 +599,8 @@ cross or immediately match. Other venue rejections leave it `false`.
 | `REPEATED_REQUEST_LIMIT_REACHED`                 | The configured repeated request limit for the scope was reached.                      |
 | `PARTICIPATION_LIMIT_REACHED`                    | The configured participation limit for the scope was reached.                         |
 | `INVENTORY_LIMIT_REACHED`                        | The configured inventory limit for the scope was reached.                             |
+| `EXPOSURE_LIMIT_REACHED`                         | The configured net exposure limit for the scope was reached.                          |
+| `EXPOSURE_LIMIT_UNKNOWN`                         | The configured net exposure limit for the scope could not be evaluated.               |
 | `RATE_LIMIT_EXCEEDED`                            | The order submission rate limit was exceeded.                                         |
 | `STREAM_RECONCILING`                             | The execution stream is unavailable or recovering; retry after recovery.              |
 | `NO_EXECUTION_CLIENT`                            | No execution client was found for the routed command.                                 |

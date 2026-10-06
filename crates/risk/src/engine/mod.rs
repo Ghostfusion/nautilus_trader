@@ -566,6 +566,7 @@ impl RiskEngine {
             &self.caps,
             &mut self.counters,
             &self.cache.borrow(),
+            &self.portfolio,
             action,
             subject,
             request,
@@ -573,12 +574,13 @@ impl RiskEngine {
         );
 
         if let Some(decision) = &decision {
+            // The refusal is rendered from its record, so a decision measured in quantity or in
+            // money names the size or the amount it observed rather than the zero count a
+            // money-measured decision carries.
             log::warn!(
-                "{} refused for {}: observed={} limit={}",
-                action,
+                "{action} refused for {}: {}",
                 decision.subject,
-                decision.observed,
-                decision.limit,
+                decision.reason()
             );
 
             self.cap_decisions.push_back(decision.clone());

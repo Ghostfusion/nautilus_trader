@@ -31,7 +31,7 @@ use crate::{
     enums::{OrderSide, OrderType, TimeInForce, TrailingOffsetType},
     identifiers::{ClientId, InstrumentId, OrderListId, PositionId, Venue},
     risk::{RiskCapMetric, RiskCapScope, RiskRequestKey},
-    types::{Money, Price, Quantity},
+    types::{Currency, Money, Price, Quantity},
 };
 
 /// The order price field being validated.
@@ -413,6 +413,30 @@ pub enum OrderDeniedReason {
         limit: Decimal,
     },
 
+    /// A configured net exposure limit was reached for the scope.
+    #[error(
+        "EXPOSURE_LIMIT_REACHED: scope={scope}, currency={currency}, observed={observed}, limit={limit}"
+    )]
+    ExposureLimitReached {
+        /// The scope kind the reached cap aggregates over.
+        scope: RiskCapScope,
+        /// The currency the portfolio expresses the exposure in.
+        currency: Currency,
+        /// The exposure observed, as a magnitude of money.
+        observed: Decimal,
+        /// The configured money limit.
+        limit: Decimal,
+    },
+
+    /// A configured net exposure limit could not be evaluated.
+    #[error("EXPOSURE_LIMIT_UNKNOWN: scope={scope}, currency={currency}")]
+    ExposureLimitUnknown {
+        /// The scope kind the configured cap aggregates over.
+        scope: RiskCapScope,
+        /// The currency the portfolio was to express the exposure in.
+        currency: Currency,
+    },
+
     /// The order submission rate limit was exceeded.
     #[error("RATE_LIMIT_EXCEEDED")]
     RateLimitExceeded,
@@ -578,6 +602,8 @@ impl OrderDeniedCode {
             Self::RepeatedRequestLimitReached => "The configured repeated request limit for the scope was reached.",
             Self::ParticipationLimitReached => "The configured participation limit for the scope was reached.",
             Self::InventoryLimitReached => "The configured inventory limit for the scope was reached.",
+            Self::ExposureLimitReached => "The configured net exposure limit for the scope was reached.",
+            Self::ExposureLimitUnknown => "The configured net exposure limit for the scope could not be evaluated.",
             Self::RateLimitExceeded => "The order submission rate limit was exceeded.",
             Self::StreamReconciling => "The execution stream is unavailable or recovering; retry after recovery.",
             Self::NoExecutionClient => "No execution client was found for the routed command.",
@@ -1051,6 +1077,16 @@ mod tests {
                 scope: RiskCapScope::Instrument,
                 observed: Decimal::new(100, 1),
                 limit: Decimal::new(50, 1),
+            },
+            OrderDeniedReason::ExposureLimitReached {
+                scope: RiskCapScope::Global,
+                currency: Currency::USD(),
+                observed: Decimal::new(12_500_000, 2),
+                limit: Decimal::new(10_000_000, 2),
+            },
+            OrderDeniedReason::ExposureLimitUnknown {
+                scope: RiskCapScope::Account,
+                currency: Currency::USD(),
             },
             OrderDeniedReason::ActiveOrderLimitReached {
                 scope: RiskCapScope::Global,
