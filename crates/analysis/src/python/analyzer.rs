@@ -31,6 +31,7 @@ use crate::{
     period::PerformancePeriod,
     python::statistic::statistic_from_pyobject,
     snapshot::PortfolioStatistics,
+    statistics::correction_impact::CorrectionImpactReport,
 };
 
 #[pymethods]
@@ -144,6 +145,11 @@ impl PortfolioAnalyzer {
     /// When fill-cause totals have been set with `Self.set_fill_cause_counts`, one row per
     /// cause is added to `general`, named for the cause, including the causes at zero: a zero is a
     /// fact and an omitted row is not. With no totals set, no cause row is produced.
+    ///
+    /// When a correction impact has been set with `Self.set_correction_impact`, three rows are
+    /// added to `returns`, naming the declared metric and the stream each value came from: the
+    /// uncorrected value, the corrected value and their delta. A correction that changed nothing
+    /// renders a delta of exactly zero rather than omitting the row.
     #[pyo3(name = "statistics")]
     fn py_statistics(&self) -> PortfolioStatistics {
         self.statistics()
@@ -336,6 +342,25 @@ impl PortfolioAnalyzer {
     fn py_signed_order_flow_imbalance(&self) -> Option<f64> {
         self.signed_order_flow_imbalance()
             .and_then(|value| value.to_f64())
+    }
+
+    /// Sets the measured effect of the data-quality correction applied to the run's stream.
+    ///
+    /// The report is built by the caller that holds both measurements of the declared outcome
+    /// metric; the analyzer is a carrier, not a measurer, of it. `None` when no correction was
+    /// applied, in which case no correction-impact row is rendered. When set, the uncorrected
+    /// value, the corrected value and their delta are rendered, each naming the stream it came
+    /// from.
+    #[pyo3(name = "set_correction_impact")]
+    fn py_set_correction_impact(&mut self, impact: Option<CorrectionImpactReport>) {
+        self.set_correction_impact(impact);
+    }
+
+    /// Returns the measured effect of the data-quality correction applied to the run's stream.
+    #[getter]
+    #[pyo3(name = "correction_impact")]
+    fn py_correction_impact(&self) -> Option<CorrectionImpactReport> {
+        self.correction_impact().cloned()
     }
 
     /// Records a position return at a specific timestamp.

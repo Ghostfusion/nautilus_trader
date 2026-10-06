@@ -21,6 +21,7 @@ pub mod beta_ratio;
 pub mod breakeven_cost;
 pub mod cagr;
 pub mod calmar_ratio;
+pub mod correction_impact;
 pub mod cost_basis_points;
 pub mod down_capture_ratio;
 pub mod expectancy;

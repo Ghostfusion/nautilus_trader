@@ -26,6 +26,10 @@
 //! explicable by the volume traded over the same interval, and whether a reported settlement total
 //! reconciles with the sum of its components.
 //!
+//! A correction is applied through [`DataQualityAction::apply`], which refuses without a declared
+//! outcome metric: the correction and its effect on the metric are then read together, in the
+//! [`DataQualityCounts`] line, rather than as a bare count of what was fixed.
+//!
 //! [`DataEngineConfig::data_quality_action`]: crate::engine::config::DataEngineConfig::data_quality_action
 
 use std::{
@@ -138,12 +142,136 @@ impl Display for DataQualityAction {
     }
 }
 
+impl DataQualityAction {
+    /// Applies this correction, reporting `outcome_metric` measured on both streams.
+    ///
+    /// A correction changes the stream a result is computed from, so it is applied together with
+    /// the declared outcome metric it moves: `uncorrected` is the metric's value on the stream as
+    /// the gate received it and `corrected` is its value after the correction. The returned
+    /// [`CorrectionImpact`] carries both values and their difference, so the correction and its
+    /// effect are read together rather than as a bare count of what was fixed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CorrectionImpactError::MissingOutcomeMetric`] when `outcome_metric` is `None` or
+    /// blank. The refusal is raised here, at the point of applying the correction, rather than
+    /// defaulting a metric for the caller or silently applying the correction with no recorded
+    /// effect: a correction whose effect on the result is unknown cannot be reported, so it is not
+    /// applied.
+    pub fn apply(
+        self,
+        outcome_metric: Option<&str>,
+        uncorrected: f64,
+        corrected: f64,
+    ) -> Result<CorrectionImpact, CorrectionImpactError> {
+        let outcome_metric = outcome_metric
+            .map(str::trim)
+            .filter(|metric| !metric.is_empty())
+            .ok_or(CorrectionImpactError::MissingOutcomeMetric)?;
+
+        Ok(CorrectionImpact {
+            action: self,
+            outcome_metric: outcome_metric.to_string(),
+            uncorrected,
+            corrected,
+        })
+    }
+}
+
+/// The measured effect of a correction on a declared outcome metric.
+///
+/// The delta is read as corrected minus uncorrected, so a correction that lowered the metric
+/// reports a negative delta and one that changed nothing reports exactly zero rather than no row.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CorrectionImpact {
+    action: DataQualityAction,
+    outcome_metric: String,
+    uncorrected: f64,
+    corrected: f64,
+}
+
+impl CorrectionImpact {
+    /// Returns the correction this impact was measured for.
+    #[must_use]
+    pub const fn action(&self) -> DataQualityAction {
+        self.action
+    }
+
+    /// Returns the declared outcome metric the correction was measured against.
+    #[must_use]
+    pub fn outcome_metric(&self) -> &str {
+        &self.outcome_metric
+    }
+
+    /// Returns the metric's value on the stream as the gate received it.
+    #[must_use]
+    pub const fn uncorrected(&self) -> f64 {
+        self.uncorrected
+    }
+
+    /// Returns the metric's value on the stream after the correction.
+    #[must_use]
+    pub const fn corrected(&self) -> f64 {
+        self.corrected
+    }
+
+    /// Returns the change the correction made to the declared metric.
+    ///
+    /// The delta is `corrected - uncorrected`. It is exactly zero when the correction changed
+    /// nothing, and it is reported rather than omitted.
+    #[must_use]
+    pub fn delta(&self) -> f64 {
+        self.corrected - self.uncorrected
+    }
+}
+
+impl Display for CorrectionImpact {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "correction impact: action={} outcome_metric={} uncorrected={} corrected={} delta={}",
+            self.action,
+            self.outcome_metric,
+            self.uncorrected,
+            self.corrected,
+            self.delta()
+        )
+    }
+}
+
+/// The refusal raised when a correction is applied without the outcome metric it changes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CorrectionImpactError {
+    /// No outcome metric was declared, so the correction's effect cannot be reported.
+    MissingOutcomeMetric,
+}
+
+impl Display for CorrectionImpactError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingOutcomeMetric => {
+                f.write_str("a correction requires a declared outcome metric; none was declared")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CorrectionImpactError {}
+
 /// Per-kind violation counts for the gate, plus the accepted total.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DataQualityCounts {
     counts: BTreeMap<DataQualityViolation, usize>,
     accepted: usize,
     aggressor_comparisons: usize,
+    /// The measured effect of the correction applied to the stream, if one was applied and
+    /// declared an outcome metric.
+    ///
+    /// `None` when no correction was applied or the gate ran in its forward-or-drop mode without
+    /// a declared outcome metric: an absent measurement is not a zero delta, and the count line is
+    /// then exactly what it was before the impact existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    correction_impact: Option<CorrectionImpact>,
 }
 
 impl DataQualityCounts {
@@ -221,6 +349,24 @@ impl DataQualityCounts {
         self.aggressor_comparisons += 1;
     }
 
+    /// Records the measured effect of the correction applied to the stream.
+    ///
+    /// The impact is built by [`DataQualityAction::apply`], which refuses without a declared
+    /// outcome metric, so a recorded impact always names the metric it moved. Replaces any impact
+    /// already held.
+    pub fn set_correction_impact(&mut self, impact: CorrectionImpact) {
+        self.correction_impact = Some(impact);
+    }
+
+    /// Returns the measured effect of the correction applied to the stream, if any.
+    ///
+    /// `None` when no correction was applied or none declared an outcome metric: an absent
+    /// measurement is not a zero delta.
+    #[must_use]
+    pub fn correction_impact(&self) -> Option<&CorrectionImpact> {
+        self.correction_impact.as_ref()
+    }
+
     pub(crate) fn accept(&mut self) {
         self.accepted += 1;
     }
@@ -238,6 +384,12 @@ impl Display for DataQualityCounts {
 
         for violation in DataQualityViolation::ALL {
             write!(f, " {violation}={}", self.count(violation))?;
+        }
+
+        // The correction and its effect are read together: a reader sees what the gate fixed and
+        // what fixing it did to the declared outcome metric, in the same line.
+        if let Some(impact) = &self.correction_impact {
+            write!(f, " {impact}")?;
         }
 
         Ok(())
@@ -664,5 +816,78 @@ mod tests {
         );
         assert_eq!(counts.rejected(), 2);
         assert_eq!(counts.total(), 2);
+    }
+
+    #[rstest::rstest]
+    fn test_correction_reports_the_outcome_it_changed() {
+        let impact = DataQualityAction::Drop
+            .apply(Some("sharpe_ratio"), 1.518, 0.589)
+            .unwrap();
+
+        assert_eq!(impact.action(), DataQualityAction::Drop);
+        assert_eq!(impact.outcome_metric(), "sharpe_ratio");
+        assert_eq!(impact.uncorrected(), 1.518);
+        assert_eq!(impact.corrected(), 0.589);
+        assert!((impact.delta() + 0.929).abs() < 1e-12);
+        assert_eq!(
+            impact.to_string(),
+            "correction impact: action=drop outcome_metric=sharpe_ratio uncorrected=1.518 \
+             corrected=0.589 delta=-0.929"
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_correction_that_changes_nothing_reports_a_zero_delta() {
+        let impact = DataQualityAction::Flag
+            .apply(Some("returns_volatility"), 0.25, 0.25)
+            .unwrap();
+
+        // The delta is exactly zero, and it is present rather than omitted.
+        assert_eq!(impact.delta(), 0.0);
+        assert!(impact.to_string().contains("delta=0"));
+    }
+
+    #[rstest::rstest]
+    #[case(None)]
+    #[case(Some(""))]
+    #[case(Some("   "))]
+    fn test_correction_without_a_declared_outcome_metric_is_refused(
+        #[case] outcome_metric: Option<&str>,
+    ) {
+        let error = DataQualityAction::Drop
+            .apply(outcome_metric, 1.0, 0.5)
+            .unwrap_err();
+
+        assert_eq!(error, CorrectionImpactError::MissingOutcomeMetric);
+        assert_eq!(
+            error.to_string(),
+            "a correction requires a declared outcome metric; none was declared"
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_correction_impact_is_rendered_beside_the_violation_counts() {
+        let mut counts = DataQualityCounts::default();
+        counts.record(DataQualityViolation::CrossedQuote);
+        counts.accept();
+        counts.set_correction_impact(
+            DataQualityAction::Drop
+                .apply(Some("sharpe_ratio"), 1.518, 0.589)
+                .unwrap(),
+        );
+
+        let line = counts.to_string();
+        let expected = concat!(
+            "data quality: total=2 accepted=1 rejected=1 crossed_quote=1 ",
+            "non_positive_value=0 out_of_order_timestamp=0 ",
+            "open_interest_change_exceeds_volume=0 settlement_total_mismatch=0 ",
+            "aggressor_sign_disagreement=0 correction impact: action=drop ",
+            "outcome_metric=sharpe_ratio uncorrected=1.518 corrected=0.589 delta=-0.929",
+        );
+        assert_eq!(line, expected);
+        assert_eq!(
+            counts.correction_impact().unwrap().outcome_metric(),
+            "sharpe_ratio"
+        );
     }
 }

@@ -30,6 +30,7 @@ from nautilus_trader.analysis import AvgWinner
 from nautilus_trader.analysis import BetaRatio
 from nautilus_trader.analysis import BreakevenCost
 from nautilus_trader.analysis import CalmarRatio
+from nautilus_trader.analysis import CorrectionImpactReport
 from nautilus_trader.analysis import CostBasisPoints
 from nautilus_trader.analysis import DownCaptureRatio
 from nautilus_trader.analysis import Expectancy
@@ -141,12 +142,19 @@ BENCHMARK_STATISTICS = [
     (UpCaptureRatio, "Up Capture Ratio"),
 ]
 
+# Statistics that carry the declared outcome metric a correction is measured against, so they are
+# not constructible with no arguments.
+REPORT_STATISTICS = [
+    (CorrectionImpactReport, "Correction Impact"),
+]
+
 ALL_STATISTICS = (
     NO_ARG_STATISTICS
     + PERIOD_STATISTICS
     + PARAMETERISED_STATISTICS
     + THRESHOLD_STATISTICS
     + BENCHMARK_STATISTICS
+    + REPORT_STATISTICS
 )
 STATISTIC_METHODS = (
     "calculate_from_positions",
@@ -165,6 +173,14 @@ EXPOSED_STATISTICS = sorted(
     ),
     key=lambda cls: cls.__name__,
 )
+
+
+def _construct_exposed_statistic(cls: object) -> object:
+    # Every exposed statistic is constructible with no arguments except the correction-impact
+    # report, which requires the declared outcome metric it reports.
+    if cls is CorrectionImpactReport:
+        return CorrectionImpactReport("sharpe_ratio", 1.0, 0.5)
+    return cls()
 
 
 @pytest.mark.parametrize(("cls", "expected_prefix"), NO_ARG_STATISTICS)
@@ -272,7 +288,7 @@ def test_pyo3_statistic_exposes_full_calculate_surface(
     """
     Test pyo3 statistic exposes full calculate surface.
     """
-    stat = cls()
+    stat = _construct_exposed_statistic(cls)
 
     # Every pyo3 statistic must expose all three calculate_from_* methods so the
     # Python PortfolioAnalyzer can iterate registered stats without AttributeError.
@@ -319,7 +335,7 @@ def test_portfolio_analyzer_register_and_deregister_statistic(cls: object) -> No
     Test portfolio analyzer register and deregister statistic.
     """
     analyzer = PortfolioAnalyzer()
-    stat = cls()
+    stat = _construct_exposed_statistic(cls)
 
     analyzer.register_statistic(stat)
 
@@ -377,7 +393,7 @@ def test_statistic_calculate_from_positions_rejects_non_position_objects(cls: ob
     Test statistic calculate from positions rejects non position objects.
     """
     with pytest.raises(TypeError, match="Position"):
-        cls().calculate_from_positions([DuckTypedPosition()])
+        _construct_exposed_statistic(cls).calculate_from_positions([DuckTypedPosition()])
 
 
 def test_undefined_cagr_and_calmar_ratio_return_nan() -> None:
@@ -1014,3 +1030,75 @@ def test_declared_scoring_chain_prints_each_stage_and_flags_a_missing_stage() ->
     assert "Metric Chain: forecast stage has no metric" not in stats.general
     assert "Account Outcome" not in stats.returns
     assert "Forecast Score" in stats.returns
+
+
+def test_correction_impact_report_names_the_metric_and_both_streams() -> None:
+    """
+    Test correction impact report names the metric and both streams.
+    """
+    report = CorrectionImpactReport("sharpe_ratio", 1.518, 0.589)
+
+    assert report.metric == "sharpe_ratio"
+    assert report.uncorrected == pytest.approx(1.518)
+    assert report.corrected == pytest.approx(0.589)
+    assert report.delta == pytest.approx(-0.929)
+
+
+def test_correction_impact_report_refuses_without_a_declared_metric() -> None:
+    """
+    Test correction impact report refuses without a declared metric.
+    """
+    # The refusal names what is missing rather than defaulting a metric for the caller.
+    with pytest.raises(ValueError, match="a correction requires a declared outcome metric"):
+        CorrectionImpactReport(None, 1.0, 0.5)
+
+    with pytest.raises(ValueError, match="a correction requires a declared outcome metric"):
+        CorrectionImpactReport("   ", 1.0, 0.5)
+
+
+def test_correction_impact_report_keeps_a_zero_delta() -> None:
+    """
+    Test correction impact report keeps a zero delta.
+    """
+    report = CorrectionImpactReport("returns_volatility", 0.25, 0.25)
+
+    assert report.delta == 0.0
+
+
+def test_analyzer_renders_the_correction_impact_beside_its_counts() -> None:
+    """
+    Test analyzer renders the correction impact beside its counts.
+    """
+    analyzer = PortfolioAnalyzer()
+    analyzer.set_correction_impact(CorrectionImpactReport("sharpe_ratio", 1.518, 0.589))
+
+    stats = analyzer.statistics()
+
+    assert stats.returns["Correction Impact: sharpe_ratio (uncorrected)"] == pytest.approx(1.518)
+    assert stats.returns["Correction Impact: sharpe_ratio (corrected)"] == pytest.approx(0.589)
+    assert stats.returns["Correction Impact: sharpe_ratio (delta)"] == pytest.approx(-0.929)
+
+
+def test_analyzer_renders_a_zero_delta_rather_than_omitting_the_row() -> None:
+    """
+    Test analyzer renders a zero delta rather than omitting the row.
+    """
+    analyzer = PortfolioAnalyzer()
+    analyzer.set_correction_impact(CorrectionImpactReport("returns_volatility", 0.25, 0.25))
+
+    stats = analyzer.statistics()
+
+    assert stats.returns["Correction Impact: returns_volatility (delta)"] == 0.0
+    assert "Correction Impact: returns_volatility (uncorrected)" in stats.returns
+    assert "Correction Impact: returns_volatility (corrected)" in stats.returns
+
+
+def test_analyzer_renders_no_correction_impact_row_when_none_is_set() -> None:
+    """
+    Test analyzer renders no correction impact row when none is set.
+    """
+    analyzer = PortfolioAnalyzer()
+
+    stats = analyzer.statistics()
+
+    assert not any(key.startswith("Correction Impact") for key in stats.returns)

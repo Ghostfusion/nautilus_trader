@@ -46,6 +46,7 @@ use crate::{
             ArithmeticCompoundingRatio, ArithmeticCompoundingRealisedEquity,
         },
         breakeven_cost::BreakevenCost,
+        correction_impact::CorrectionImpactReport,
         cost_basis_points::CostBasisPoints,
         expectancy::Expectancy,
         gross_return::GrossReturn,
@@ -164,6 +165,15 @@ pub struct PortfolioAnalyzer {
     /// read only by [`Self::statistics`], which marks the cost rows the model's fills contribute
     /// to.
     market_impact_label: Option<String>,
+    /// The measured effect of the data-quality correction applied to the run's stream, if any.
+    ///
+    /// `None` when no correction was applied or none declared an outcome metric, in which case no
+    /// correction-impact row is rendered: an absent measurement is not a zero delta. Set with
+    /// [`Self::set_correction_impact`] by whoever holds the correction beside the two
+    /// measurements of the declared metric, and read only by [`Self::statistics`], which renders
+    /// the uncorrected value, the corrected value and the delta, each naming the stream it came
+    /// from.
+    correction_impact: Option<CorrectionImpactReport>,
 }
 
 impl Default for PortfolioAnalyzer {
@@ -240,6 +250,7 @@ impl PortfolioAnalyzer {
             signed_order_flow_imbalance: None,
             fill_cause_counts: None,
             market_impact_label: None,
+            correction_impact: None,
         }
     }
 
@@ -285,6 +296,7 @@ impl PortfolioAnalyzer {
         self.signed_order_flow_imbalance = None;
         self.fill_cause_counts = None;
         self.market_impact_label = None;
+        self.correction_impact = None;
     }
 
     /// Returns all tracked currencies.
@@ -412,6 +424,25 @@ impl PortfolioAnalyzer {
     #[must_use]
     pub fn market_impact_label(&self) -> Option<&str> {
         self.market_impact_label.as_deref()
+    }
+
+    /// Sets the measured effect of the data-quality correction applied to the run's stream.
+    ///
+    /// The report is built by the caller that holds both measurements of the declared outcome
+    /// metric; the analyzer is a carrier, not a measurer, of it. `None` when no correction was
+    /// applied or none declared a metric, in which case no correction-impact row is rendered: an
+    /// absent measurement is not a zero delta. When `Some`, the uncorrected value, the corrected
+    /// value and their delta are rendered, each naming the stream it came from, and the zero delta
+    /// of a correction that changed nothing is rendered rather than omitted.
+    pub fn set_correction_impact(&mut self, impact: Option<CorrectionImpactReport>) {
+        self.correction_impact = impact;
+    }
+
+    /// Returns the measured effect of the data-quality correction applied to the run's stream, if
+    /// any.
+    #[must_use]
+    pub fn correction_impact(&self) -> Option<&CorrectionImpactReport> {
+        self.correction_impact.as_ref()
     }
 
     /// Returns the scoring-chain stage of every registered statistic that declares one.
@@ -572,6 +603,12 @@ impl PortfolioAnalyzer {
     /// When fill-cause totals have been set with [`Self::set_fill_cause_counts`], one row per
     /// cause is added to `general`, named for the cause, including the causes at zero: a zero is a
     /// fact and an omitted row is not. With no totals set, no cause row is produced.
+    ///
+    /// When a correction impact has been set with [`Self::set_correction_impact`], three rows are
+    /// added to `returns`, naming the declared metric and the stream each value came from: the
+    /// uncorrected value, the corrected value and their delta. A correction that changed nothing
+    /// renders a delta of exactly zero rather than omitting the row. With no impact set, no
+    /// correction-impact row is produced.
     #[must_use]
     pub fn statistics(&self) -> PortfolioStatistics {
         let mut pnls = AHashMap::new();
@@ -617,6 +654,26 @@ impl PortfolioAnalyzer {
             for (cause, count) in counts {
                 general.insert(format!("Fill Cause: {cause}"), *count as f64);
             }
+        }
+
+        // A correction and its effect are read together: each row names the stream it came from
+        // and the declared metric it measures, so a delta cannot be read without knowing what
+        // moved. A correction that changed nothing renders a delta of exactly zero rather than
+        // omitting the row.
+        if let Some(impact) = &self.correction_impact {
+            let metric = impact.metric();
+            returns.insert(
+                format!("Correction Impact: {metric} (uncorrected)"),
+                impact.uncorrected(),
+            );
+            returns.insert(
+                format!("Correction Impact: {metric} (corrected)"),
+                impact.corrected(),
+            );
+            returns.insert(
+                format!("Correction Impact: {metric} (delta)"),
+                impact.delta(),
+            );
         }
 
         // A number computed with an impact model whose parameters are not recoverable is marked
@@ -4114,5 +4171,79 @@ mod tests {
         assert_eq!(analyzer.aggressor_agreement(), None);
         assert_eq!(analyzer.aggressor_agreement_floor(), None);
         assert_eq!(analyzer.signed_order_flow_imbalance(), None);
+    }
+
+    #[rstest]
+    fn test_correction_impact_renders_both_streams_and_the_delta() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_correction_impact(Some(
+            CorrectionImpactReport::new(Some("sharpe_ratio"), 1.518, 0.589).unwrap(),
+        ));
+
+        let stats = analyzer.statistics();
+
+        assert_eq!(
+            stats.returns["Correction Impact: sharpe_ratio (uncorrected)"],
+            1.518
+        );
+        assert_eq!(
+            stats.returns["Correction Impact: sharpe_ratio (corrected)"],
+            0.589
+        );
+        assert_eq!(
+            stats.returns["Correction Impact: sharpe_ratio (delta)"],
+            0.589 - 1.518
+        );
+    }
+
+    #[rstest]
+    fn test_correction_impact_with_a_zero_delta_still_renders() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_correction_impact(Some(
+            CorrectionImpactReport::new(Some("returns_volatility"), 0.25, 0.25).unwrap(),
+        ));
+
+        let stats = analyzer.statistics();
+
+        // The row is present with a delta of exactly zero rather than omitted.
+        assert_eq!(
+            stats.returns["Correction Impact: returns_volatility (delta)"],
+            0.0
+        );
+        assert!(
+            stats
+                .returns
+                .contains_key("Correction Impact: returns_volatility (uncorrected)")
+        );
+        assert!(
+            stats
+                .returns
+                .contains_key("Correction Impact: returns_volatility (corrected)")
+        );
+    }
+
+    #[rstest]
+    fn test_no_correction_impact_renders_no_row() {
+        let analyzer = PortfolioAnalyzer::default();
+        let stats = analyzer.statistics();
+
+        assert!(
+            !stats
+                .returns
+                .keys()
+                .any(|key| key.starts_with("Correction Impact"))
+        );
+    }
+
+    #[rstest]
+    fn test_reset_clears_the_correction_impact() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_correction_impact(Some(
+            CorrectionImpactReport::new(Some("sharpe_ratio"), 1.518, 0.589).unwrap(),
+        ));
+
+        analyzer.reset();
+
+        assert!(analyzer.correction_impact().is_none());
     }
 }
