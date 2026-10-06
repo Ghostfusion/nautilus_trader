@@ -81,13 +81,14 @@ pub use measurement::{
     AdmittedDecision, CONFIDENCE_BANDS, CVAR_TAIL_FRACTION, CalibrationGroup, CalibrationReport,
     ConfidenceBand, Disposition, DispositionOutcome, EligibleSignal, Exclusions,
     ExecutionRealizationReport, FitModel, InformationCoefficient, InformationCoefficientPoint,
-    LabelProvenance, Metric, MetricComparison, MetricEstimate, ParameterEstimate,
-    ParameterRecovery, ParameterRecoveryReport, PolicyEffectReport, ProducerIdentity,
-    REDUNDANCY_CORRELATION_THRESHOLD, Realization, RecoveryCheck, RecoveryTolerance,
-    RecoveryVerdict, ReductionEffectReport, RedundancyReport, RiskDecision, ScoreCluster,
-    ScoreCorrelation, ScoreObservation, SignalQualityReport, confidence_calibration,
-    execution_realization, parameter_recovery, policy_effect, reduction_effect, redundancy,
-    restrict_to_regime, signal_quality,
+    LabelProvenance, MINIMUM_BOUND_SPECIFICATIONS, Metric, MetricComparison, MetricEstimate,
+    ParameterEstimate, ParameterRecovery, ParameterRecoveryReport, PolicyEffectReport,
+    ProducerIdentity, REDUNDANCY_CORRELATION_THRESHOLD, Realization, RecoveryCheck,
+    RecoveryTolerance, RecoveryVerdict, ReductionEffectReport, RedundancyReport, RiskDecision,
+    ScoreCluster, ScoreCorrelation, ScoreObservation, SignalQualityReport, SpecificationBound,
+    SpecificationBoundError, SpecificationBounds, SpecificationExtreme, confidence_calibration,
+    execution_realization, information_coefficient_bounds, parameter_recovery, policy_effect,
+    reduction_effect, redundancy, restrict_to_regime, signal_quality,
 };
 pub use membership::{MembershipInterval, MembershipRule, MembershipSeries, MembershipSpell};
 pub use operators::{

@@ -69,6 +69,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use nautilus_core::UnixNanos;
 use nautilus_model::{identifiers::InstrumentId, signal::SignalDirection};
 use serde::{Serialize, Serializer};
+use thiserror::Error;
 
 use crate::label::LabelDefinition;
 use crate::membership::MembershipSeries;
@@ -84,6 +85,14 @@ pub const CVAR_TAIL_FRACTION: f64 = 0.05;
 /// The absolute correlation at or above which two scores are treated as one hypothesis
 /// (`design 6.4`).
 pub const REDUNDANCY_CORRELATION_THRESHOLD: f64 = 0.7;
+
+/// The number of distinct declared specifications a bound pair needs before it can be compared
+/// (`design 6.2`).
+///
+/// One specification is one reading of a search, not a range: the pair's two extremes coincide
+/// with it, so a single declared specification is reported as uncheckable rather than as one
+/// figure.
+pub const MINIMUM_BOUND_SPECIFICATIONS: usize = 2;
 
 /// The producer identity carried by an admitted decision (`design 4 I12`).
 ///
@@ -339,6 +348,273 @@ pub struct InformationCoefficient {
     pub coverage_absent: usize,
     /// The number of observations whose forward label was absent.
     pub label_absent: usize,
+}
+
+impl InformationCoefficient {
+    /// Returns the coefficient's significance: the mean over its jackknife standard error.
+    ///
+    /// The significance is the distance of the coefficient's mean from zero in units of its own
+    /// uncertainty, so a mean of one standard error above zero has significance one. An absent mean
+    /// or standard error, or a non-positive standard error, is an explicit absence rather than a
+    /// zero.
+    #[must_use]
+    pub fn significance(&self) -> Option<f64> {
+        let mean = self.mean?;
+        let standard_error = self.standard_error?;
+        if standard_error > 0.0 {
+            Some(mean.abs() / standard_error)
+        } else {
+            None
+        }
+    }
+}
+
+/// Which extreme of a declared specification pair a reported bound names (`design 6.2`).
+///
+/// A bound is only comparable once it names the specification it was measured under and which end
+/// of the range it is, so the extreme travels with the value rather than being implied by a pair's
+/// order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SpecificationExtreme {
+    /// The higher bound: the reading under which the finding looks strongest.
+    MostFavourable,
+    /// The lower bound: the reading under which the finding looks weakest.
+    LeastFavourable,
+}
+
+impl SpecificationExtreme {
+    /// Returns the canonical lowercase name of the extreme.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::MostFavourable => "most_favourable",
+            Self::LeastFavourable => "least_favourable",
+        }
+    }
+}
+
+/// A significance bound together with the specification that produced it.
+///
+/// A bound whose specification is unnamed cannot be compared, so the name travels with the value.
+/// The extreme is carried too, so a caller cannot confuse which end of the range a bound is from
+/// the order a pair happens to be in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpecificationBound {
+    /// The declared specification the bound was measured under.
+    pub specification: String,
+    /// Which extreme of the declared pair this bound is.
+    pub extreme: SpecificationExtreme,
+    /// The bound's value.
+    pub value: f64,
+}
+
+/// The reasons a specification bound pair cannot be formed (`design 6.2`).
+#[derive(Clone, Debug, PartialEq, Error)]
+pub enum SpecificationBoundError {
+    /// A report that carries one bound rather than both extremes.
+    #[error(
+        "a significance bound report must carry both specification extremes: a single bound \
+         cannot be compared and is refused"
+    )]
+    SingleBound,
+    /// A bound whose specification is unnamed cannot be compared.
+    #[error("a significance bound must name the specification that produced it")]
+    UnnamedSpecification,
+    /// Fewer than two distinct declared specifications: the bound cannot be checked.
+    #[error(
+        "the significance bound could not be checked: the search declared {declared} distinct \
+         specification(s), and a bound is only a bound once it is read at two extremes"
+    )]
+    NotCheckable {
+        /// The number of distinct declared specifications.
+        declared: usize,
+    },
+    /// Two measurements record one specification, so the pair is ambiguous.
+    #[error("two measurements record the specification `{specification}`")]
+    DuplicateSpecification {
+        /// The duplicated specification.
+        specification: String,
+    },
+    /// The bound is not defined under a declared specification.
+    #[error("the significance bound is not defined under the specification `{specification}`")]
+    Undefined {
+        /// The specification that produced no bound.
+        specification: String,
+    },
+    /// A bound is labelled the wrong extreme for its position in the pair.
+    #[error("the {expected} bound is labelled {found}")]
+    MislabelledExtreme {
+        /// The extreme the position requires.
+        expected: &'static str,
+        /// The extreme the bound carries.
+        found: &'static str,
+    },
+    /// The pair is not ordered: the most favourable bound is below the least favourable one.
+    #[error("the most favourable bound {most} is below the least favourable bound {least}")]
+    Unordered {
+        /// The most favourable value.
+        most: f64,
+        /// The least favourable value.
+        least: f64,
+    },
+}
+
+/// A significance bound reported at both declared specification extremes (`design 6.2`).
+///
+/// The bound depends on the specification the finding was measured under, so a single figure is
+/// one reading of a search rather than a bound on the finding. This report carries the most and the
+/// least favourable declared specifications, each naming itself in its own bound, and refuses to
+/// exist with one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpecificationBounds {
+    /// The bound at the most favourable declared specification, which is the higher one.
+    pub most_favourable: SpecificationBound,
+    /// The bound at the least favourable declared specification, which is the lower one.
+    pub least_favourable: SpecificationBound,
+}
+
+impl SpecificationBounds {
+    /// Builds the pair from the bounds a report carries, refusing a single-bound report.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SpecificationBoundError::SingleBound`] unless exactly two bounds are given, one at
+    /// each extreme, and whatever [`Self::new`] refuses.
+    pub fn from_bounds(bounds: &[SpecificationBound]) -> Result<Self, SpecificationBoundError> {
+        if bounds.len() != MINIMUM_BOUND_SPECIFICATIONS {
+            return Err(SpecificationBoundError::SingleBound);
+        }
+
+        let most_favourable = bounds
+            .iter()
+            .find(|bound| bound.extreme == SpecificationExtreme::MostFavourable)
+            .ok_or(SpecificationBoundError::SingleBound)?
+            .clone();
+        let least_favourable = bounds
+            .iter()
+            .find(|bound| bound.extreme == SpecificationExtreme::LeastFavourable)
+            .ok_or(SpecificationBoundError::SingleBound)?
+            .clone();
+
+        Self::new(most_favourable, least_favourable)
+    }
+
+    /// Builds the pair from its two labelled bounds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SpecificationBoundError::MislabelledExtreme`] if a bound is not labelled for its
+    /// position, [`SpecificationBoundError::UnnamedSpecification`] if a specification is empty, and
+    /// [`SpecificationBoundError::Unordered`] if the most favourable bound is below the least
+    /// favourable one.
+    pub fn new(
+        most_favourable: SpecificationBound,
+        least_favourable: SpecificationBound,
+    ) -> Result<Self, SpecificationBoundError> {
+        if most_favourable.extreme != SpecificationExtreme::MostFavourable {
+            return Err(SpecificationBoundError::MislabelledExtreme {
+                expected: SpecificationExtreme::MostFavourable.name(),
+                found: most_favourable.extreme.name(),
+            });
+        }
+        if least_favourable.extreme != SpecificationExtreme::LeastFavourable {
+            return Err(SpecificationBoundError::MislabelledExtreme {
+                expected: SpecificationExtreme::LeastFavourable.name(),
+                found: least_favourable.extreme.name(),
+            });
+        }
+        if most_favourable.specification.is_empty() || least_favourable.specification.is_empty() {
+            return Err(SpecificationBoundError::UnnamedSpecification);
+        }
+        if most_favourable.value < least_favourable.value {
+            return Err(SpecificationBoundError::Unordered {
+                most: most_favourable.value,
+                least: least_favourable.value,
+            });
+        }
+
+        Ok(Self {
+            most_favourable,
+            least_favourable,
+        })
+    }
+}
+
+/// Returns the information coefficient's significance at both declared specification extremes.
+///
+/// Each entry pairs a declared specification name with the coefficient measured under it. The
+/// significance of each coefficient is [`InformationCoefficient::significance`], and the pair is
+/// the highest and the lowest of them, each naming its specification. Fewer than two distinct
+/// declared specifications is not a comparison: the bound could not be checked, and this returns an
+/// error rather than one figure. Ties break towards the first declared specification for both
+/// extremes, so a search that varied nothing that moves the bound reports two equal bounds naming
+/// one specification rather than one bound.
+///
+/// # Errors
+///
+/// Returns [`SpecificationBoundError::UnnamedSpecification`] if a specification name is empty,
+/// [`SpecificationBoundError::DuplicateSpecification`] if a specification is declared twice,
+/// [`SpecificationBoundError::NotCheckable`] if fewer than two distinct specifications are
+/// declared, [`SpecificationBoundError::Undefined`] if a coefficient has no significance under its
+/// specification, and whatever [`SpecificationBounds::new`] refuses.
+pub fn information_coefficient_bounds(
+    declared: &[(&str, &InformationCoefficient)],
+) -> Result<SpecificationBounds, SpecificationBoundError> {
+    let mut seen: Vec<&str> = Vec::with_capacity(declared.len());
+    for (specification, _) in declared.iter().copied() {
+        if specification.is_empty() {
+            return Err(SpecificationBoundError::UnnamedSpecification);
+        }
+        if seen.contains(&specification) {
+            return Err(SpecificationBoundError::DuplicateSpecification {
+                specification: specification.to_string(),
+            });
+        }
+        seen.push(specification);
+    }
+    if seen.len() < MINIMUM_BOUND_SPECIFICATIONS {
+        return Err(SpecificationBoundError::NotCheckable {
+            declared: seen.len(),
+        });
+    }
+
+    let mut most: Option<(usize, &str, f64)> = None;
+    let mut least: Option<(usize, &str, f64)> = None;
+    for (index, (specification, coefficient)) in declared.iter().copied().enumerate() {
+        let Some(value) = coefficient.significance() else {
+            return Err(SpecificationBoundError::Undefined {
+                specification: specification.to_string(),
+            });
+        };
+        if most.is_none_or(|(_, _, best)| value > best) {
+            most = Some((index, specification, value));
+        }
+        if least.is_none_or(|(_, _, best)| value < best) {
+            least = Some((index, specification, value));
+        }
+    }
+
+    let (_, most_specification, most_value) =
+        most.ok_or(SpecificationBoundError::NotCheckable {
+            declared: seen.len(),
+        })?;
+    let (_, least_specification, least_value) =
+        least.ok_or(SpecificationBoundError::NotCheckable {
+            declared: seen.len(),
+        })?;
+
+    SpecificationBounds::new(
+        SpecificationBound {
+            specification: most_specification.to_string(),
+            extreme: SpecificationExtreme::MostFavourable,
+            value: most_value,
+        },
+        SpecificationBound {
+            specification: least_specification.to_string(),
+            extreme: SpecificationExtreme::LeastFavourable,
+            value: least_value,
+        },
+    )
 }
 
 /// Experiment A: research signal quality, the research decision against a forward return

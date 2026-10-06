@@ -108,8 +108,14 @@ from nautilus_trader.optimization.significance import SharpeFrequency as SharpeF
 from nautilus_trader.optimization.significance import SharpeSample as SharpeSample
 from nautilus_trader.optimization.significance import SignificanceReport as SignificanceReport
 from nautilus_trader.optimization.significance import SignificanceResult as SignificanceResult
+from nautilus_trader.optimization.significance import SpecificationBound as SpecificationBound
+from nautilus_trader.optimization.significance import SpecificationBounds as SpecificationBounds
+from nautilus_trader.optimization.significance import SpecificationExtreme as SpecificationExtreme
 from nautilus_trader.optimization.significance import StatisticalContract as StatisticalContract
 from nautilus_trader.optimization.significance import TrialDependence as TrialDependence
+from nautilus_trader.optimization.significance import (
+    deflated_sharpe_bounds as deflated_sharpe_bounds,
+)
 from nautilus_trader.optimization.significance import deflated_sharpe_ratio as deflated_sharpe_ratio
 from nautilus_trader.optimization.significance import per_period_sharpe as per_period_sharpe
 from nautilus_trader.optimization.significance import return_moments as return_moments
@@ -193,6 +199,9 @@ __all__ = [
     "SignalWindow",
     "SignificanceReport",
     "SignificanceResult",
+    "SpecificationBound",
+    "SpecificationBounds",
+    "SpecificationExtreme",
     "Split",
     "SplitContract",
     "SplitDirection",
@@ -214,6 +223,7 @@ __all__ = [
     "WalkForwardResult",
     "WalkForwardStage",
     "WalkForwardWindow",
+    "deflated_sharpe_bounds",
     "deflated_sharpe_ratio",
     "gapped_range_capability",
     "history_capability",

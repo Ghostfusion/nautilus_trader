@@ -50,6 +50,16 @@ specification stated in the row's name. A single run still does not carry the se
 it, so the declaration stays explicit: the caller declares the trial counts and the specification
 its trials were run under.
 
+A single bound is not a bound on the finding. The multiple-testing bound depends on the
+specification the finding was measured under, and the published evidence puts the most and the
+least favourable readings of one literature a factor of five apart (8.5 percent on equal-weighted
+findings and 41.7 percent after value-weighting and a four-factor adjustment). `SpecificationBounds`
+therefore carries two bounds, one at each declared specification extreme, each naming the
+specification that produced it, and refuses to exist with one. `deflated_sharpe_bounds` picks the
+pair from the declared samples: the higher bound is the most favourable reading and the lower the
+least, and a search that declared a single specification cannot be checked at all rather than
+printed as one figure.
+
 The value is reported, never a gate: this module has no decision authority, and nothing here is
 consulted by a strategy, an order or a risk check. The correction is deliberately outside the
 compiled kernels, in agreement with the analysis statistics: it is a study-level statistic, not a
@@ -122,6 +132,10 @@ _SQRT_TWO_PI = math.sqrt(2.0 * math.pi)
 # do not lose precision on a long series.
 _MINIMUM_MOMENT_OBSERVATIONS = 2
 
+# Two declared specifications are the fewest a bound can be read against: one specification is one
+# reading, not a range, and the pair's two extremes coincide with it.
+_MINIMUM_BOUND_SPECIFICATIONS = 2
+
 # The vocabulary names, so a record states a status and a reason as text. The binding's enumeration
 # exposes its members as values without a name or a value string, so the mapping is explicit: a
 # change to the vocabulary fails here rather than silently emitting a repr.
@@ -185,6 +199,19 @@ class TrialDependence(Enum):
 
     INDEPENDENT = "independent"
     DEPENDENT = "dependent"
+
+
+class SpecificationExtreme(Enum):
+    """
+    Which extreme of a declared specification pair a reported bound is.
+
+    A bound is only comparable once it names the specification it was measured under and which end
+    of the range it is, so the extreme travels with the value rather than being implied by the
+    pair's order.
+    """
+
+    MOST_FAVOURABLE = "most_favourable"
+    LEAST_FAVOURABLE = "least_favourable"
 
 
 def _digest(payload: Mapping[str, object]) -> str:
@@ -837,6 +864,192 @@ class SignificanceResult:
         }
 
 
+@dataclass(frozen=True)
+class SpecificationBound:
+    """
+    A significance bound together with the specification that produced it.
+
+    A bound whose specification is unnamed cannot be compared, so the name travels with the value
+    rather than being reconstructed by the reader. The extreme is carried too, so a caller cannot
+    confuse which end of the range a bound is from the order a pair happens to be in.
+
+    Parameters
+    ----------
+    extreme : SpecificationExtreme
+        Which extreme of the declared specification pair this bound is.
+    specification : TrialSpecification
+        The specification the bound was measured under.
+    value : float
+        The bound: the deflated Sharpe ratio measured under the specification.
+
+    Raises
+    ------
+    TypeError
+        If a declaration has the wrong type.
+    ValueError
+        If the value is not finite.
+
+    """
+
+    extreme: SpecificationExtreme
+    specification: TrialSpecification
+    value: float
+
+    def __post_init__(self) -> None:
+        """
+        Validate the bound's declaration.
+        """
+        if not isinstance(self.extreme, SpecificationExtreme):
+            raise TypeError("extreme must be a SpecificationExtreme")
+        if not isinstance(self.specification, TrialSpecification):
+            raise TypeError("specification must be a TrialSpecification")
+        if not math.isfinite(self.value):
+            raise ValueError(f"value must be finite, was {self.value}")
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        """
+        Return the bound as a canonical mapping, stating the extreme and the specification name.
+
+        Returns
+        -------
+        dict[str, JsonValue]
+
+        """
+        return {
+            "extreme": self.extreme.value,
+            "specification": self.specification.to_dict(),
+            "specification_label": self.specification.label,
+            "value": self.value,
+        }
+
+
+@dataclass(frozen=True)
+class SpecificationBounds:
+    """
+    A significance bound reported at both declared specification extremes.
+
+    The bound depends on the specification the finding was measured under, so a single figure is
+    one reading of the search rather than a bound on the finding. This report carries the most and
+    the least favourable declared specifications, each naming itself in its own bound, and refuses
+    to exist with one: a report that does not carry both extremes is an error rather than a default.
+
+    Parameters
+    ----------
+    most_favourable : SpecificationBound
+        The bound at the most favourable declared specification, which is the higher one.
+    least_favourable : SpecificationBound
+        The bound at the least favourable declared specification, which is the lower one.
+
+    Raises
+    ------
+    TypeError
+        If a bound has the wrong type.
+    ValueError
+        If the pair is not ordered, or a bound is labelled the wrong extreme.
+
+    """
+
+    most_favourable: SpecificationBound
+    least_favourable: SpecificationBound
+
+    def __post_init__(self) -> None:
+        """
+        Validate the pair, which is a comparison rather than one number.
+        """
+        for name, bound in (
+            ("most_favourable", self.most_favourable),
+            ("least_favourable", self.least_favourable),
+        ):
+            if not isinstance(bound, SpecificationBound):
+                raise TypeError(f"{name} must be a SpecificationBound")
+
+        if self.most_favourable.extreme is not SpecificationExtreme.MOST_FAVOURABLE:
+            raise ValueError(
+                "the most favourable bound must be labelled most favourable, "
+                f"was {self.most_favourable.extreme.value}",
+            )
+        if self.least_favourable.extreme is not SpecificationExtreme.LEAST_FAVOURABLE:
+            raise ValueError(
+                "the least favourable bound must be labelled least favourable, "
+                f"was {self.least_favourable.extreme.value}",
+            )
+        if self.most_favourable.value < self.least_favourable.value:
+            raise ValueError(
+                "the most favourable bound must not be below the least favourable bound, "
+                f"was {self.most_favourable.value} below {self.least_favourable.value}",
+            )
+
+    @classmethod
+    def from_bounds(cls, bounds: Sequence[SpecificationBound]) -> SpecificationBounds:
+        """
+        Return the pair built from the bounds a report carries.
+
+        Exactly one bound at each extreme is required. A report that carries one bound, or two at
+        the same extreme, is refused rather than defaulted: one bound is not a comparison.
+
+        Parameters
+        ----------
+        bounds : Sequence[SpecificationBound]
+            The bounds the report carries.
+
+        Returns
+        -------
+        SpecificationBounds
+
+        Raises
+        ------
+        ValueError
+            If the bounds are not exactly one at each extreme.
+
+        """
+        if len(bounds) != _MINIMUM_BOUND_SPECIFICATIONS:
+            raise ValueError(
+                "a significance bound report must carry both specification extremes: "
+                f"a single bound cannot be compared and is refused, got {len(bounds)}",
+            )
+
+        by_extreme = {bound.extreme: bound for bound in bounds}
+        if set(by_extreme) != {
+            SpecificationExtreme.MOST_FAVOURABLE,
+            SpecificationExtreme.LEAST_FAVOURABLE,
+        }:
+            raise ValueError(
+                "a significance bound report must carry both specification extremes: "
+                "a single bound cannot be compared and is refused",
+            )
+
+        return cls(
+            most_favourable=by_extreme[SpecificationExtreme.MOST_FAVOURABLE],
+            least_favourable=by_extreme[SpecificationExtreme.LEAST_FAVOURABLE],
+        )
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        """
+        Return the report as a canonical mapping, both extremes stated.
+
+        Returns
+        -------
+        dict[str, JsonValue]
+
+        """
+        return {
+            "most_favourable": self.most_favourable.to_dict(),
+            "least_favourable": self.least_favourable.to_dict(),
+        }
+
+    @property
+    def digest(self) -> str:
+        """
+        Return the digest of the report.
+
+        Returns
+        -------
+        str
+
+        """
+        return _digest(self.to_dict())
+
+
 def deflated_sharpe_ratio(
     sample: SharpeSample,
     *,
@@ -939,6 +1152,103 @@ def deflated_sharpe_ratio(
         status=MetricStatus.COMPUTED,
         value=value,
         trial_variance=trial_variance,
+    )
+
+
+def deflated_sharpe_bounds(
+    samples: Sequence[SharpeSample],
+    *,
+    contract: StatisticalContract | None = None,
+) -> SpecificationBounds:
+    """
+    Return the deflated Sharpe ratio at both declared specification extremes.
+
+    Each sample declares the specification it was found under, so the correction can be computed
+    once per specification and the search read as a range rather than as one number. The higher
+    bound is the most favourable reading of the search and the lower is the least, and each bound
+    names the specification that produced it.
+
+    A bound is only a bound once it is read at two extremes. A search that declared a single
+    specification is refused with `could not be checked` rather than reported as one figure, and a
+    sample that records no specification is refused because an unnamed bound cannot be compared.
+    Ties are broken towards the first declared specification, so a search that varied nothing that
+    moves the bound reports two equal bounds naming one specification rather than one bound.
+
+    Parameters
+    ----------
+    samples : Sequence[SharpeSample]
+        One sample per declared specification, each recording the specification it was found under.
+    contract : StatisticalContract | None, default None
+        The contract to compute under, or None for the declared default.
+
+    Returns
+    -------
+    SpecificationBounds
+        The most and least favourable declared specifications and their bounds.
+
+    Raises
+    ------
+    ValueError
+        If a sample records no specification, two samples record one specification, fewer than two
+        distinct specifications are declared, or the correction is not computed under a declared
+        specification.
+
+    """
+    declared: dict[str, tuple[TrialSpecification, SharpeSample]] = {}
+
+    for sample in samples:
+        specification = sample.specification
+        if specification is None:
+            raise ValueError(
+                "a significance bound must name the specification that produced it: "
+                "a sample records none",
+            )
+        if specification.digest in declared:
+            raise ValueError(
+                f"two samples record the specification {specification.label!r}: "
+                "one bound per declared specification is compared",
+            )
+        declared[specification.digest] = (specification, sample)
+
+    if len(declared) < _MINIMUM_BOUND_SPECIFICATIONS:
+        if not declared:
+            raise ValueError(
+                "the significance bound could not be checked: the search declared no specification",
+            )
+        specification = next(iter(declared.values()))[0]
+        raise ValueError(
+            "the significance bound could not be checked: the search declared a single "
+            f"specification ({specification.label}), and a bound is only a bound once it is read "
+            "at two extremes",
+        )
+
+    measured: list[tuple[int, TrialSpecification, float]] = []
+
+    for index, (specification, sample) in enumerate(declared.values()):
+        result = deflated_sharpe_ratio(sample, contract=contract)
+        if result.value is None:
+            raise ValueError(
+                f"the significance bound is not computed under the specification "
+                f"{specification.label!r}",
+            )
+        measured.append((index, specification, result.value))
+
+    # The ties break towards the first declared specification for both extremes, so a set of
+    # specifications whose bounds coincide reads as two equal bounds naming one specification.
+    most_favourable = max(measured, key=lambda item: (item[2], -item[0]))
+    least_favourable = min(measured, key=lambda item: (item[2], item[0]))
+
+    return SpecificationBounds(
+        most_favourable=SpecificationBound(
+            extreme=SpecificationExtreme.MOST_FAVOURABLE,
+            specification=most_favourable[1],
+            value=most_favourable[2],
+        ),
+        least_favourable=SpecificationBound(
+            extreme=SpecificationExtreme.LEAST_FAVOURABLE,
+            specification=least_favourable[1],
+            value=least_favourable[2],
+        ),
     )
 
 

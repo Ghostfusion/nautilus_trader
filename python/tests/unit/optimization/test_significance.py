@@ -41,11 +41,15 @@ from nautilus_trader.optimization import SelectionRule
 from nautilus_trader.optimization import SharpeFrequency
 from nautilus_trader.optimization import SharpeSample
 from nautilus_trader.optimization import SignificanceResult
+from nautilus_trader.optimization import SpecificationBound
+from nautilus_trader.optimization import SpecificationBounds
+from nautilus_trader.optimization import SpecificationExtreme
 from nautilus_trader.optimization import StatisticalContract
 from nautilus_trader.optimization import StudyIdentity
 from nautilus_trader.optimization import TrialDependence
 from nautilus_trader.optimization import TrialSpecification
 from nautilus_trader.optimization import UniverseIdentity
+from nautilus_trader.optimization import deflated_sharpe_bounds
 from nautilus_trader.optimization import deflated_sharpe_ratio
 from nautilus_trader.optimization import per_period_sharpe
 from nautilus_trader.optimization import return_moments
@@ -865,3 +869,149 @@ def test_the_deflated_sharpe_statistic_is_unavailable_rather_than_zero() -> None
     }
 
     assert statistic.calculate_from_returns(short) is None
+
+
+def _equal_weighted_specification() -> TrialSpecification:
+    """
+    Return a second declared specification, distinct from `_specification`.
+    """
+    return TrialSpecification(
+        data_window=(1_000, 2_000),
+        universe_rule="top_500_by_capitalisation",
+        weighting="equal",
+    )
+
+
+def test_the_bound_is_reported_at_both_specification_extremes() -> None:
+    """
+    Test a bound that differs across the declared specifications is reported as both, named.
+    """
+    equal = _equal_weighted_specification()
+    value_weighted = _specification()
+
+    # The specifications read the same search differently: the value-weighted, four-factor reading
+    # deflates the selected estimate further, which is the least favourable reading of the two.
+    favourable = _sample(specification=equal)
+    unfavourable = _sample(specification=value_weighted, sharpe=0.6)
+
+    bounds = deflated_sharpe_bounds([favourable, unfavourable], contract=_FORMULA_CONTRACT)
+
+    assert bounds.most_favourable.value == pytest.approx(0.9516126683175339, rel=1e-12)
+    assert bounds.least_favourable.value < bounds.most_favourable.value
+
+    # Each bound names the specification that produced it, and states which extreme it is.
+    assert bounds.most_favourable.extreme is SpecificationExtreme.MOST_FAVOURABLE
+    assert bounds.most_favourable.specification == equal
+    assert bounds.least_favourable.extreme is SpecificationExtreme.LEAST_FAVOURABLE
+    assert bounds.least_favourable.specification == value_weighted
+
+    emitted = bounds.to_dict()
+    assert emitted["most_favourable"]["extreme"] == "most_favourable"
+    assert emitted["most_favourable"]["specification_label"] == equal.label
+    assert emitted["least_favourable"]["extreme"] == "least_favourable"
+    assert emitted["least_favourable"]["specification_label"] == value_weighted.label
+    assert emitted["most_favourable"]["specification"] == equal.to_dict()
+    assert (
+        bounds.digest
+        == deflated_sharpe_bounds(
+            [favourable, unfavourable],
+            contract=_FORMULA_CONTRACT,
+        ).digest
+    )
+
+
+def test_a_single_bound_report_is_refused() -> None:
+    """
+    Test one bound is not a comparison and is refused rather than defaulted.
+    """
+    bound = SpecificationBound(
+        extreme=SpecificationExtreme.MOST_FAVOURABLE,
+        specification=_equal_weighted_specification(),
+        value=0.5,
+    )
+
+    with pytest.raises(ValueError, match="must carry both specification extremes"):
+        SpecificationBounds.from_bounds([bound])
+
+    with pytest.raises(ValueError, match="must carry both specification extremes"):
+        SpecificationBounds.from_bounds([bound, bound])
+
+
+def test_a_search_that_declared_one_specification_could_not_be_checked() -> None:
+    """
+    Test a single declared specification is refused rather than printed as one figure.
+    """
+    specification = _equal_weighted_specification()
+
+    with pytest.raises(ValueError, match="could not be checked"):
+        deflated_sharpe_bounds(
+            [_sample(specification=specification)],
+            contract=_FORMULA_CONTRACT,
+        )
+
+    # Two samples that record one specification are still one declared specification.
+    with pytest.raises(ValueError, match="one bound per declared specification"):
+        deflated_sharpe_bounds(
+            [
+                _sample(specification=specification),
+                _sample(specification=specification, sharpe=0.6),
+            ],
+            contract=_FORMULA_CONTRACT,
+        )
+
+    # A bound whose specification is unnamed cannot be compared.
+    with pytest.raises(ValueError, match="must name the specification"):
+        deflated_sharpe_bounds(
+            [_sample(specification=specification), _sample()],
+            contract=_FORMULA_CONTRACT,
+        )
+
+
+def test_coincident_extremes_read_as_two_equal_bounds_naming_one_specification() -> None:
+    """
+    Test a search that varied nothing that moves the bound is not read as one bound.
+    """
+    first = _equal_weighted_specification()
+    second = TrialSpecification(
+        data_window=(1_000, 2_000),
+        universe_rule="all_listed",
+        weighting="equal",
+    )
+
+    bounds = deflated_sharpe_bounds(
+        [_sample(specification=first), _sample(specification=second)],
+        contract=_FORMULA_CONTRACT,
+    )
+
+    assert bounds.most_favourable.value == bounds.least_favourable.value
+    assert bounds.most_favourable.specification == first
+    assert bounds.least_favourable.specification == first
+    assert bounds.most_favourable.extreme is not bounds.least_favourable.extreme
+
+
+def test_a_bound_pair_refuses_an_unordered_or_mislabelled_pair() -> None:
+    """
+    Test the pair states which extreme is which rather than relying on its order.
+    """
+    low = SpecificationBound(
+        extreme=SpecificationExtreme.MOST_FAVOURABLE,
+        specification=_equal_weighted_specification(),
+        value=0.2,
+    )
+    high = SpecificationBound(
+        extreme=SpecificationExtreme.LEAST_FAVOURABLE,
+        specification=_specification(),
+        value=0.8,
+    )
+
+    with pytest.raises(ValueError, match="must not be below"):
+        SpecificationBounds(most_favourable=low, least_favourable=high)
+
+    labelled_most = SpecificationBound(
+        extreme=SpecificationExtreme.MOST_FAVOURABLE,
+        specification=_specification(),
+        value=0.8,
+    )
+
+    with pytest.raises(ValueError, match="must be labelled least favourable"):
+        SpecificationBounds(most_favourable=labelled_most, least_favourable=labelled_most)
