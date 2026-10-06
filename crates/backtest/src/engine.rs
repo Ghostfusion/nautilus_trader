@@ -51,7 +51,9 @@ use nautilus_core::{
     string::formatting::Separable, time::nanos_since_unix_epoch,
 };
 use nautilus_data::client::DataClientAdapter;
-use nautilus_execution::models::fill::FillModelHandle;
+use nautilus_execution::{
+    matching_engine::fill_cause::FillCauseCounts, models::fill::FillModelHandle,
+};
 use nautilus_model::{
     accounts::{Account, AccountAny},
     data::{Data, DataBatch, DataRef, HasTsInit},
@@ -1137,6 +1139,11 @@ impl BacktestEngine {
         self.run_finished = Some(UnixNanos::from(nanos_since_unix_epoch()));
         self.backtest_end = Some(self.kernel.clock.borrow().timestamp_ns());
 
+        // The engines have stopped, so their counts are final; carry them onto the portfolio now,
+        // before any statistics read, so `Portfolio::statistics` and the result agree whichever is
+        // read first.
+        self.carry_result_provenance();
+
         // Switch logging back to realtime mode
         logging_clock_set_realtime_mode();
 
@@ -1330,6 +1337,35 @@ impl BacktestEngine {
         }
     }
 
+    /// Carries the run's observable provenance onto the portfolio.
+    ///
+    /// The observed aggressor-agreement rate lives on the data engine's counts and the declared
+    /// floor on the data engine's config, while the refusal belongs to the portfolio's analysis;
+    /// the engine's signed order-flow imbalance is the tape-fed value that metric reports. The
+    /// venue's per-cause fill totals meet the analysis at the same point. The portfolio is the one
+    /// place that rebuilds the analyzer for every statistics read, so the values are set there
+    /// rather than on an analyzer built for a single call: [`Portfolio::statistics`] and the
+    /// backtest result then agree, whichever is read first.
+    fn carry_result_provenance(&self) {
+        let data_engine = self.kernel.data_engine.borrow();
+        let observed = data_engine.data_quality_counts().aggressor_agreement_rate();
+        let floor = data_engine.config().aggressor_agreement_floor;
+        let imbalance = data_engine.signed_order_flow_imbalance();
+        drop(data_engine);
+
+        // Every cause is carried, including the causes at zero, so a report renders a row for
+        // each cause rather than only the causes that occurred.
+        let mut fill_cause_counts = FillCauseCounts::new();
+        for exchange in self.venues.values() {
+            fill_cause_counts.merge(&exchange.borrow().fill_cause_counts());
+        }
+
+        let mut portfolio = self.kernel.portfolio.borrow_mut();
+        portfolio.set_aggressor_agreement(observed, floor);
+        portfolio.set_signed_order_flow_imbalance(imbalance);
+        portfolio.set_fill_cause_counts(Some(fill_cause_counts.to_string_map()));
+    }
+
     /// Return the backtest result from the last run.
     #[must_use]
     pub fn get_result(&self) -> BacktestResult {
@@ -1357,6 +1393,10 @@ impl BacktestEngine {
             cached_positions_count,
             snapshot_positions,
         );
+
+        // Re-carry the run's provenance in case this is read without the run's end sequence having
+        // populated it; the call is idempotent.
+        self.carry_result_provenance();
 
         let stats = self.kernel.portfolio.borrow().statistics();
         let stats_pnls = stats.pnls;
@@ -1607,6 +1647,12 @@ impl BacktestEngine {
             .clone();
         if data_quality.rejected() > 0 {
             summary.insert("data_quality".to_string(), data_quality.to_string());
+        }
+        // The observed aggressor-agreement rate is a run figure even when the gate flagged
+        // nothing: it is what a declared floor is compared against, so it is reported whenever a
+        // trade was compared rather than only when a violation was recorded.
+        if let Some(rate) = data_quality.aggressor_agreement_rate() {
+            summary.insert("aggressor_agreement".to_string(), rate.to_string());
         }
 
         summary

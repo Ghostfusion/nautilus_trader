@@ -120,6 +120,7 @@ use nautilus_persistence::test_data::RustTestCustomData;
 #[cfg(feature = "streaming")]
 use nautilus_serialization::ensure_custom_data_registered;
 use rstest::*;
+use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use ustr::Ustr;
 
@@ -2141,6 +2142,25 @@ fn make_trade(
     )
 }
 
+fn make_trade_signed(
+    instrument_id: InstrumentId,
+    price: &str,
+    size: u64,
+    aggressor_side: AggressorSide,
+    trade_id: &str,
+    ts: u64,
+) -> TradeTick {
+    TradeTick::new(
+        instrument_id,
+        Price::from(price),
+        Quantity::from(size),
+        aggressor_side,
+        TradeId::new(trade_id),
+        UnixNanos::from(ts),
+        UnixNanos::from(ts),
+    )
+}
+
 fn make_quote(instrument_id: InstrumentId, bid: &str, ask: &str, ts: u64) -> QuoteTick {
     QuoteTick::new(
         instrument_id,
@@ -2281,6 +2301,324 @@ fn test_data_quality_counts_reset(stub_msgbus: Rc<RefCell<MessageBus>>) {
     assert_eq!(counts.rejected(), 0);
     assert_eq!(counts.accepted(), 0);
     assert_eq!(counts.total(), 0);
+}
+
+#[rstest]
+fn test_data_quality_aggressor_disagreement_reports_half_agreement(
+    stub_msgbus: Rc<RefCell<MessageBus>>,
+) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .data_quality_action(DataQualityAction::Flag)
+        .build();
+    let (engine, _cache) = quality_engine(config);
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    // Prices alternate, so the tick rule infers buy, sell, buy, ...; every trade reports buy, so
+    // the inferred sells disagree and the agreement rate is one half.
+    for i in 0..11u64 {
+        let price = if i % 2 == 0 { "100.00" } else { "101.00" };
+        engine
+            .borrow_mut()
+            .process_data(Data::Trade(make_trade_signed(
+                instrument_id,
+                price,
+                1,
+                AggressorSide::Buy,
+                &format!("A-{i}"),
+                i + 1,
+            )));
+    }
+
+    let counts = engine.borrow().data_quality_counts().clone();
+    assert_eq!(counts.aggressor_comparisons(), 10);
+    assert_eq!(
+        counts.count(DataQualityViolation::AggressorSignDisagreement),
+        5
+    );
+    let rate = (counts.aggressor_comparisons()
+        - counts.count(DataQualityViolation::AggressorSignDisagreement)) as f64
+        / counts.aggressor_comparisons() as f64;
+    assert!((rate - 0.5).abs() < 1e-12, "agreement rate was {rate}");
+}
+
+#[rstest]
+fn test_data_quality_aggressor_matching_tick_rule_agrees_fully(
+    stub_msgbus: Rc<RefCell<MessageBus>>,
+) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .data_quality_action(DataQualityAction::Flag)
+        .build();
+    let (engine, _cache) = quality_engine(config);
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    // Every reported side matches the tick-rule inference from the previous price.
+    for i in 0..11u64 {
+        let (price, side) = if i % 2 == 0 {
+            ("100.00", AggressorSide::Sell)
+        } else {
+            ("101.00", AggressorSide::Buy)
+        };
+        engine
+            .borrow_mut()
+            .process_data(Data::Trade(make_trade_signed(
+                instrument_id,
+                price,
+                1,
+                side,
+                &format!("M-{i}"),
+                i + 1,
+            )));
+    }
+
+    let counts = engine.borrow().data_quality_counts().clone();
+    assert_eq!(counts.aggressor_comparisons(), 10);
+    assert_eq!(
+        counts.count(DataQualityViolation::AggressorSignDisagreement),
+        0
+    );
+    let rate = (counts.aggressor_comparisons()
+        - counts.count(DataQualityViolation::AggressorSignDisagreement)) as f64
+        / counts.aggressor_comparisons() as f64;
+    assert_eq!(rate, 1.0);
+}
+
+#[rstest]
+fn test_signed_order_flow_imbalance_and_agreement_rate_from_the_tape(
+    stub_msgbus: Rc<RefCell<MessageBus>>,
+) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .data_quality_action(DataQualityAction::Flag)
+        .build();
+    let (engine, _cache) = quality_engine(config);
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    // Prices alternate, so the tick rule infers buy, sell, buy, ...; every trade reports buy, so
+    // the inferred sells disagree. Six trades at size 2 are five comparisons with two
+    // disagreements, an agreement rate of 0.6, and a reported-buy imbalance of +12.
+    let prices = ["100.00", "101.00", "100.00", "101.00", "100.00", "101.00"];
+    for (i, price) in prices.iter().enumerate() {
+        engine
+            .borrow_mut()
+            .process_data(Data::Trade(make_trade_signed(
+                instrument_id,
+                price,
+                2,
+                AggressorSide::Buy,
+                &format!("S-{i}"),
+                i as u64 + 1,
+            )));
+    }
+
+    let counts = engine.borrow().data_quality_counts().clone();
+    assert_eq!(counts.aggressor_comparisons(), 5);
+    assert_eq!(
+        counts.count(DataQualityViolation::AggressorSignDisagreement),
+        2
+    );
+    assert_eq!(counts.aggressor_agreement_rate(), Some(0.6));
+    assert_eq!(
+        engine.borrow().signed_order_flow_imbalance(),
+        Some(Decimal::from(12))
+    );
+
+    // A reported sell subtracts its size; it also agrees with the tick rule here (price 100 fell
+    // from 101), so the rate becomes four of six.
+    engine
+        .borrow_mut()
+        .process_data(Data::Trade(make_trade_signed(
+            instrument_id,
+            "100.00",
+            3,
+            AggressorSide::Sell,
+            "S-6",
+            7,
+        )));
+
+    let counts = engine.borrow().data_quality_counts().clone();
+    assert_eq!(counts.aggressor_comparisons(), 6);
+    assert_eq!(counts.aggressor_agreement_rate(), Some(4.0 / 6.0));
+    assert_eq!(
+        engine.borrow().signed_order_flow_imbalance(),
+        Some(Decimal::from(9))
+    );
+
+    // A trade with no reported aggressor contributes nothing to the imbalance and is not compared.
+    engine
+        .borrow_mut()
+        .process_data(Data::Trade(make_trade_signed(
+            instrument_id,
+            "100.00",
+            5,
+            AggressorSide::NoAggressor,
+            "S-7",
+            8,
+        )));
+
+    assert_eq!(
+        engine.borrow().signed_order_flow_imbalance(),
+        Some(Decimal::from(9))
+    );
+    assert_eq!(
+        engine
+            .borrow()
+            .data_quality_counts()
+            .aggressor_comparisons(),
+        6
+    );
+}
+
+#[rstest]
+fn test_signed_order_flow_imbalance_is_absent_without_a_signed_trade(
+    stub_msgbus: Rc<RefCell<MessageBus>>,
+) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .data_quality_action(DataQualityAction::Flag)
+        .build();
+    let (engine, _cache) = quality_engine(config);
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    engine
+        .borrow_mut()
+        .process_data(Data::Trade(make_trade_signed(
+            instrument_id,
+            "100.00",
+            1,
+            AggressorSide::NoAggressor,
+            "N-0",
+            1,
+        )));
+
+    // No signed trade was seen, so the imbalance is absent rather than a measured zero, and no
+    // trade was compared, so the agreement rate is absent too.
+    assert_eq!(engine.borrow().signed_order_flow_imbalance(), None);
+    assert_eq!(
+        engine
+            .borrow()
+            .data_quality_counts()
+            .aggressor_agreement_rate(),
+        None
+    );
+}
+
+#[rstest]
+#[should_panic(expected = "aggressor_agreement_floor")]
+fn test_out_of_range_aggressor_floor_is_refused_at_construction(
+    stub_msgbus: Rc<RefCell<MessageBus>>,
+) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .aggressor_agreement_floor(1.5)
+        .build();
+
+    // The engine refuses the invalid floor at construction rather than carrying it into a run.
+    let _ = quality_engine(config);
+}
+
+#[rstest]
+fn test_data_quality_gate_leaves_clean_tape_counts_unchanged(stub_msgbus: Rc<RefCell<MessageBus>>) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .data_quality_action(DataQualityAction::Flag)
+        .build();
+    let (engine, _cache) = quality_engine(config);
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    engine.borrow_mut().process_data(Data::Quote(make_quote(
+        instrument_id,
+        "100.00",
+        "100.10",
+        1,
+    )));
+    engine.borrow_mut().process_data(Data::Quote(make_quote(
+        instrument_id,
+        "100.00",
+        "100.10",
+        2,
+    )));
+    for i in 0..3u64 {
+        engine
+            .borrow_mut()
+            .process_data(Data::Trade(make_trade_signed(
+                instrument_id,
+                "100.00",
+                1,
+                AggressorSide::NoAggressor,
+                &format!("N-{i}"),
+                i + 3,
+            )));
+    }
+
+    let counts = engine.borrow().data_quality_counts().clone();
+    assert_eq!(counts.accepted(), 5);
+    assert_eq!(counts.rejected(), 0);
+    assert_eq!(counts.total(), 5);
+    assert_eq!(counts.aggressor_comparisons(), 0);
+    for violation in DataQualityViolation::ALL {
+        assert_eq!(counts.count(violation), 0, "{violation}");
+    }
+}
+
+#[rstest]
+fn test_data_quality_no_aggressor_trade_is_not_compared(stub_msgbus: Rc<RefCell<MessageBus>>) {
+    let _ = stub_msgbus;
+    let config = DataEngineConfig::builder()
+        .data_quality_action(DataQualityAction::Flag)
+        .build();
+    let (engine, _cache) = quality_engine(config);
+    let instrument_id = InstrumentId::from("ETHUSDT-PERP.BINANCE");
+
+    let tape = [
+        ("100.00", AggressorSide::Sell),
+        ("101.00", AggressorSide::Buy),
+        ("100.00", AggressorSide::Sell),
+        ("101.00", AggressorSide::Buy),
+    ];
+    for (i, (price, side)) in tape.iter().enumerate() {
+        engine
+            .borrow_mut()
+            .process_data(Data::Trade(make_trade_signed(
+                instrument_id,
+                price,
+                1,
+                *side,
+                &format!("D-{i}"),
+                i as u64 + 1,
+            )));
+    }
+
+    let before = engine.borrow().data_quality_counts().clone();
+    assert_eq!(before.aggressor_comparisons(), 3);
+    assert_eq!(
+        before.count(DataQualityViolation::AggressorSignDisagreement),
+        0
+    );
+
+    // A `NoAggressor` trade is not compared: it lowers neither the compared total nor the rate.
+    engine
+        .borrow_mut()
+        .process_data(Data::Trade(make_trade_signed(
+            instrument_id,
+            "102.00",
+            1,
+            AggressorSide::NoAggressor,
+            "D-n",
+            5,
+        )));
+
+    let after = engine.borrow().data_quality_counts().clone();
+    assert_eq!(after.aggressor_comparisons(), 3);
+    assert_eq!(
+        after.count(DataQualityViolation::AggressorSignDisagreement),
+        0
+    );
+    let rate = (after.aggressor_comparisons()
+        - after.count(DataQualityViolation::AggressorSignDisagreement)) as f64
+        / after.aggressor_comparisons() as f64;
+    assert_eq!(rate, 1.0);
 }
 
 fn recorded_bars_request(recorder: &Rc<RefCell<Vec<DataCommand>>>, index: usize) -> RequestBars {

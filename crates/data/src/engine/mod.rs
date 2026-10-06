@@ -108,8 +108,8 @@ use nautilus_model::{
         option_chain::{OptionGreeks, StrikeRange},
     },
     enums::{
-        AggregationSource, BarAggregation, BookType, InstrumentClass, MarketStatusAction,
-        PriceType, RecordFlag,
+        AggregationSource, AggressorSide, BarAggregation, BookType, InstrumentClass,
+        MarketStatusAction, PriceType, RecordFlag,
     },
     identifiers::{
         ClientId, GENERIC_SPREAD_ID_SEPARATOR, InstrumentId, OptionSeriesId, Symbol, Venue,
@@ -120,6 +120,7 @@ use nautilus_model::{
 };
 use quality::{
     DataQualityAction, DataQualityCounts, DataQualityViolation, classify_quote, classify_trade,
+    infer_aggressor_side,
 };
 use requests::{
     ContinuousFutureRequest, ContinuousFutureRequestState, ContinuousFutureSegment,
@@ -128,6 +129,7 @@ use requests::{
     has_continuous_future_params, request_bar_aggregation_from_params, request_params,
     response_params,
 };
+use rust_decimal::Decimal;
 #[cfg(feature = "streaming")]
 use streaming::CatalogMap;
 use time_range::{
@@ -210,6 +212,15 @@ pub struct DataEngine {
     response_count: u64,
     data_quality_counts: DataQualityCounts,
     data_quality_last_ts: AHashMap<InstrumentId, UnixNanos>,
+    data_quality_last_trade_price: AHashMap<InstrumentId, Price>,
+    /// The signed order-flow imbalance accumulated from the engine's own trade tape, if any.
+    ///
+    /// A buy-aggressed trade adds its size, a sell-aggressed trade subtracts it, and a
+    /// `NoAggressor` trade contributes nothing. The sum is exact in the instrument's size units
+    /// and is signed by the *reported* aggressor side; how far that sign can be trusted is the
+    /// data-quality gate's question, not this accumulator's. It is `None` until a trade with a
+    /// buy or sell aggressor is seen, so an empty tape leaves the value absent rather than zero.
+    signed_order_flow_imbalance: Option<Decimal>,
     #[cfg(feature = "streaming")]
     catalogs: CatalogMap,
     #[cfg(feature = "defi")]
@@ -224,6 +235,11 @@ pub struct DataEngine {
 
 impl DataEngine {
     /// Creates a new [`DataEngine`] instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the supplied config declares an aggressor-agreement floor outside the unit
+    /// interval, which [`DataEngineConfig::validate`] refuses.
     #[must_use]
     pub fn new(
         clock: Rc<RefCell<dyn Clock>>,
@@ -231,6 +247,11 @@ impl DataEngine {
         config: Option<DataEngineConfig>,
     ) -> Self {
         let config = config.unwrap_or_default();
+        // The floor is a declared threshold, so an out-of-range value is refused at construction
+        // rather than carried into a run where it would silently compare against a rate.
+        if let Err(e) = config.validate() {
+            panic!("Invalid `DataEngineConfig`: {e}");
+        }
         let external_clients: AHashSet<ClientId> = config
             .external_clients
             .clone()
@@ -291,6 +312,8 @@ impl DataEngine {
             response_count: 0,
             data_quality_counts: DataQualityCounts::default(),
             data_quality_last_ts: AHashMap::new(),
+            data_quality_last_trade_price: AHashMap::new(),
+            signed_order_flow_imbalance: None,
             #[cfg(feature = "streaming")]
             catalogs: CatalogMap::new(),
             #[cfg(feature = "defi")]
@@ -441,6 +464,19 @@ impl DataEngine {
     #[must_use]
     pub fn data_quality_counts(&self) -> &DataQualityCounts {
         &self.data_quality_counts
+    }
+
+    /// Returns the signed order-flow imbalance accumulated from the engine's own trade tape.
+    ///
+    /// The quantity is the exact sum, in the instrument's size units, of the traded size signed
+    /// by the reported aggressor side: positive for a buy, negative for a sell, and unchanged for
+    /// a `NoAggressor`. It is `None` until a signed trade is seen, so a tape with none leaves the
+    /// value absent. It is reset by [`Self::reset`] with the other data-quality state. This is the
+    /// tape-fed seam through which a direction-dependent metric reaches the analysis; the data
+    /// engine carries it because the engine is the only component that sees the tape.
+    #[must_use]
+    pub const fn signed_order_flow_imbalance(&self) -> Option<Decimal> {
+        self.signed_order_flow_imbalance
     }
 
     /// Returns whether an `OptionChainManager` exists for the given series.
@@ -722,6 +758,8 @@ impl DataEngine {
         self.response_count = 0;
         self.data_quality_counts = DataQualityCounts::default();
         self.data_quality_last_ts.clear();
+        self.data_quality_last_trade_price.clear();
+        self.signed_order_flow_imbalance = None;
     }
 
     /// Disposes the engine, stopping all clients and canceling any timers.
@@ -2661,15 +2699,44 @@ impl DataEngine {
     /// previous behaviour. Otherwise it records the value violation or the out-of-order
     /// violation against the engine's own last-seen `ts_event` for the instrument (accepting the
     /// record when neither applies), and returns `false` only for `Drop` with a violation.
+    ///
+    /// `aggressor` carries a trade's price and reported aggressor side; quotes pass `None`. A trade
+    /// that reports a buy or sell side and has a previous trade price for its instrument is
+    /// compared with the tick-rule inference and counted, and a disagreement is recorded. A trade
+    /// reported as `NoAggressor`, or one with no previous price or an unchanged price, is not
+    /// compared and never enters the agreement-rate denominator.
     fn gate_market_data(
         &mut self,
         instrument_id: InstrumentId,
         ts_event: UnixNanos,
         violation: Option<DataQualityViolation>,
+        aggressor: Option<(Price, AggressorSide)>,
     ) -> bool {
         let Some(action) = self.config.data_quality_action else {
             return true;
         };
+
+        let aggressor_violation = aggressor.and_then(|(price, side)| {
+            let previous_price = self
+                .data_quality_last_trade_price
+                .get(&instrument_id)
+                .copied();
+
+            // A non-positive price is not a price the tick rule can carry forward.
+            if price.as_f64() > 0.0 {
+                self.data_quality_last_trade_price
+                    .insert(instrument_id, price);
+            }
+
+            if !matches!(side, AggressorSide::Buy | AggressorSide::Sell) {
+                return None;
+            }
+
+            let inferred = infer_aggressor_side(price, previous_price)?;
+            self.data_quality_counts.record_aggressor_comparison();
+
+            (side != inferred).then_some(DataQualityViolation::AggressorSignDisagreement)
+        });
 
         let monotonic_violation = self
             .data_quality_last_ts
@@ -2685,7 +2752,7 @@ impl DataEngine {
             *last_ts = ts_event;
         }
 
-        match violation.or(monotonic_violation) {
+        match violation.or(aggressor_violation).or(monotonic_violation) {
             Some(violation) => {
                 self.data_quality_counts.record(violation);
                 matches!(action, DataQualityAction::Flag)
@@ -2698,7 +2765,12 @@ impl DataEngine {
     }
 
     fn handle_quote(&mut self, quote: QuoteTick) {
-        if !self.gate_market_data(quote.instrument_id, quote.ts_event, classify_quote(&quote)) {
+        if !self.gate_market_data(
+            quote.instrument_id,
+            quote.ts_event,
+            classify_quote(&quote),
+            None,
+        ) {
             return;
         }
 
@@ -2716,7 +2788,33 @@ impl DataEngine {
     }
 
     fn handle_trade(&mut self, trade: TradeTick) {
-        if !self.gate_market_data(trade.instrument_id, trade.ts_event, classify_trade(&trade)) {
+        // Accumulate the signed order-flow imbalance from the tape, signed by the reported
+        // aggressor side. This is unconditional: the floor gate decides whether the signed value
+        // may be reported, not whether it is accumulated, so an undeclared floor still leaves the
+        // metric computable. The sum is exact (`Decimal`), and a `NoAggressor` trade adds nothing.
+        match trade.aggressor_side {
+            AggressorSide::Buy => {
+                let imbalance = self
+                    .signed_order_flow_imbalance
+                    .get_or_insert(Decimal::ZERO);
+                *imbalance += trade.size.as_decimal();
+            }
+            AggressorSide::Sell => {
+                let imbalance = self
+                    .signed_order_flow_imbalance
+                    .get_or_insert(Decimal::ZERO);
+                *imbalance -= trade.size.as_decimal();
+            }
+            AggressorSide::NoAggressor => {}
+        }
+
+        let aggressor = Some((trade.price, trade.aggressor_side));
+        if !self.gate_market_data(
+            trade.instrument_id,
+            trade.ts_event,
+            classify_trade(&trade),
+            aggressor,
+        ) {
             return;
         }
 
@@ -3039,7 +3137,12 @@ impl DataEngine {
     }
 
     fn handle_quote_pipeline(&mut self, quote: QuoteTick) {
-        if !self.gate_market_data(quote.instrument_id, quote.ts_event, classify_quote(&quote)) {
+        if !self.gate_market_data(
+            quote.instrument_id,
+            quote.ts_event,
+            classify_quote(&quote),
+            None,
+        ) {
             return;
         }
 
@@ -3054,7 +3157,13 @@ impl DataEngine {
     }
 
     fn handle_trade_pipeline(&mut self, trade: TradeTick) {
-        if !self.gate_market_data(trade.instrument_id, trade.ts_event, classify_trade(&trade)) {
+        let aggressor = Some((trade.price, trade.aggressor_side));
+        if !self.gate_market_data(
+            trade.instrument_id,
+            trade.ts_event,
+            classify_trade(&trade),
+            aggressor,
+        ) {
             return;
         }
 

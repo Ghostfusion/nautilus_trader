@@ -37,6 +37,7 @@ pub mod max_drawdown;
 pub mod max_drawdown_duration;
 pub mod net_return;
 pub mod omega_ratio;
+pub mod order_flow_imbalance;
 pub mod profit_factor;
 pub mod rescaled_range;
 pub mod returns_avg;

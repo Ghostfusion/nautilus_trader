@@ -15,12 +15,14 @@
 
 use std::{
     cell::{Cell, RefCell},
+    collections::BTreeSet,
     fmt::Debug,
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering},
 };
 
 use indexmap::IndexMap;
+use nautilus_analysis::metric::{MetricReason, MetricStatus};
 use nautilus_backtest::{
     config::{BacktestEngineConfig, SimulatedVenueConfig},
     engine::BacktestEngine,
@@ -1218,6 +1220,25 @@ fn trade(instrument_id: InstrumentId, price: &str, size: &str, ts: u64) -> Data 
     ))
 }
 
+fn signed_trade(
+    instrument_id: InstrumentId,
+    price: &str,
+    size: &str,
+    side: AggressorSide,
+    id: &str,
+    ts: u64,
+) -> Data {
+    Data::Trade(TradeTick::new(
+        instrument_id,
+        Price::from(price),
+        Quantity::from(size),
+        side,
+        TradeId::from(id),
+        ts.into(),
+        ts.into(),
+    ))
+}
+
 fn option_underlying_equity(venue: Venue) -> InstrumentAny {
     InstrumentAny::Equity(
         Equity::builder()
@@ -1808,6 +1829,165 @@ fn test_run_reports_data_quality_violations(crypto_perpetual_ethusdt: CryptoPerp
     assert!(line.contains("crossed_quote=1"), "{line}");
     assert!(line.contains("non_positive_value=1"), "{line}");
     assert!(line.contains("out_of_order_timestamp=0"), "{line}");
+}
+
+fn quality_floor_engine(instrument: CryptoPerpetual, floor: Option<f64>) -> BacktestEngine {
+    let data_engine = match floor {
+        Some(floor) => DataEngineConfig::builder()
+            .data_quality_action(DataQualityAction::Flag)
+            .aggressor_agreement_floor(floor)
+            .build(),
+        None => DataEngineConfig::builder()
+            .data_quality_action(DataQualityAction::Flag)
+            .build(),
+    };
+    let config = BacktestEngineConfig {
+        bypass_logging: true,
+        data_engine: Some(data_engine),
+        ..Default::default()
+    };
+    let mut engine = BacktestEngine::new(config).unwrap();
+    let venue_config = SimulatedVenueConfig::builder()
+        .venue(Venue::from("BINANCE"))
+        .oms_type(OmsType::Netting)
+        .account_type(AccountType::Margin)
+        .book_type(BookType::L1_MBP)
+        .starting_balances(vec![Money::from("1_000_000 USDT")])
+        .fee_model(FeeModelAny::MakerTaker(MakerTakerFeeModel::zero()).into())
+        .build()
+        .unwrap();
+    engine.add_venue(venue_config).unwrap();
+    engine
+        .add_instrument(&InstrumentAny::CryptoPerpetual(instrument))
+        .unwrap();
+    engine
+}
+
+/// Returns a six-trade tape whose reported sides agree with the tick rule four times in five.
+fn agreement_tape(instrument_id: InstrumentId) -> Vec<Data> {
+    let prices = [
+        "1000.00", "1000.10", "1000.00", "1000.10", "1000.00", "1000.10",
+    ];
+    prices
+        .iter()
+        .enumerate()
+        .map(|(i, price)| {
+            signed_trade(
+                instrument_id,
+                price,
+                "1.000",
+                AggressorSide::Buy,
+                &format!("T-{i}"),
+                i as u64 + 1,
+            )
+        })
+        .collect()
+}
+
+#[rstest]
+fn test_run_refuses_a_direction_dependent_metric_below_the_declared_floor(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let instrument_id = crypto_perpetual_ethusdt.id();
+    let mut engine = quality_floor_engine(crypto_perpetual_ethusdt, Some(0.9));
+    engine
+        .add_data(agreement_tape(instrument_id), None, true, true)
+        .unwrap();
+    engine.run(None, None, None, false).unwrap();
+
+    let result = engine.get_result();
+    let rate = result
+        .summary
+        .get("aggressor_agreement")
+        .expect("the observed rate is a run figure");
+    assert!(rate.starts_with("0.6"), "{rate}");
+
+    let portfolio = engine.kernel().portfolio();
+    let analyzer = portfolio.analyzer();
+    let report = analyzer.report_tape_metrics(&["order_flow_imbalance"]);
+    let metric = report.get("order_flow_imbalance").unwrap();
+
+    assert_eq!(metric.status(), MetricStatus::Unavailable);
+    assert_eq!(
+        metric.reason(),
+        Some(MetricReason::AggressorAgreementBelowFloor)
+    );
+    assert_eq!(metric.value(), None);
+
+    let detail = metric.detail().expect("the refusal names its quantities");
+    assert!(detail.contains("0.6"), "{detail}");
+    assert!(detail.contains("0.9"), "{detail}");
+}
+
+#[rstest]
+fn test_run_computes_the_signed_metric_above_the_declared_floor(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let instrument_id = crypto_perpetual_ethusdt.id();
+    let mut engine = quality_floor_engine(crypto_perpetual_ethusdt, Some(0.5));
+    engine
+        .add_data(agreement_tape(instrument_id), None, true, true)
+        .unwrap();
+    engine.run(None, None, None, false).unwrap();
+    let _ = engine.get_result();
+
+    let portfolio = engine.kernel().portfolio();
+    let analyzer = portfolio.analyzer();
+    let report = analyzer.report_tape_metrics(&["order_flow_imbalance"]);
+    let metric = report.get("order_flow_imbalance").unwrap();
+
+    assert_eq!(metric.status(), MetricStatus::Computed);
+    assert_eq!(metric.value(), Some(6.0));
+}
+
+#[rstest]
+fn test_run_computes_the_signed_metric_with_no_declared_floor(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let instrument_id = crypto_perpetual_ethusdt.id();
+    let mut engine = quality_floor_engine(crypto_perpetual_ethusdt, None);
+    engine
+        .add_data(agreement_tape(instrument_id), None, true, true)
+        .unwrap();
+    engine.run(None, None, None, false).unwrap();
+    let _ = engine.get_result();
+
+    let portfolio = engine.kernel().portfolio();
+    let analyzer = portfolio.analyzer();
+    let report = analyzer.report_tape_metrics(&["order_flow_imbalance"]);
+    let metric = report.get("order_flow_imbalance").unwrap();
+
+    assert_eq!(metric.status(), MetricStatus::Computed);
+    assert_eq!(metric.value(), Some(6.0));
+}
+
+#[rstest]
+fn test_portfolio_statistics_equal_the_result_after_a_run(
+    crypto_perpetual_ethusdt: CryptoPerpetual,
+) {
+    let mut engine = quality_floor_engine(crypto_perpetual_ethusdt, None);
+    engine.run(None, None, None, false).unwrap();
+
+    // Read the portfolio first: the two paths must agree without the result path being what
+    // populates the portfolio, so the carried provenance is set at the run's end.
+    let portfolio_stats = engine.kernel().portfolio().statistics();
+    let result = engine.get_result();
+
+    let portfolio_keys: BTreeSet<&String> = portfolio_stats.general.keys().collect();
+    let result_keys: BTreeSet<&String> = result.stats_general.keys().collect();
+    assert_eq!(portfolio_keys, result_keys);
+
+    for (key, value) in &portfolio_stats.general {
+        let other = result.stats_general[key];
+        assert!(
+            *value == other || (value.is_nan() && other.is_nan()),
+            "{key}: {value} != {other}"
+        );
+    }
+
+    let portfolio_keys: BTreeSet<&String> = portfolio_stats.returns.keys().collect();
+    let result_keys: BTreeSet<&String> = result.stats_returns.keys().collect();
+    assert_eq!(portfolio_keys, result_keys);
 }
 
 #[rstest]

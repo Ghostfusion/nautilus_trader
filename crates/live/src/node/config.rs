@@ -170,6 +170,10 @@ impl From<LiveDataEngineConfig> for DataEngineConfig {
             time_bars_origin_offset,
             validate_data_sequence: config.validate_data_sequence,
             data_quality_action: config.data_quality_action,
+            // Live has no result path that carries the observed aggressor-agreement rate beside
+            // the floor, so the live data-engine config declares no floor. A backtest declares it
+            // on `DataEngineConfig` directly, where the result path reads both.
+            aggressor_agreement_floor: None,
             buffer_deltas: config.buffer_deltas,
             emit_quotes_from_book: config.emit_quotes_from_book,
             emit_quotes_from_book_depths: config.emit_quotes_from_book_depths,

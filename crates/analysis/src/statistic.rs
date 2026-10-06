@@ -17,6 +17,7 @@ use std::{collections::BTreeMap, fmt::Debug};
 
 use nautilus_core::DurationNanos;
 use nautilus_model::position::Position;
+use rust_decimal::Decimal;
 
 use crate::{Returns, metric::MetricDefinition, period::PerformancePeriod};
 
@@ -106,6 +107,18 @@ pub trait PortfolioStatistic: Debug {
     /// returns- or PnL-based statistic needs no override. A frame-based statistic overrides this
     /// and returns `None` for a frame it cannot reduce.
     fn calculate_from_periods(&self, periods: &[PerformancePeriod]) -> Option<Self::Item> {
+        None
+    }
+
+    /// Calculates the statistic from a signed order-flow quantity accumulated from the trade tape.
+    ///
+    /// Defaults to `None`: only a statistic defined over [`MetricInput::Trades`] overrides this.
+    /// The quantity is handed in already signed by the reported aggressor side, because the sign
+    /// is a property of the tape and the statistic is a view of it, not a reconstruction of it.
+    ///
+    /// [`MetricInput::Trades`]: crate::metric::MetricInput::Trades
+    fn calculate_from_tape(&self, signed_order_flow_imbalance: Decimal) -> Option<Self::Item> {
+        let _ = signed_order_flow_imbalance;
         None
     }
 

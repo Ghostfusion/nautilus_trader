@@ -35,7 +35,7 @@ use crate::{
     Returns,
     metric::{
         MetricDefinition, MetricInput, MetricReason, MetricReport, MetricResult, MetricStage,
-        MetricStatus, MetricUnits,
+        MetricStatus, MetricTag, MetricUnits, format_number,
     },
     period::PerformancePeriod,
     snapshot::PortfolioStatistics,
@@ -54,6 +54,7 @@ use crate::{
         loser_max::MaxLoser,
         loser_min::MinLoser,
         net_return::NetReturn,
+        order_flow_imbalance::OrderFlowImbalance,
         profit_factor::ProfitFactor,
         returns_avg::ReturnsAverage,
         returns_avg_loss::ReturnsAverageLoss,
@@ -114,6 +115,30 @@ pub struct PortfolioAnalyzer {
     /// [`Self::set_declared_stages`] and read only by [`Self::statistics`], which reports a
     /// declared stage that produced no rendered metric rather than letting the gap pass silently.
     declared_stages: Vec<MetricStage>,
+    /// The observed aggressor-agreement rate of the run's trade tape, if any tape was compared.
+    ///
+    /// `None` when no trade was comparable, in which case no floor can be breached: a rate that
+    /// was never measured is not a zero rate. Set with [`Self::set_aggressor_agreement`] by
+    /// whoever holds it beside the declared floor, and read only by [`Self::report_tape_metrics`].
+    aggressor_agreement: Option<f64>,
+    /// The aggressor-agreement floor declared for the run, if any.
+    ///
+    /// `None` means no gate: a direction-dependent metric is computed as usual. Set with
+    /// [`Self::set_aggressor_agreement`].
+    aggressor_agreement_floor: Option<f64>,
+    /// The signed order-flow imbalance accumulated from the run's trade tape, if any.
+    ///
+    /// Set with [`Self::set_signed_order_flow_imbalance`] and read by
+    /// [`Self::report_tape_metrics`] as the tape-fed value of a [`MetricInput::Trades`] metric.
+    signed_order_flow_imbalance: Option<Decimal>,
+    /// The per-run totals of venue order events by cause, if any, keyed by each cause's stable
+    /// string.
+    ///
+    /// `None` when no venue reported counts, in which case no cause row is rendered: an absent
+    /// authority is not rendered as a zero. Set with [`Self::set_fill_cause_counts`] by whoever
+    /// holds the venue's counts, and read only by [`Self::statistics`], which renders one row per
+    /// cause, including the causes at zero.
+    fill_cause_counts: Option<BTreeMap<String, u64>>,
 }
 
 impl Default for PortfolioAnalyzer {
@@ -158,6 +183,11 @@ impl Default for PortfolioAnalyzer {
         analyzer.register_statistic(Arc::new(ArithmeticCompoundingRealisedEquity::new()));
         analyzer.register_statistic(Arc::new(ArithmeticCompoundingRatio::new(None)));
         analyzer.register_statistic(Arc::new(ArithmeticCompoundingFlagged::new(None)));
+        // The tape-dependent row: the signed order-flow imbalance the data engine accumulated from
+        // its own tape. It is defined over the tape input rather than the ledger, so it appears
+        // only when a tape quantity is supplied; its sign is refused below a declared
+        // aggressor-agreement floor.
+        analyzer.register_statistic(Arc::new(OrderFlowImbalance::new()));
         analyzer
     }
 }
@@ -180,6 +210,10 @@ impl PortfolioAnalyzer {
             returns: BTreeMap::new(),
             periods: Vec::new(),
             declared_stages: Vec::new(),
+            aggressor_agreement: None,
+            aggressor_agreement_floor: None,
+            signed_order_flow_imbalance: None,
+            fill_cause_counts: None,
         }
     }
 
@@ -220,6 +254,10 @@ impl PortfolioAnalyzer {
         self.returns.clear();
         self.periods.clear();
         self.declared_stages.clear();
+        self.aggressor_agreement = None;
+        self.aggressor_agreement_floor = None;
+        self.signed_order_flow_imbalance = None;
+        self.fill_cause_counts = None;
     }
 
     /// Returns all tracked currencies.
@@ -276,6 +314,59 @@ impl PortfolioAnalyzer {
     #[must_use]
     pub fn declared_stages(&self) -> &[MetricStage] {
         &self.declared_stages
+    }
+
+    /// Sets the observed aggressor-agreement rate of the run's trade tape and the declared floor.
+    ///
+    /// The rate is `None` when no trade was comparable, which is not a zero rate: a value that was
+    /// never measured cannot breach a floor, so a direction-dependent metric is computed as usual.
+    /// The floor is `None` when the run declared none, which disables the gate. Both are replaced
+    /// together because the gate reads them together.
+    pub fn set_aggressor_agreement(&mut self, observed: Option<f64>, floor: Option<f64>) {
+        self.aggressor_agreement = observed;
+        self.aggressor_agreement_floor = floor;
+    }
+
+    /// Returns the observed aggressor-agreement rate of the run's trade tape, if any.
+    #[must_use]
+    pub const fn aggressor_agreement(&self) -> Option<f64> {
+        self.aggressor_agreement
+    }
+
+    /// Returns the declared aggressor-agreement floor, if any.
+    #[must_use]
+    pub const fn aggressor_agreement_floor(&self) -> Option<f64> {
+        self.aggressor_agreement_floor
+    }
+
+    /// Sets the signed order-flow imbalance accumulated from the run's trade tape.
+    ///
+    /// The quantity is already signed by the reported aggressor side; the analyzer is a carrier,
+    /// not a reconstructor, of its sign. Replaces any value already held.
+    pub fn set_signed_order_flow_imbalance(&mut self, value: Option<Decimal>) {
+        self.signed_order_flow_imbalance = value;
+    }
+
+    /// Returns the signed order-flow imbalance accumulated from the run's trade tape, if any.
+    #[must_use]
+    pub const fn signed_order_flow_imbalance(&self) -> Option<Decimal> {
+        self.signed_order_flow_imbalance
+    }
+
+    /// Sets the per-run totals of venue order events by cause, keyed by each cause's stable
+    /// string.
+    ///
+    /// The totals are the venue's, including the causes at zero; the analyzer is a carrier, not a
+    /// counter. Replaces any totals already held. `None` when no venue reported counts, in which
+    /// case no cause row is rendered: an absent authority is not rendered as a zero.
+    pub fn set_fill_cause_counts(&mut self, counts: Option<BTreeMap<String, u64>>) {
+        self.fill_cause_counts = counts;
+    }
+
+    /// Returns the per-run totals of venue order events by cause, if any.
+    #[must_use]
+    pub fn fill_cause_counts(&self) -> Option<&BTreeMap<String, u64>> {
+        self.fill_cause_counts.as_ref()
     }
 
     /// Returns the scoring-chain stage of every registered statistic that declares one.
@@ -432,6 +523,10 @@ impl PortfolioAnalyzer {
     /// When stages have been declared with [`Self::set_declared_stages`], a declared stage that
     /// produced no rendered row is reported as one row in `general`, named for the stage, so a
     /// chain that intends a stage it never scores is visible rather than silent.
+    ///
+    /// When fill-cause totals have been set with [`Self::set_fill_cause_counts`], one row per
+    /// cause is added to `general`, named for the cause, including the causes at zero: a zero is a
+    /// fact and an omitted row is not. With no totals set, no cause row is produced.
     #[must_use]
     pub fn statistics(&self) -> PortfolioStatistics {
         let mut pnls = AHashMap::new();
@@ -470,6 +565,12 @@ impl PortfolioAnalyzer {
                         1.0,
                     );
                 }
+            }
+        }
+
+        if let Some(counts) = &self.fill_cause_counts {
+            for (cause, count) in counts {
+                general.insert(format!("Fill Cause: {cause}"), *count as f64);
             }
         }
 
@@ -1255,6 +1356,88 @@ impl PortfolioAnalyzer {
         MetricReport::new(results)
     }
 
+    /// Reports the requested tape-fed metrics, one result per request.
+    ///
+    /// Mirrors [`Self::report_period_metrics`] for the tape input: a metric whose definition is
+    /// defined over [`MetricInput::Trades`] is calculated from the signed order-flow imbalance
+    /// carried by [`Self::set_signed_order_flow_imbalance`], and one that is not is reported
+    /// `unavailable` with [`MetricReason::UnsupportedInput`]. A direction-dependent metric (one
+    /// whose definition declares [`MetricTag::DirectionDependent`]) is refused with
+    /// [`MetricReason::AggressorAgreementBelowFloor`] when the declared floor is above the
+    /// observed rate, and the refusal's detail names both; nothing is printed as a number in that
+    /// case.
+    ///
+    /// The floor is a precondition, not a calculation: it refuses only when a rate was observed,
+    /// because a floor cannot be breached by a rate that was never measured. An unmeasured rate
+    /// therefore leaves the metric computed, which is the conservative reading of an absent
+    /// measurement.
+    #[must_use]
+    pub fn report_tape_metrics(&self, requested: &[&str]) -> MetricReport {
+        let mut results = Vec::with_capacity(requested.len());
+        let imbalance = self.signed_order_flow_imbalance;
+        let input_present = imbalance.is_some();
+        let breach = self.aggressor_agreement_breach();
+
+        for requested in requested {
+            let Some(statistic) = self.find_metric(requested) else {
+                results.push(not_registered(requested));
+                continue;
+            };
+
+            let definition = statistic.definition();
+
+            if !definition.is_defined_over(MetricInput::Trades) {
+                results.push(not_computed(
+                    &definition,
+                    MetricReason::UnsupportedInput,
+                    MetricStatus::Unavailable,
+                ));
+                continue;
+            }
+
+            if definition.tags().contains(&MetricTag::DirectionDependent)
+                && let Some(detail) = &breach
+            {
+                results.push(MetricResult::not_computed_with_detail(
+                    definition.id().to_string(),
+                    definition.title(),
+                    MetricReason::AggressorAgreementBelowFloor,
+                    MetricStatus::Unavailable,
+                    detail.clone(),
+                ));
+                continue;
+            }
+
+            results.push(classify(
+                &definition,
+                imbalance.and_then(|value| statistic.calculate_from_tape(value)),
+                input_present,
+                false,
+            ));
+        }
+
+        MetricReport::new(results)
+    }
+
+    /// Returns the refusal detail when the declared floor is above the observed agreement rate.
+    ///
+    /// `None` when no floor was declared or no rate was observed: with no declared floor there is
+    /// no gate, and with no observed rate there is nothing a floor can be breached by.
+    fn aggressor_agreement_breach(&self) -> Option<String> {
+        let floor = self.aggressor_agreement_floor?;
+        let observed = self.aggressor_agreement?;
+
+        if observed < floor {
+            Some(format!(
+                "observed aggressor agreement {} is below the declared floor {}",
+                format_number(observed),
+                format_number(floor),
+            ))
+        } else {
+            None
+        }
+    }
+
     /// Finds a registered statistic by its definition id, then by its registry name.
     fn find_metric(&self, requested: &str) -> Option<&Statistic> {
         if let Some(statistic) = self.statistics.get(requested) {
@@ -1522,6 +1705,7 @@ mod tests {
         types::{AccountBalance, Money, Price, Quantity},
     };
     use rstest::rstest;
+    use rust_decimal::Decimal;
 
     use super::*;
     use crate::{
@@ -3725,5 +3909,121 @@ mod tests {
         assert_eq!(stages.len(), 1);
         assert_eq!(stages["Forecast Score"], MetricStage::Forecast);
         assert!(!stages.contains_key("Undeclared"));
+    }
+
+    #[rstest]
+    fn test_default_registers_the_direction_dependent_tape_metric() {
+        let analyzer = PortfolioAnalyzer::default();
+        let statistic = analyzer
+            .statistic("Order Flow Imbalance (reported aggressor)")
+            .expect("the tape metric is registered by default");
+        let definition = statistic.definition();
+
+        assert_eq!(definition.id(), "order_flow_imbalance");
+        assert!(definition.tags().contains(&MetricTag::DirectionDependent));
+        assert!(definition.is_defined_over(MetricInput::Trades));
+    }
+
+    #[rstest]
+    fn test_tape_metric_is_refused_below_the_declared_floor() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_aggressor_agreement(Some(0.6), Some(0.9));
+        analyzer.set_signed_order_flow_imbalance(Some(Decimal::new(1234, 2)));
+
+        let report = analyzer.report_tape_metrics(&["order_flow_imbalance"]);
+        let result = report.get("order_flow_imbalance").unwrap();
+
+        assert_eq!(result.status(), MetricStatus::Unavailable);
+        assert_eq!(
+            result.reason(),
+            Some(MetricReason::AggressorAgreementBelowFloor)
+        );
+        assert_eq!(result.value(), None);
+
+        // The refusal names the observed rate and the declared floor rather than printing a
+        // plausible number.
+        let detail = result.detail().expect("a refusal names its quantities");
+        assert!(detail.contains("0.6"), "{detail}");
+        assert!(detail.contains("0.9"), "{detail}");
+    }
+
+    #[rstest]
+    fn test_tape_metric_is_computed_above_the_declared_floor() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_aggressor_agreement(Some(0.6), Some(0.5));
+        analyzer.set_signed_order_flow_imbalance(Some(Decimal::new(1234, 2)));
+
+        let report = analyzer.report_tape_metrics(&["order_flow_imbalance"]);
+        let result = report.get("order_flow_imbalance").unwrap();
+
+        assert_eq!(result.status(), MetricStatus::Computed);
+        assert_eq!(result.value(), Some(12.34));
+        assert_eq!(result.detail(), None);
+    }
+
+    #[rstest]
+    fn test_tape_metric_is_computed_with_no_declared_floor() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_aggressor_agreement(Some(0.6), None);
+        analyzer.set_signed_order_flow_imbalance(Some(Decimal::new(-25, 1)));
+
+        let report = analyzer.report_tape_metrics(&["order_flow_imbalance"]);
+        let result = report.get("order_flow_imbalance").unwrap();
+
+        assert_eq!(result.status(), MetricStatus::Computed);
+        assert_eq!(result.value(), Some(-2.5));
+    }
+
+    #[rstest]
+    fn test_tape_metric_is_computed_when_no_rate_was_measured() {
+        // A floor is declared, but no trade was compared, so there is no observed rate to breach
+        // it: the metric is computed rather than refused.
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_aggressor_agreement(None, Some(0.9));
+        analyzer.set_signed_order_flow_imbalance(Some(Decimal::from(7)));
+
+        let report = analyzer.report_tape_metrics(&["order_flow_imbalance"]);
+        let result = report.get("order_flow_imbalance").unwrap();
+
+        assert_eq!(result.status(), MetricStatus::Computed);
+        assert_eq!(result.value(), Some(7.0));
+    }
+
+    #[rstest]
+    fn test_tape_metric_is_unavailable_without_a_tape_quantity() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_aggressor_agreement(Some(0.6), Some(0.5));
+
+        let report = analyzer.report_tape_metrics(&["order_flow_imbalance"]);
+        let result = report.get("order_flow_imbalance").unwrap();
+
+        assert_eq!(result.status(), MetricStatus::Unavailable);
+        assert_eq!(result.reason(), Some(MetricReason::InsufficientData));
+        assert_eq!(result.value(), None);
+    }
+
+    #[rstest]
+    fn test_report_tape_metrics_reports_a_returns_metric_as_unsupported() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_signed_order_flow_imbalance(Some(Decimal::ONE));
+
+        let report = analyzer.report_tape_metrics(&["sharpe_ratio"]);
+        let result = report.get("sharpe_ratio").unwrap();
+
+        assert_eq!(result.status(), MetricStatus::Unavailable);
+        assert_eq!(result.reason(), Some(MetricReason::UnsupportedInput));
+    }
+
+    #[rstest]
+    fn test_reset_clears_the_tape_provenance() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_aggressor_agreement(Some(0.6), Some(0.9));
+        analyzer.set_signed_order_flow_imbalance(Some(Decimal::ONE));
+
+        analyzer.reset();
+
+        assert_eq!(analyzer.aggressor_agreement(), None);
+        assert_eq!(analyzer.aggressor_agreement_floor(), None);
+        assert_eq!(analyzer.signed_order_flow_imbalance(), None);
     }
 }

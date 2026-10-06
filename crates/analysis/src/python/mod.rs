@@ -103,6 +103,9 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::statistics::total_commissions::TotalCommissions>()?;
     m.add_class::<crate::statistics::total_turnover::TotalTurnover>()?;
 
+    // Statistics - Tape-based
+    m.add_class::<crate::statistics::order_flow_imbalance::OrderFlowImbalance>()?;
+
     // Statistics - PnL-based
     m.add_class::<crate::statistics::expectancy::Expectancy>()?;
     m.add_class::<crate::statistics::loser_avg::AvgLoser>()?;

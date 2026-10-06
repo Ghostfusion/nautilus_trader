@@ -1192,7 +1192,9 @@ def test_create_tearsheet_end_to_end_real_engine() -> None:
     assert result.stats_pnls["USD"]["PnL (total)"] == pytest.approx(47.2)
     assert result.stats_returns["Average (Return, simple)"] == pytest.approx(returns.mean())
     assert (1 + returns).prod() == pytest.approx(1.0000472)
-    # The general map carries the frame's money totals beside the position-based statistics.
+    # The general map carries the frame's money totals and the per-cause fill counts beside the
+    # position-based statistics. Every cause renders, so a cause that did not occur reads zero
+    # rather than being absent.
     assert result.stats_general == {
         "Long Ratio": 1.0,
         "Total Commissions": pytest.approx(2.8),
@@ -1201,6 +1203,12 @@ def test_create_tearsheet_end_to_end_real_engine() -> None:
             1000047.2056951466,
         ),
         "Arithmetic Compounding Realised Equity (simple)": pytest.approx(1000047.2),
+        "Fill Cause: book_match": pytest.approx(2.0),
+        "Fill Cause: circuit_breaker": 0.0,
+        "Fill Cause: corporate_action": 0.0,
+        "Fill Cause: halt": 0.0,
+        "Fill Cause: liquidation": 0.0,
+        "Fill Cause: price_band": 0.0,
     }
     # The construction agrees with the ledger here, so the run is not flagged.
     assert result.stats_returns[

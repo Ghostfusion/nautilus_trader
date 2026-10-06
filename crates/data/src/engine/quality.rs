@@ -29,13 +29,15 @@
 //! [`DataEngineConfig::data_quality_action`]: crate::engine::config::DataEngineConfig::data_quality_action
 
 use std::{
+    cmp::Ordering,
     collections::BTreeMap,
     fmt::{Display, Formatter},
 };
 
 use nautilus_model::{
     data::{QuoteTick, TradeTick},
-    types::{Money, Quantity},
+    enums::AggressorSide,
+    types::{Money, Price, Quantity},
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -71,16 +73,19 @@ pub enum DataQualityViolation {
     OpenInterestChangeExceedsVolume,
     /// A reported settlement total did not reconcile with the sum of its components.
     SettlementTotalMismatch,
+    /// The reported aggressor side disagreed with the tick-rule inference from the previous price.
+    AggressorSignDisagreement,
 }
 
 impl DataQualityViolation {
     /// Every violation kind, used to render a complete and stable count line.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::CrossedQuote,
         Self::NonPositiveValue,
         Self::OutOfOrderTimestamp,
         Self::OpenInterestChangeExceedsVolume,
         Self::SettlementTotalMismatch,
+        Self::AggressorSignDisagreement,
     ];
 }
 
@@ -94,6 +99,7 @@ impl Display for DataQualityViolation {
                 f.write_str("open_interest_change_exceeds_volume")
             }
             Self::SettlementTotalMismatch => f.write_str("settlement_total_mismatch"),
+            Self::AggressorSignDisagreement => f.write_str("aggressor_sign_disagreement"),
         }
     }
 }
@@ -137,6 +143,7 @@ impl Display for DataQualityAction {
 pub struct DataQualityCounts {
     counts: BTreeMap<DataQualityViolation, usize>,
     accepted: usize,
+    aggressor_comparisons: usize,
 }
 
 impl DataQualityCounts {
@@ -150,6 +157,35 @@ impl DataQualityCounts {
     #[must_use]
     pub fn accepted(&self) -> usize {
         self.accepted
+    }
+
+    /// Returns the number of trades whose reported aggressor side was compared with the tick-rule
+    /// inference.
+    ///
+    /// A trade reported as `NoAggressor`, or one whose previous trade price is unknown or equal to
+    /// its own, is not compared: it never enters this denominator, so an agreement rate computed
+    /// from it is not diluted by trades that carry no aggressor signal.
+    #[must_use]
+    pub fn aggressor_comparisons(&self) -> usize {
+        self.aggressor_comparisons
+    }
+
+    /// Returns the observed aggressor-agreement rate, or `None` when nothing was compared.
+    ///
+    /// The rate is the fraction of compared trades whose reported aggressor side matched the
+    /// tick-rule inference, `(comparisons - disagreements) / comparisons`. It is `None`, never
+    /// zero, when `comparisons` is zero: a rate that was never measured is not a measured zero,
+    /// and a direction-dependent metric must not be refused against an absent measurement.
+    #[must_use]
+    pub fn aggressor_agreement_rate(&self) -> Option<f64> {
+        if self.aggressor_comparisons == 0 {
+            return None;
+        }
+
+        let disagreements = self.count(DataQualityViolation::AggressorSignDisagreement);
+        let agreements = self.aggressor_comparisons.saturating_sub(disagreements);
+
+        Some(agreements as f64 / self.aggressor_comparisons as f64)
     }
 
     /// Returns the total number of records that violated a check.
@@ -175,6 +211,14 @@ impl DataQualityCounts {
     /// checks detect, so both reach the same totals.
     pub fn record(&mut self, violation: DataQualityViolation) {
         *self.counts.entry(violation).or_insert(0) += 1;
+    }
+
+    /// Records one comparison of a reported aggressor side against the tick-rule inference.
+    ///
+    /// Recorded only when a trade reports a buy or sell aggressor and a previous trade price is
+    /// available, so the agreement rate is `comparisons - disagreements` over this count.
+    pub fn record_aggressor_comparison(&mut self) {
+        self.aggressor_comparisons += 1;
     }
 
     pub(crate) fn accept(&mut self) {
@@ -229,6 +273,23 @@ pub fn classify_trade(trade: &TradeTick) -> Option<DataQualityViolation> {
     }
 
     None
+}
+
+/// Infers a trade's aggressor side from the tick rule.
+///
+/// A trade priced above the previous trade price for the same instrument is inferred a buy, one
+/// priced below a sell, and one at the same price (or the first trade, with no previous price)
+/// yields no inference. The inference is `None` rather than a guess, so a caller cannot mistake a
+/// missing signal for a reported one.
+#[must_use]
+pub fn infer_aggressor_side(price: Price, previous_price: Option<Price>) -> Option<AggressorSide> {
+    let previous_price = previous_price?;
+
+    match price.cmp(&previous_price) {
+        Ordering::Greater => Some(AggressorSide::Buy),
+        Ordering::Less => Some(AggressorSide::Sell),
+        Ordering::Equal => None,
+    }
 }
 
 /// Validates a venue's reported change in open interest against the volume traded over the same
@@ -378,6 +439,65 @@ mod tests {
     }
 
     #[rstest::rstest]
+    fn test_infer_aggressor_side_from_a_rise_and_a_fall() {
+        assert_eq!(
+            infer_aggressor_side(Price::from("101.00"), Some(Price::from("100.00"))),
+            Some(AggressorSide::Buy)
+        );
+        assert_eq!(
+            infer_aggressor_side(Price::from("99.00"), Some(Price::from("100.00"))),
+            Some(AggressorSide::Sell)
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_infer_aggressor_side_yields_no_inference() {
+        assert_eq!(
+            infer_aggressor_side(Price::from("100.00"), Some(Price::from("100.00"))),
+            None
+        );
+        assert_eq!(infer_aggressor_side(Price::from("100.00"), None), None);
+    }
+
+    #[rstest::rstest]
+    fn test_aggressor_comparisons_are_counted_beside_the_counts() {
+        let mut counts = DataQualityCounts::default();
+        counts.record_aggressor_comparison();
+        counts.record_aggressor_comparison();
+        counts.record(DataQualityViolation::AggressorSignDisagreement);
+
+        assert_eq!(counts.aggressor_comparisons(), 2);
+        assert_eq!(
+            counts.count(DataQualityViolation::AggressorSignDisagreement),
+            1
+        );
+        // The comparison count is not part of the accept/reject totals.
+        assert_eq!(counts.rejected(), 1);
+        assert_eq!(counts.total(), 1);
+    }
+
+    #[rstest::rstest]
+    fn test_aggressor_agreement_rate_is_absent_without_comparisons() {
+        let counts = DataQualityCounts::default();
+
+        // Nothing was compared, so there is no rate: absent rather than a zero that would read
+        // as a measured value and breach every floor.
+        assert_eq!(counts.aggressor_agreement_rate(), None);
+    }
+
+    #[rstest::rstest]
+    fn test_aggressor_agreement_rate_is_the_agreeing_fraction() {
+        let mut counts = DataQualityCounts::default();
+        for _ in 0..5 {
+            counts.record_aggressor_comparison();
+        }
+        counts.record(DataQualityViolation::AggressorSignDisagreement);
+        counts.record(DataQualityViolation::AggressorSignDisagreement);
+
+        assert_eq!(counts.aggressor_agreement_rate(), Some(3.0 / 5.0));
+    }
+
+    #[rstest::rstest]
     fn test_counts_accumulate_per_kind() {
         let mut counts = DataQualityCounts::default();
         counts.record(DataQualityViolation::CrossedQuote);
@@ -416,7 +536,7 @@ mod tests {
         let expected = concat!(
             "data quality: total=4 accepted=1 rejected=3 crossed_quote=1 non_positive_value=2 ",
             "out_of_order_timestamp=0 open_interest_change_exceeds_volume=0 ",
-            "settlement_total_mismatch=0"
+            "settlement_total_mismatch=0 aggressor_sign_disagreement=0"
         );
         assert_eq!(line, expected);
     }
@@ -442,6 +562,10 @@ mod tests {
         assert_eq!(
             DataQualityViolation::SettlementTotalMismatch.to_string(),
             "settlement_total_mismatch"
+        );
+        assert_eq!(
+            DataQualityViolation::AggressorSignDisagreement.to_string(),
+            "aggressor_sign_disagreement"
         );
     }
 

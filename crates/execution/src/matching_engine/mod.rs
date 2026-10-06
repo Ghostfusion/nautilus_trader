@@ -16,6 +16,7 @@
 //! Order matching engine components for simulating trading venue behavior.
 
 pub mod config;
+pub mod fill_cause;
 pub mod ids_generator;
 pub mod inflight;
 
@@ -76,7 +77,10 @@ use rust_decimal::Decimal;
 use ustr::Ustr;
 
 use self::{
-    config::OrderMatchingEngineConfig, ids_generator::IdsGenerator, inflight::InflightOrders,
+    config::OrderMatchingEngineConfig,
+    fill_cause::{FillCause, FillCauseCounts},
+    ids_generator::IdsGenerator,
+    inflight::InflightOrders,
 };
 use crate::{
     matching_core::{MatchAction, OrderMatchingCore, RestingOrder},
@@ -140,6 +144,8 @@ pub struct OrderMatchingEngine {
     breaker_halt_until_ns: Option<UnixNanos>,
     /// How many times the circuit breaker has tripped since the last reset.
     circuit_breaker_trips: u64,
+    /// The per-run totals of order events by cause.
+    fill_cause_counts: FillCauseCounts,
     trade_consumption: QuantityRaw,
     bid_consumption: IndexMap<PriceRaw, (QuantityRaw, QuantityRaw)>,
     ask_consumption: IndexMap<PriceRaw, (QuantityRaw, QuantityRaw)>,
@@ -246,6 +252,7 @@ impl OrderMatchingEngine {
             breaker_anchor: None,
             breaker_halt_until_ns: None,
             circuit_breaker_trips: 0,
+            fill_cause_counts: FillCauseCounts::new(),
             trade_consumption: 0,
             bid_consumption: IndexMap::new(),
             ask_consumption: IndexMap::new(),
@@ -346,6 +353,7 @@ impl OrderMatchingEngine {
         self.breaker_anchor = None;
         self.breaker_halt_until_ns = None;
         self.circuit_breaker_trips = 0;
+        self.fill_cause_counts = FillCauseCounts::new();
         self.pending_resolution = false;
         self.expiration_processed = false;
         self.option_settlement_failed = false;
@@ -2735,7 +2743,7 @@ impl OrderMatchingEngine {
                 self.market_status = MarketStatus::Suspended;
             }
             MarketStatusAction::Halt if self.market_status == MarketStatus::Open => {
-                self.halt_market(MarketStatus::Closed, "MARKET_HALTED");
+                self.halt_market(MarketStatus::Closed, "MARKET_HALTED", FillCause::Halt);
             }
             MarketStatusAction::Close if self.market_status == MarketStatus::Open => {
                 self.market_status = MarketStatus::Closed;
@@ -2744,17 +2752,17 @@ impl OrderMatchingEngine {
         }
     }
 
-    /// Halts the market with `status` and the venue `reason`.
+    /// Halts the market with `status`, the venue `reason`, and the `cause` of the halt.
     ///
     /// Every halt in this engine goes through here, so cancel-on-halt is enforced once: the book
-    /// is emptied and the halt's own reason is attached to each cancellation. An operator halt
-    /// arrives through `process_status` and a circuit breaker trip through
-    /// `update_circuit_breaker`.
-    fn halt_market(&mut self, status: MarketStatus, reason: &str) {
+    /// is emptied, the halt's own reason is attached to each cancellation, and each cancellation
+    /// is counted under the halt's cause. An operator halt arrives through `process_status` and a
+    /// circuit breaker trip through `update_circuit_breaker`.
+    fn halt_market(&mut self, status: MarketStatus, reason: &str, cause: FillCause) {
         self.market_status = status;
 
         if self.config.cancel_on_halt {
-            self.cancel_open_orders(&[], Some(Ustr::from(reason)));
+            self.cancel_open_orders(&[], Some(Ustr::from(reason)), Some(cause));
 
             log::info!(
                 "{} halted with cancel-on-halt enabled; open orders canceled",
@@ -2806,8 +2814,14 @@ impl OrderMatchingEngine {
     /// represented in the core while inflight orders can remain cache-only during the
     /// submitted/pending transition window. `reason` is attached to each cancellation, so an
     /// emptied book is attributable in the resulting events: expiration passes `None`, a halt
-    /// passes its venue reason.
-    fn cancel_open_orders(&mut self, excluded: &[ClientOrderId], reason: Option<Ustr>) {
+    /// passes its venue reason. Each cancellation is counted under `cause`, which names the rule
+    /// that emptied the book.
+    fn cancel_open_orders(
+        &mut self,
+        excluded: &[ClientOrderId],
+        reason: Option<Ustr>,
+        cause: Option<FillCause>,
+    ) {
         let instrument_id = self.instrument.id();
         let open_order_ids: IndexSet<ClientOrderId> = {
             let cache = self.cache.borrow();
@@ -2834,7 +2848,7 @@ impl OrderMatchingEngine {
             };
 
             if let Some(order) = order {
-                self.cancel_order_excluding(&order, None, excluded, reason);
+                self.cancel_order_excluding(&order, None, excluded, reason, cause);
             }
         }
     }
@@ -2846,7 +2860,7 @@ impl OrderMatchingEngine {
 
         self.pending_resolution = true;
         self.market_status = MarketStatus::Closed;
-        self.cancel_open_orders(excluded, None);
+        self.cancel_open_orders(excluded, None, Some(FillCause::CorporateAction));
         log::info!(
             "{} expired and is now pending resolution; open orders canceled and new orders blocked",
             self.instrument.id()
@@ -2925,7 +2939,7 @@ impl OrderMatchingEngine {
         self.pending_resolution = false;
         let close = self.instrument_close.take();
         log::info!("{} reached expiration", self.instrument.id());
-        self.cancel_open_orders(excluded, None);
+        self.cancel_open_orders(excluded, None, Some(FillCause::CorporateAction));
 
         let instrument_id = self.instrument.id();
         let positions: Vec<(
@@ -3013,11 +3027,12 @@ impl OrderMatchingEngine {
                     None,
                     None,
                     false,
+                    FillCause::CorporateAction,
                 ) {
                     log::error!("Cannot fill expiration order {client_order_id}: {e}");
                 }
             } else {
-                self.fill_market_order(client_order_id);
+                self.fill_market_order_with_cause(client_order_id, FillCause::CorporateAction);
             }
         }
     }
@@ -3152,7 +3167,7 @@ impl OrderMatchingEngine {
             self.account_ids.insert(trader_id, account_id);
             self.generate_order_submitted(&order, account_id);
             self.generate_order_accepted(&order, venue_order_id);
-            self.fill_market_order(client_order_id);
+            self.fill_market_order_with_cause(client_order_id, FillCause::Liquidation);
         }
     }
 
@@ -3193,6 +3208,9 @@ impl OrderMatchingEngine {
         // reason rather than emitting events while the borrow is held.
         // This avoids RefCell re-entrancy panics from synchronous event
         // dispatch that calls back into the execution engine.
+        // The cause of a rejection, when the rejecting rule is one of the closed cause
+        // vocabulary. Only the price band rejects a submission, so only it sets a cause.
+        let mut reject_cause: Option<FillCause> = None;
         let reject_reason: Option<Ustr> = 'validate: {
             let cache_borrow = self.cache.as_ref().borrow();
 
@@ -3394,6 +3412,7 @@ impl OrderMatchingEngine {
                 let price_dec = price.as_decimal();
 
                 if price_dec < lower || price_dec > upper {
+                    reject_cause = Some(FillCause::PriceBand);
                     break 'validate Some(
                         format!(
                             "Order price {} is outside the {} basis point price band {}-{} around reference {} for order {}",
@@ -3461,6 +3480,9 @@ impl OrderMatchingEngine {
         };
 
         if let Some(reason) = reject_reason {
+            if let Some(cause) = reject_cause {
+                self.fill_cause_counts.record(cause);
+            }
             self.generate_order_rejected(order, reason);
             return;
         }
@@ -3768,7 +3790,7 @@ impl OrderMatchingEngine {
                 continue;
             }
 
-            self.cancel_order_excluding(&order, None, excluded, None);
+            self.cancel_order_excluding(&order, None, excluded, None, None);
         }
     }
 
@@ -4270,6 +4292,12 @@ impl OrderMatchingEngine {
         self.circuit_breaker_trips
     }
 
+    /// Returns the per-run totals of order events by cause.
+    #[must_use]
+    pub const fn fill_cause_counts(&self) -> &FillCauseCounts {
+        &self.fill_cause_counts
+    }
+
     /// Advances the circuit breaker for a matching pass at `timestamp_ns`.
     ///
     /// The breaker watches the venue reference price that the price band is also measured
@@ -4323,7 +4351,11 @@ impl OrderMatchingEngine {
         self.breaker_halt_until_ns = Some(UnixNanos::from(
             timestamp_ns.as_u64().saturating_add(config.halt_ns),
         ));
-        self.halt_market(MarketStatus::Halted, "CIRCUIT_BREAKER");
+        self.halt_market(
+            MarketStatus::Halted,
+            "CIRCUIT_BREAKER",
+            FillCause::CircuitBreaker,
+        );
 
         log::warn!(
             "{} circuit breaker tripped: reference moved {move_bps} basis points from the window anchor {anchor}, halting for {} ns",
@@ -4928,6 +4960,15 @@ impl OrderMatchingEngine {
     /// The order is filled as a taker against available liquidity.
     /// Reduce-only orders are canceled if no position exists.
     pub fn fill_market_order(&mut self, client_order_id: ClientOrderId) {
+        self.fill_market_order_with_cause(client_order_id, FillCause::BookMatch);
+    }
+
+    /// Fills a market order, attributing the resulting fills to `cause`.
+    ///
+    /// The cause is set by the decision that reached this path: an ordinary market order passes
+    /// [`FillCause::BookMatch`], a liquidation passes [`FillCause::Liquidation`], and a
+    /// corporate-action close passes [`FillCause::CorporateAction`].
+    fn fill_market_order_with_cause(&mut self, client_order_id: ClientOrderId, cause: FillCause) {
         let mut order = match self.order_snapshot(client_order_id) {
             Some(order) => order,
             None => {
@@ -5051,6 +5092,7 @@ impl OrderMatchingEngine {
             position.as_ref(),
             protection_price,
             from_synthetic,
+            cause,
         ) {
             log::error!("Cannot fill market order {}: {e}", order.client_order_id());
         }
@@ -5259,6 +5301,7 @@ impl OrderMatchingEngine {
                     position.as_ref(),
                     None,
                     false,
+                    FillCause::BookMatch,
                 ) {
                     log::error!("Cannot fill limit order {}: {e}", order.client_order_id());
                 }
@@ -5352,6 +5395,7 @@ impl OrderMatchingEngine {
         position: Option<&Position>,
         protection_price: Option<Price>,
         from_synthetic: bool,
+        cause: FillCause,
     ) -> anyhow::Result<()> {
         if self.is_fok_unfillable(order, fills) {
             self.cancel_order(order, None);
@@ -5533,6 +5577,7 @@ impl OrderMatchingEngine {
                 liquidity_side,
                 venue_position_id,
                 position,
+                cause,
             )?;
             last_fill_px = Some(fill_px);
 
@@ -5628,6 +5673,7 @@ impl OrderMatchingEngine {
                 liquidity_side,
                 venue_position_id,
                 position,
+                cause,
             )?;
             self.purge_cached_filled_qty_if_closed(order.client_order_id());
         }
@@ -5741,6 +5787,7 @@ impl OrderMatchingEngine {
         liquidity_side: LiquiditySide,
         venue_position_id: Option<PositionId>,
         position: Option<&Position>,
+        cause: FillCause,
     ) -> anyhow::Result<()> {
         self.check_size_precision(last_qty.precision, "fill quantity")?;
 
@@ -5798,6 +5845,7 @@ impl OrderMatchingEngine {
             self.instrument.quote_currency(),
             commission,
             liquidity_side,
+            cause,
         );
 
         let post_fill_filled_qty = self
@@ -6541,17 +6589,21 @@ impl OrderMatchingEngine {
     }
 
     fn cancel_order(&mut self, order: &OrderAny, cancel_contingencies: Option<bool>) {
-        self.cancel_order_excluding(order, cancel_contingencies, &[], None);
+        self.cancel_order_excluding(order, cancel_contingencies, &[], None, None);
     }
 
     /// Cancels `order`, leaving `excluded` untouched should the cancellation cascade into its
     /// contingent orders, and attaching `reason` to the resulting cancellation event.
+    ///
+    /// When `cause` names a venue rule, the cancellation is counted under it at the point the
+    /// cancellation event is emitted, so a rule-driven cancel is attributed exactly once.
     fn cancel_order_excluding(
         &mut self,
         order: &OrderAny,
         cancel_contingencies: Option<bool>,
         excluded: &[ClientOrderId],
         reason: Option<Ustr>,
+        cause: Option<FillCause>,
     ) {
         if self.inflight_orders.contains(order.client_order_id()) {
             return;
@@ -6585,6 +6637,10 @@ impl OrderMatchingEngine {
 
         let venue_order_id = self.ids_generator.get_venue_order_id(order).unwrap();
         self.generate_order_canceled(order, venue_order_id, reason);
+
+        if let Some(cause) = cause {
+            self.fill_cause_counts.record(cause);
+        }
 
         if self.config.support_contingent_orders
             && order.contingency_type().is_some()
@@ -7241,7 +7297,23 @@ impl OrderMatchingEngine {
         quote_currency: Currency,
         commission: Money,
         liquidity_side: LiquiditySide,
+        cause: FillCause,
     ) {
+        // A fill the engine decided as an ordinary book match is re-attributed to the halt in
+        // force at fill time. Liquidation and corporate-action fills keep their own cause, so a
+        // rule-driven print is never reported as a market one.
+        let cause = match cause {
+            FillCause::BookMatch if self.market_status != MarketStatus::Open => {
+                if self.market_status == MarketStatus::Halted {
+                    FillCause::CircuitBreaker
+                } else {
+                    FillCause::Halt
+                }
+            }
+            other => other,
+        };
+        self.fill_cause_counts.record(cause);
+
         debug_assert!(
             last_qty <= order.quantity(),
             "Fill quantity {last_qty} exceeds order quantity {order_qty} for {client_order_id}",
@@ -7521,8 +7593,8 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::{
-        BarTickSizes, OrderFilled, OrderMatchingEngine, Position, PositionId, PostMatchOrderAction,
-        order_precision_valid, post_match_order_action,
+        BarTickSizes, FillCause, OrderFilled, OrderMatchingEngine, Position, PositionId,
+        PostMatchOrderAction, order_precision_valid, post_match_order_action,
     };
     use crate::{
         matching_engine::config::OrderMatchingEngineConfig,
@@ -8205,6 +8277,7 @@ mod tests {
                     Some(&position),
                     None,
                     false,
+                    FillCause::BookMatch,
                 )
                 .unwrap();
             let events = events.borrow();
@@ -8450,6 +8523,7 @@ mod tests {
                 Some(&position),
                 None,
                 false,
+                FillCause::BookMatch,
             )
             .unwrap();
 
@@ -8705,6 +8779,7 @@ mod tests {
                     Some(&position),
                     None,
                     false,
+                    FillCause::BookMatch,
                 )
                 .unwrap();
             let mut expected = vec![("fill", "MIXED-CLOSE", Quantity::from(quantity))];
@@ -9120,6 +9195,7 @@ mod tests {
                 Some(&position),
                 None,
                 false,
+                FillCause::BookMatch,
             )
             .unwrap();
         let ids = engine.reduce_only_order_ids(position_id);
@@ -9765,6 +9841,7 @@ mod tests {
                 Some(&position),
                 None,
                 false,
+                FillCause::BookMatch,
             )
             .unwrap();
 
@@ -10136,6 +10213,7 @@ mod tests {
                 LiquiditySide::Taker,
                 None,
                 None,
+                FillCause::BookMatch,
             )
             .unwrap();
 
@@ -10203,6 +10281,7 @@ mod tests {
                 LiquiditySide::Taker,
                 None,
                 None,
+                FillCause::BookMatch,
             )
             .unwrap();
 
@@ -10257,6 +10336,7 @@ mod tests {
             LiquiditySide::Taker,
             None,
             None,
+            FillCause::BookMatch,
         );
 
         assert!(result.is_err());

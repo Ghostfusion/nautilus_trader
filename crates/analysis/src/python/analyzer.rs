@@ -22,6 +22,7 @@ use nautilus_model::{
     types::{Currency, Money},
 };
 use pyo3::prelude::*;
+use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     Returns,
@@ -139,6 +140,10 @@ impl PortfolioAnalyzer {
     /// When stages have been declared with `Self.set_declared_stages`, a declared stage that
     /// produced no rendered row is reported as one row in `general`, named for the stage, so a
     /// chain that intends a stage it never scores is visible rather than silent.
+    ///
+    /// When fill-cause totals have been set with `Self.set_fill_cause_counts`, one row per
+    /// cause is added to `general`, named for the cause, including the causes at zero: a zero is a
+    /// fact and an omitted row is not. With no totals set, no cause row is produced.
     #[pyo3(name = "statistics")]
     fn py_statistics(&self) -> PortfolioStatistics {
         self.statistics()
@@ -266,6 +271,71 @@ impl PortfolioAnalyzer {
         let requested: Vec<&str> = requested.iter().map(String::as_str).collect();
 
         self.report_period_metrics(&requested, &periods)
+    }
+
+    /// Reports the requested tape-fed metrics, one result per request.
+    ///
+    /// Mirrors `Self.report_period_metrics` for the tape input: a metric whose definition is
+    /// defined over `MetricInput.Trades` is calculated from the signed order-flow imbalance
+    /// carried by `Self.set_signed_order_flow_imbalance`, and one that is not is reported
+    /// `unavailable` with `MetricReason.UnsupportedInput`. A direction-dependent metric (one
+    /// whose definition declares `MetricTag.DirectionDependent`) is refused with
+    /// `MetricReason.AggressorAgreementBelowFloor` when the declared floor is above the
+    /// observed rate, and the refusal's detail names both; nothing is printed as a number in that
+    /// case.
+    ///
+    /// The floor is a precondition, not a calculation: it refuses only when a rate was observed,
+    /// because a floor cannot be breached by a rate that was never measured. An unmeasured rate
+    /// therefore leaves the metric computed, which is the conservative reading of an absent
+    /// measurement.
+    #[expect(clippy::needless_pass_by_value)]
+    #[pyo3(name = "report_tape_metrics")]
+    fn py_report_tape_metrics(&self, requested: Vec<String>) -> MetricReport {
+        let requested: Vec<&str> = requested.iter().map(String::as_str).collect();
+
+        self.report_tape_metrics(&requested)
+    }
+
+    /// Sets the observed aggressor-agreement rate of the run's trade tape and the declared floor.
+    ///
+    /// The rate is `None` when no trade was comparable, which is not a zero rate: a value that was
+    /// never measured cannot breach a floor, so a direction-dependent metric is computed as usual.
+    /// The floor is `None` when the run declared none, which disables the gate. Both are replaced
+    /// together because the gate reads them together.
+    #[pyo3(name = "set_aggressor_agreement", signature = (observed, floor=None))]
+    fn py_set_aggressor_agreement(&mut self, observed: Option<f64>, floor: Option<f64>) {
+        self.set_aggressor_agreement(observed, floor);
+    }
+
+    /// Returns the observed aggressor-agreement rate of the run's trade tape, if any.
+    #[getter]
+    #[pyo3(name = "aggressor_agreement")]
+    const fn py_aggressor_agreement(&self) -> Option<f64> {
+        self.aggressor_agreement()
+    }
+
+    /// Returns the declared aggressor-agreement floor, if any.
+    #[getter]
+    #[pyo3(name = "aggressor_agreement_floor")]
+    const fn py_aggressor_agreement_floor(&self) -> Option<f64> {
+        self.aggressor_agreement_floor()
+    }
+
+    /// Sets the signed order-flow imbalance accumulated from the run's trade tape.
+    ///
+    /// The quantity is already signed by the reported aggressor side; the analyzer is a carrier,
+    /// not a reconstructor, of its sign. Replaces any value already held.
+    #[pyo3(name = "set_signed_order_flow_imbalance")]
+    fn py_set_signed_order_flow_imbalance(&mut self, value: Option<f64>) {
+        self.set_signed_order_flow_imbalance(value.and_then(Decimal::from_f64_retain));
+    }
+
+    /// Returns the signed order-flow imbalance accumulated from the run's trade tape, if any.
+    #[getter]
+    #[pyo3(name = "signed_order_flow_imbalance")]
+    fn py_signed_order_flow_imbalance(&self) -> Option<f64> {
+        self.signed_order_flow_imbalance()
+            .and_then(|value| value.to_f64())
     }
 
     /// Records a position return at a specific timestamp.

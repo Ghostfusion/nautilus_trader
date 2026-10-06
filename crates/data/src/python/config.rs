@@ -65,6 +65,7 @@ impl DataEngineConfig {
         time_bars_origin_offset = None,
         validate_data_sequence = None,
         data_quality_action = None,
+        aggressor_agreement_floor = None,
         buffer_deltas = None,
         emit_quotes_from_book = None,
         emit_quotes_from_book_depths = None,
@@ -81,6 +82,7 @@ impl DataEngineConfig {
         time_bars_origin_offset: Option<HashMap<BarAggregation, u64>>,
         validate_data_sequence: Option<bool>,
         data_quality_action: Option<DataQualityAction>,
+        aggressor_agreement_floor: Option<f64>,
         buffer_deltas: Option<bool>,
         emit_quotes_from_book: Option<bool>,
         emit_quotes_from_book_depths: Option<bool>,
@@ -97,7 +99,7 @@ impl DataEngineConfig {
                 .map(|(agg, nanos)| (agg, Duration::from_nanos(nanos)))
                 .collect()
         });
-        Ok(Self::builder()
+        let config = Self::builder()
             .maybe_time_bars_build_with_no_updates(time_bars_build_with_no_updates)
             .maybe_time_bars_timestamp_on_close(time_bars_timestamp_on_close)
             .maybe_time_bars_skip_first_non_full_bar(time_bars_skip_first_non_full_bar)
@@ -106,13 +108,20 @@ impl DataEngineConfig {
             .maybe_time_bars_origin_offset(time_bars_origin_offset)
             .maybe_validate_data_sequence(validate_data_sequence)
             .maybe_data_quality_action(data_quality_action)
+            .maybe_aggressor_agreement_floor(aggressor_agreement_floor)
             .maybe_buffer_deltas(buffer_deltas)
             .maybe_emit_quotes_from_book(emit_quotes_from_book)
             .maybe_emit_quotes_from_book_depths(emit_quotes_from_book_depths)
             .maybe_disable_historical_cache(disable_historical_cache)
             .maybe_external_clients(external_clients)
             .maybe_debug(debug)
-            .build())
+            .build();
+
+        // Refuse a floor outside the unit interval at construction, as the other checked
+        // configuration values do.
+        config.validate().map_err(to_pyvalue_err)?;
+
+        Ok(config)
     }
 
     #[getter]
@@ -164,6 +173,12 @@ impl DataEngineConfig {
     #[pyo3(name = "data_quality_action")]
     fn py_data_quality_action(&self) -> Option<DataQualityAction> {
         self.data_quality_action
+    }
+
+    #[getter]
+    #[pyo3(name = "aggressor_agreement_floor")]
+    const fn py_aggressor_agreement_floor(&self) -> Option<f64> {
+        self.aggressor_agreement_floor
     }
 
     #[getter]

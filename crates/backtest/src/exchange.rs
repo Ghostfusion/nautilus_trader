@@ -40,6 +40,7 @@ use nautilus_execution::{
     matching_engine::{
         OrderMatchingEngine,
         config::{CircuitBreakerConfig, OrderMatchingEngineConfig},
+        fill_cause::FillCauseCounts,
         inflight::InflightOrders,
     },
     models::{
@@ -648,6 +649,19 @@ impl SimulatedExchange {
     #[must_use]
     pub const fn get_matching_engines(&self) -> &IndexMap<InstrumentId, OrderMatchingEngine> {
         &self.matching_engines
+    }
+
+    /// Returns the per-run totals of order events by cause across the venue's instruments.
+    ///
+    /// The totals are summed over every matching engine, so a multi-instrument venue reports one
+    /// per-cause figure for the run. Every cause is present, including the causes at zero.
+    #[must_use]
+    pub fn fill_cause_counts(&self) -> FillCauseCounts {
+        let mut counts = FillCauseCounts::new();
+        for matching_engine in self.matching_engines.values() {
+            counts.merge(matching_engine.fill_cause_counts());
+        }
+        counts
     }
 
     /// Returns all order books keyed by instrument ID.

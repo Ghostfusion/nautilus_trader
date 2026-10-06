@@ -143,6 +143,13 @@ pub enum MetricTag {
     Tail,
     /// Depends on an annualisation period.
     Annualised,
+    /// The sign of the value is taken from a reported trade aggressor side.
+    ///
+    /// A venue whose reported aggressor side disagrees with an independent reconstruction cannot
+    /// support a signed metric: the magnitude may be measured and the sign may still be wrong, so
+    /// the value is not interpretable below a declared agreement floor. This tag is what a report
+    /// reads to refuse such a metric rather than print a plausible number.
+    DirectionDependent,
 }
 
 impl MetricTag {
@@ -158,6 +165,7 @@ impl MetricTag {
         Self::Distribution,
         Self::Tail,
         Self::Annualised,
+        Self::DirectionDependent,
     ];
 
     /// Returns the stable string for this tag.
@@ -174,6 +182,7 @@ impl MetricTag {
             Self::Distribution => "distribution",
             Self::Tail => "tail",
             Self::Annualised => "annualised",
+            Self::DirectionDependent => "direction_dependent",
         }
     }
 }
@@ -277,6 +286,13 @@ pub enum MetricInput {
     Positions,
     /// A frame of performance periods.
     PerformancePeriods,
+    /// A signed order-flow quantity accumulated from the trade tape.
+    ///
+    /// The value is not derived from the portfolio ledger: it is fed by the data engine's own
+    /// trade tape, signed by the reported aggressor side. It is a data source of the analyzer in
+    /// the same sense as returns or positions, so a definition declared over it is reported
+    /// unavailable when no tape quantity was supplied rather than silently omitted.
+    Trades,
 }
 
 impl MetricInput {
@@ -287,6 +303,7 @@ impl MetricInput {
         Self::RealizedPnls,
         Self::Positions,
         Self::PerformancePeriods,
+        Self::Trades,
     ];
 
     /// Returns the stable string for this input.
@@ -298,6 +315,7 @@ impl MetricInput {
             Self::RealizedPnls => "realized_pnls",
             Self::Positions => "positions",
             Self::PerformancePeriods => "performance_periods",
+            Self::Trades => "trades",
         }
     }
 }
@@ -494,6 +512,12 @@ pub enum MetricReason {
     UnresolvedCurrency,
     /// The metric is not in the analyzer's metric set.
     NotInMetricSet,
+    /// A direction-dependent metric was requested below its declared aggressor-agreement floor.
+    ///
+    /// The tape's reported aggressor side agrees with an independent reconstruction too rarely for
+    /// the sign of the metric to be interpretable, so the metric is refused rather than printed.
+    /// The observed rate and the declared floor are carried in the result's detail.
+    AggressorAgreementBelowFloor,
 }
 
 impl MetricReason {
@@ -506,6 +530,7 @@ impl MetricReason {
         Self::UndefinedResult,
         Self::UnresolvedCurrency,
         Self::NotInMetricSet,
+        Self::AggressorAgreementBelowFloor,
     ];
 
     /// Returns the stable string for this reason.
@@ -519,6 +544,7 @@ impl MetricReason {
             Self::UndefinedResult => "undefined_result",
             Self::UnresolvedCurrency => "unresolved_currency",
             Self::NotInMetricSet => "not_in_metric_set",
+            Self::AggressorAgreementBelowFloor => "aggressor_agreement_below_floor",
         }
     }
 
@@ -526,10 +552,11 @@ impl MetricReason {
     #[must_use]
     pub const fn status(self) -> MetricStatus {
         match self {
-            Self::InsufficientData | Self::UnsupportedInput | Self::MissingBenchmark => {
-                MetricStatus::Unavailable
-            }
-            Self::UnresolvedCurrency => MetricStatus::Unavailable,
+            Self::InsufficientData
+            | Self::UnsupportedInput
+            | Self::MissingBenchmark
+            | Self::AggressorAgreementBelowFloor
+            | Self::UnresolvedCurrency => MetricStatus::Unavailable,
             Self::NonFiniteInput | Self::UndefinedResult => MetricStatus::Invalid,
             Self::NotInMetricSet => MetricStatus::NotRegistered,
         }
@@ -744,6 +771,7 @@ pub struct MetricResult {
     status: MetricStatus,
     value: Option<f64>,
     reason: Option<MetricReason>,
+    detail: Option<String>,
 }
 
 impl MetricResult {
@@ -756,6 +784,7 @@ impl MetricResult {
             status: MetricStatus::Computed,
             value: Some(value),
             reason: None,
+            detail: None,
         }
     }
 
@@ -784,7 +813,30 @@ impl MetricResult {
             status,
             value: None,
             reason: Some(reason),
+            detail: None,
         }
+    }
+
+    /// Creates a result for a state other than `Computed`, with a human-readable detail.
+    ///
+    /// The detail is presentation, not identity: it names the quantities a reason refers to (for
+    /// example the observed rate and the declared floor), while the reason code stays the closed,
+    /// canonical token a caller branches on.
+    ///
+    /// # Panics
+    ///
+    /// The same conditions as [`Self::not_computed`].
+    #[must_use]
+    pub fn not_computed_with_detail(
+        id: String,
+        title: String,
+        reason: MetricReason,
+        status: MetricStatus,
+        detail: impl Into<String>,
+    ) -> Self {
+        let mut result = Self::not_computed(id, title, reason, status);
+        result.detail = Some(detail.into());
+        result
     }
 
     /// Returns the stable metric identity.
@@ -816,6 +868,15 @@ impl MetricResult {
     pub const fn reason(&self) -> Option<MetricReason> {
         self.reason
     }
+
+    /// Returns the human-readable detail of the reason, when one was supplied.
+    ///
+    /// The detail names the quantities a refusal refers to; it is never canonical, so a consumer
+    /// branches on [`Self::reason`] and reads the detail only for a human.
+    #[must_use]
+    pub fn detail(&self) -> Option<&str> {
+        self.detail.as_deref()
+    }
 }
 
 impl MetricResult {
@@ -830,10 +891,15 @@ impl MetricResult {
     pub fn capability(&self) -> Capability {
         match self.reason() {
             None => Capability::available(),
-            Some(reason) => Capability::unavailable(
-                reason.as_str(),
-                format!("{} is {}", self.title(), self.status().as_str()),
-            ),
+            Some(reason) => {
+                let detail = match self.detail() {
+                    Some(detail) => {
+                        format!("{} is {}: {detail}", self.title(), self.status().as_str())
+                    }
+                    None => format!("{} is {}", self.title(), self.status().as_str()),
+                };
+                Capability::unavailable(reason.as_str(), detail)
+            }
         }
     }
 }
@@ -953,7 +1019,7 @@ mod tests {
             assert_eq!(unit.to_string(), unit.as_str());
         }
 
-        assert_eq!(MetricTag::ALL.len(), 10);
+        assert_eq!(MetricTag::ALL.len(), 11);
         for tag in MetricTag::ALL {
             assert!(!tag.as_str().is_empty());
             assert_eq!(tag.to_string(), tag.as_str());
@@ -965,7 +1031,7 @@ mod tests {
             assert_eq!(direction.to_string(), direction.as_str());
         }
 
-        assert_eq!(MetricInput::ALL.len(), 5);
+        assert_eq!(MetricInput::ALL.len(), 6);
         for input in MetricInput::ALL {
             assert!(!input.as_str().is_empty());
             assert_eq!(input.to_string(), input.as_str());
@@ -984,7 +1050,7 @@ mod tests {
         }
 
         // Every reason belongs to exactly one status, and the mapping is total.
-        assert_eq!(MetricReason::ALL.len(), 7);
+        assert_eq!(MetricReason::ALL.len(), 8);
         for reason in MetricReason::ALL {
             assert!(MetricStatus::ALL.contains(&reason.status()));
             assert!(!reason.as_str().is_empty());
@@ -1252,6 +1318,28 @@ mod capability_tests {
                 .starts_with(&format!("{expected}: Long Ratio is "))
         );
         assert!(capability.requirements().is_empty());
+    }
+
+    #[test]
+    fn test_a_refusal_with_detail_names_its_quantities() {
+        let result = MetricResult::not_computed_with_detail(
+            "order_flow_imbalance".to_string(),
+            "Order Flow Imbalance (reported aggressor)".to_string(),
+            MetricReason::AggressorAgreementBelowFloor,
+            MetricStatus::Unavailable,
+            "observed aggressor agreement 0.6 is below the declared floor 0.9",
+        );
+
+        assert_eq!(
+            result.detail(),
+            Some("observed aggressor agreement 0.6 is below the declared floor 0.9"),
+        );
+
+        let capability = result.capability();
+
+        // Only the code is compared: the detail is for a human and is not canonical.
+        assert_eq!(capability.code(), Some("aggressor_agreement_below_floor"));
+        assert!(!capability.is_available());
     }
 
     #[test]

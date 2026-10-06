@@ -67,6 +67,17 @@ pub struct DataEngineConfig {
     /// what to do with an out-of-order or crossed record. `Drop` refuses a violating record: it
     /// is neither cached nor published, and the violation is counted.
     pub data_quality_action: Option<DataQualityAction>,
+    /// The minimum aggressor-agreement rate a direction-dependent metric may be computed at.
+    ///
+    /// The gate compares a trade's reported aggressor side with the tick-rule inference and counts
+    /// the comparisons; this floor is the declared fraction of those comparisons that must agree
+    /// before a metric whose sign depends on the reported side is interpretable. Below it a report
+    /// refuses the metric rather than printing a plausible number.
+    ///
+    /// `None` (the default) declares no floor, so a direction-dependent metric is computed as
+    /// usual. A declared value must be a finite rate in the unit interval `[0.0, 1.0]`; a value
+    /// outside it is refused at construction by [`DataEngineConfig::validate`].
+    pub aggressor_agreement_floor: Option<f64>,
     /// If order book deltas should be buffered until the `F_LAST` flag is set for a delta.
     #[builder(default)]
     pub buffer_deltas: bool,
@@ -90,8 +101,61 @@ pub struct DataEngineConfig {
     pub debug: bool,
 }
 
+impl DataEngineConfig {
+    /// Validates the declared aggressor-agreement floor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the floor is not a finite rate in the unit interval `[0.0, 1.0]`.
+    /// A threshold outside the unit interval cannot separate a measured rate from an unmeasured
+    /// one, so it is refused rather than carried.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(floor) = self.aggressor_agreement_floor {
+            anyhow::ensure!(
+                floor.is_finite() && (0.0..=1.0).contains(&floor),
+                "aggressor_agreement_floor must be a finite rate in the unit interval, was {floor}",
+            );
+        }
+
+        Ok(())
+    }
+}
+
 impl Default for DataEngineConfig {
     fn default() -> Self {
         Self::builder().build()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    fn test_aggressor_floor_accepts_the_unit_interval_and_absence() {
+        assert!(DataEngineConfig::default().validate().is_ok());
+
+        for floor in [0.0, 0.5, 1.0] {
+            let config = DataEngineConfig::builder()
+                .aggressor_agreement_floor(floor)
+                .build();
+
+            assert!(config.validate().is_ok(), "floor {floor} was refused");
+        }
+    }
+
+    #[rstest]
+    #[case(-0.1)]
+    #[case(1.1)]
+    #[case(f64::NAN)]
+    #[case(f64::INFINITY)]
+    fn test_aggressor_floor_refuses_a_value_outside_the_unit_interval(#[case] floor: f64) {
+        let config = DataEngineConfig::builder()
+            .aggressor_agreement_floor(floor)
+            .build();
+
+        assert!(config.validate().is_err(), "floor {floor} was accepted");
     }
 }

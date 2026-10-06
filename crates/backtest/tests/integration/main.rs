@@ -24,6 +24,7 @@ mod derisking;
 mod ema_cross;
 mod exchange;
 mod fee_model;
+mod fill_cause;
 mod grid_mm;
 mod grid_mm_itch;
 mod netting_fill_void;

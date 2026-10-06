@@ -96,6 +96,15 @@ struct PortfolioState {
     periods: Vec<PerformancePeriod>,
     /// The reducer that closes the frame at UTC-day boundaries; created on the first observation.
     reducer: Option<PerformancePeriodReducer>,
+    /// The observed aggressor-agreement rate of the run's trade tape, if any.
+    aggressor_agreement: Option<f64>,
+    /// The declared aggressor-agreement floor, if any.
+    aggressor_agreement_floor: Option<f64>,
+    /// The signed order-flow imbalance accumulated from the run's trade tape, if any.
+    signed_order_flow_imbalance: Option<Decimal>,
+    /// The per-run totals of venue order events by cause, if any, keyed by each cause's stable
+    /// string.
+    fill_cause_counts: Option<BTreeMap<String, u64>>,
 }
 
 #[derive(Clone, Copy)]
@@ -159,6 +168,10 @@ impl PortfolioState {
             balance_error: None,
             periods: Vec::new(),
             reducer: None,
+            aggressor_agreement: None,
+            aggressor_agreement_floor: None,
+            signed_order_flow_imbalance: None,
+            fill_cause_counts: None,
         }
     }
 
@@ -191,6 +204,10 @@ impl PortfolioState {
         self.balance_error = None;
         self.periods.clear();
         self.reducer = None;
+        self.aggressor_agreement = None;
+        self.aggressor_agreement_floor = None;
+        self.signed_order_flow_imbalance = None;
+        self.fill_cause_counts = None;
         self.analyzer.reset();
         self.initialized = false;
         log::debug!("READY");
@@ -2248,6 +2265,10 @@ impl Portfolio {
         );
         analyzer.replace_statistics(statistics);
         analyzer.set_performance_periods(periods);
+        analyzer
+            .set_aggressor_agreement(inner.aggressor_agreement, inner.aggressor_agreement_floor);
+        analyzer.set_signed_order_flow_imbalance(inner.signed_order_flow_imbalance);
+        analyzer.set_fill_cause_counts(inner.fill_cause_counts.clone());
 
         analyzer
     }
@@ -2276,7 +2297,36 @@ impl Portfolio {
             .collect()
     }
 
-    /// Registers `statistic` for inclusion in portfolio and backtest analysis.
+    /// Sets the observed aggressor-agreement rate of the run's trade tape and the declared floor.
+    ///
+    /// The pair is carried onto every [`PortfolioAnalyzer`] this portfolio builds, so a report read
+    /// from [`Self::analyzer`] refuses a direction-dependent metric below the floor. It is set by
+    /// the result path that holds the data engine's counts beside the data engine's config.
+    pub fn set_aggressor_agreement(&mut self, observed: Option<f64>, floor: Option<f64>) {
+        let mut inner = self.inner.borrow_mut();
+        inner.aggressor_agreement = observed;
+        inner.aggressor_agreement_floor = floor;
+    }
+
+    /// Sets the signed order-flow imbalance accumulated from the run's trade tape.
+    ///
+    /// Carried onto every [`PortfolioAnalyzer`] this portfolio builds, so the tape-fed metric has
+    /// the run's quantity rather than a stale one.
+    pub fn set_signed_order_flow_imbalance(&mut self, value: Option<Decimal>) {
+        self.inner.borrow_mut().signed_order_flow_imbalance = value;
+    }
+
+    /// Sets the per-run totals of venue order events by cause, keyed by each cause's stable
+    /// string.
+    ///
+    /// Carried onto every [`PortfolioAnalyzer`] this portfolio builds, so a report read from
+    /// [`Self::analyzer`] renders one row per cause. The map is the venue's, including the causes
+    /// at zero; the portfolio is a carrier, not a counter.
+    pub fn set_fill_cause_counts(&mut self, counts: Option<BTreeMap<String, u64>>) {
+        self.inner.borrow_mut().fill_cause_counts = counts;
+    }
+
+    /// Registers a statistic for inclusion in portfolio and backtest analysis.
     ///
     /// The registration persists across [`Self::statistics`] calls and analyzer state resets.
     /// Registering a statistic whose name matches an existing one replaces it.

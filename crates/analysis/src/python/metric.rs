@@ -147,6 +147,16 @@ impl MetricResult {
         self.reason()
     }
 
+    /// Returns the human-readable detail of the reason, when one was supplied.
+    ///
+    /// The detail names the quantities a refusal refers to; it is never canonical, so a consumer
+    /// branches on `Self.reason` and reads the detail only for a human.
+    #[getter]
+    #[pyo3(name = "detail")]
+    fn py_detail(&self) -> Option<String> {
+        self.detail().map(ToString::to_string)
+    }
+
     fn __repr__(&self) -> String {
         match (self.value(), self.reason()) {
             (Some(value), _) => format!(
@@ -155,12 +165,21 @@ impl MetricResult {
                 self.status(),
                 value,
             ),
-            (None, Some(reason)) => format!(
-                "MetricResult(id={:?}, status={}, reason={})",
-                self.id(),
-                self.status(),
-                reason,
-            ),
+            (None, Some(reason)) => match self.detail() {
+                Some(detail) => format!(
+                    "MetricResult(id={:?}, status={}, reason={}, detail={:?})",
+                    self.id(),
+                    self.status(),
+                    reason,
+                    detail,
+                ),
+                None => format!(
+                    "MetricResult(id={:?}, status={}, reason={})",
+                    self.id(),
+                    self.status(),
+                    reason,
+                ),
+            },
             (None, None) => format!("MetricResult(id={:?}, status={})", self.id(), self.status()),
         }
     }
