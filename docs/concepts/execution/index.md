@@ -556,6 +556,8 @@ cross or immediately match. Other venue rejections leave it `false`.
 | `ORDER_COUNT_LIMIT_REACHED`                      | The configured order count limit for the scope was reached.                           |
 | `ACTIVE_ORDER_LIMIT_REACHED`                     | The configured active order limit for the scope was reached.                          |
 | `REPEATED_REQUEST_LIMIT_REACHED`                 | The configured repeated request limit for the scope was reached.                      |
+| `PARTICIPATION_LIMIT_REACHED`                    | The configured participation limit for the scope was reached.                         |
+| `INVENTORY_LIMIT_REACHED`                        | The configured inventory limit for the scope was reached.                             |
 | `RATE_LIMIT_EXCEEDED`                            | The order submission rate limit was exceeded.                                         |
 | `STREAM_RECONCILING`                             | The execution stream is unavailable or recovering; retry after recovery.              |
 | `NO_EXECUTION_CLIENT`                            | No execution client was found for the routed command.                                 |

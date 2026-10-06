@@ -101,6 +101,21 @@ pub enum RiskCapMetric {
     /// The identity is [`RiskRequestKey`]: the instrument, side, order type, quantity and price of
     /// the request, excluding the client order id, which a repeated request necessarily changes.
     RepeatedRequest,
+    /// The quantity a scope has filled over the window, in the instrument's units.
+    ///
+    /// This is the participation limit as far as it is enforceable here: a budget of traded volume
+    /// rather than a share of the market, because the engine observes this trader's fills and not
+    /// the venue's total traded volume, so a denominator would have to be invented. Where the
+    /// venue's volume is roughly stable the budget is the same discipline; where it is not, read
+    /// the cap as a budget. It is measured in quantity, so it carries `RiskCap::quantity_limit`
+    /// and must be scoped to an instrument.
+    Participation,
+    /// The absolute position size a scope holds in the instrument, in the instrument's units.
+    ///
+    /// Read from the cache's open position at the moment an action is gated, so this is standing
+    /// inventory rather than occurrences over a window. It is measured in quantity, so it carries
+    /// `RiskCap::quantity_limit`, must be scoped to an instrument, and takes no window.
+    Inventory,
 }
 
 /// The canonical identity of an order request, excluding the client order id.

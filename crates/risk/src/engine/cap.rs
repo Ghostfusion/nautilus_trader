@@ -37,6 +37,7 @@ use nautilus_model::{
     orders::{Order, OrderAny},
     risk::{RiskCapMetric, RiskCapScope, RiskRequestKey},
 };
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 /// The number of most recent cap refusals an engine retains for observation.
@@ -51,11 +52,21 @@ pub struct RiskCap {
     /// The kind of scope counted over.
     pub scope: RiskCapScope,
     /// The number of occurrences allowed before the cap refuses an action.
+    ///
+    /// Zero for a cap measured in quantity, which carries [`Self::quantity_limit`] instead.
     pub limit: u32,
+    /// The quantity allowed before the cap refuses an action, in the instrument's units.
+    ///
+    /// Set for [`RiskCapMetric::Participation`] and [`RiskCapMetric::Inventory`], which measure a
+    /// size rather than a count, so a configuration cannot read "no more than 1.5 BTC" as a number
+    /// of events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantity_limit: Option<Decimal>,
     /// The rolling window the count is taken over, in nanoseconds.
     ///
     /// `None` for [`RiskCapMetric::Active`], which counts the open order set as it stands rather
-    /// than occurrences over a window.
+    /// than occurrences over a window, and for [`RiskCapMetric::Inventory`], which reads the
+    /// standing position.
     pub window: Option<DurationNanos>,
 }
 
@@ -72,8 +83,32 @@ impl RiskCap {
             metric,
             scope,
             limit,
+            quantity_limit: None,
             window,
         }
+    }
+
+    /// Creates a new [`RiskCap`] instance measured in quantity.
+    #[must_use]
+    pub const fn new_quantity(
+        metric: RiskCapMetric,
+        scope: RiskCapScope,
+        quantity_limit: Decimal,
+        window: Option<DurationNanos>,
+    ) -> Self {
+        Self {
+            metric,
+            scope,
+            limit: 0,
+            quantity_limit: Some(quantity_limit),
+            window,
+        }
+    }
+
+    /// Returns whether this cap is measured in quantity rather than in occurrences.
+    #[must_use]
+    pub const fn measures_quantity(&self) -> bool {
+        self.quantity_limit.is_some()
     }
 
     /// Returns whether this cap counts occurrences of `action`.
@@ -85,13 +120,15 @@ impl RiskCap {
     #[must_use]
     pub const fn counts(&self, action: RiskCapMetric) -> bool {
         match self.metric {
-            RiskCapMetric::Active => false,
+            RiskCapMetric::Active | RiskCapMetric::Inventory => false,
             RiskCapMetric::Submit | RiskCapMetric::RepeatedRequest => {
                 matches!(action, RiskCapMetric::Submit)
             }
             RiskCapMetric::Modify => matches!(action, RiskCapMetric::Modify),
             RiskCapMetric::Cancel => matches!(action, RiskCapMetric::Cancel),
-            RiskCapMetric::Fill => matches!(action, RiskCapMetric::Fill),
+            RiskCapMetric::Fill | RiskCapMetric::Participation => {
+                matches!(action, RiskCapMetric::Fill)
+            }
         }
     }
 
@@ -109,13 +146,18 @@ impl RiskCap {
                     | RiskCapMetric::Fill
                     | RiskCapMetric::Active
                     | RiskCapMetric::RepeatedRequest
+                    | RiskCapMetric::Participation
+                    | RiskCapMetric::Inventory
             ),
-            RiskCapMetric::Modify => {
-                matches!(self.metric, RiskCapMetric::Modify | RiskCapMetric::Active)
-            }
+            RiskCapMetric::Modify => matches!(
+                self.metric,
+                RiskCapMetric::Modify | RiskCapMetric::Active | RiskCapMetric::Inventory
+            ),
             RiskCapMetric::Cancel
             | RiskCapMetric::Fill
             | RiskCapMetric::Active
+            | RiskCapMetric::Inventory
+            | RiskCapMetric::Participation
             | RiskCapMetric::RepeatedRequest => false,
         }
     }
@@ -278,6 +320,7 @@ impl RiskCounterKey {
 #[derive(Debug, Default)]
 pub struct RiskCounters {
     occurrences: AHashMap<RiskCounterKey, VecDeque<UnixNanos>>,
+    volumes: AHashMap<RiskCounterKey, VecDeque<(UnixNanos, Decimal)>>,
 }
 
 impl RiskCounters {
@@ -315,6 +358,56 @@ impl RiskCounters {
     /// Clears every counter.
     pub fn clear(&mut self) {
         self.occurrences.clear();
+        self.volumes.clear();
+    }
+
+    /// Records one quantity of `key` at `ts_event`.
+    ///
+    /// Quantities outside the window are dropped as they are seen, in the same way occurrences
+    /// are, so a counter holds only what can still count.
+    pub fn record_volume(&mut self, key: RiskCounterKey, ts_event: UnixNanos, quantity: Decimal) {
+        let window = key.window;
+        let volumes = self.volumes.entry(key).or_default();
+        volumes.push_back((ts_event, quantity));
+        Self::expire_volumes(volumes, ts_event, window);
+    }
+
+    /// Removes the most recent quantity of `key`, for a fill that was voided.
+    pub fn void_last_volume(&mut self, key: &RiskCounterKey, ts_event: UnixNanos) {
+        let Some(volumes) = self.volumes.get_mut(key) else {
+            return;
+        };
+
+        volumes.pop_back();
+        Self::expire_volumes(volumes, ts_event, key.window);
+    }
+
+    /// Returns the quantity of `key` within the window ending at `ts_event`.
+    pub fn volume(&mut self, key: &RiskCounterKey, ts_event: UnixNanos) -> Decimal {
+        let Some(volumes) = self.volumes.get_mut(key) else {
+            return Decimal::ZERO;
+        };
+
+        Self::expire_volumes(volumes, ts_event, key.window);
+
+        // A sum that cannot be represented saturates, so an observed quantity can overstate a cap
+        // and never understate one.
+        volumes.iter().fold(Decimal::ZERO, |total, (_, quantity)| {
+            total.checked_add(*quantity).unwrap_or(Decimal::MAX)
+        })
+    }
+
+    /// Drops the quantities that no longer fall inside the window ending at `ts_event`.
+    fn expire_volumes(
+        volumes: &mut VecDeque<(UnixNanos, Decimal)>,
+        ts_event: UnixNanos,
+        window: Option<DurationNanos>,
+    ) {
+        let Some(window) = window else {
+            return;
+        };
+
+        volumes.retain(|(ts, _)| ts_event.saturating_duration_since(*ts) < window);
     }
 
     /// Drops the occurrences that no longer fall inside the window ending at `ts_event`.
@@ -351,9 +444,17 @@ pub struct RiskCapDecision {
     /// The canonical request identity, for a cap that counts repeated requests.
     pub request: Option<RiskRequestKey>,
     /// The count observed.
+    ///
+    /// Zero for a decision measured in quantity, which carries [`Self::observed_quantity`].
     pub observed: u32,
     /// The configured limit.
+    ///
+    /// Zero for a decision measured in quantity, which carries [`Self::limit_quantity`].
     pub limit: u32,
+    /// The quantity observed, for a metric measured in quantity.
+    pub observed_quantity: Option<Decimal>,
+    /// The configured quantity limit, for a metric measured in quantity.
+    pub limit_quantity: Option<Decimal>,
     /// The rolling window the count was taken over.
     pub window: Option<DurationNanos>,
     /// The timestamp the refusal was evaluated at.
@@ -387,6 +488,19 @@ impl RiskCapDecision {
                     limit: self.limit,
                     window_ns: self.window.map_or(0, |window| window.as_u64()),
                 },
+            },
+            RiskCapMetric::Participation => OrderDeniedReason::ParticipationLimitReached {
+                scope: self.scope,
+                // A decision measured in quantity always carries both, so the fallback keeps the
+                // rendering total rather than panicking on the engine's send path.
+                observed: self.observed_quantity.unwrap_or_default(),
+                limit: self.limit_quantity.unwrap_or_default(),
+                window_ns: self.window.map_or(0, |window| window.as_u64()),
+            },
+            RiskCapMetric::Inventory => OrderDeniedReason::InventoryLimitReached {
+                scope: self.scope,
+                observed: self.observed_quantity.unwrap_or_default(),
+                limit: self.limit_quantity.unwrap_or_default(),
             },
             metric => OrderDeniedReason::OrderCountLimitReached {
                 metric,
@@ -426,13 +540,43 @@ pub fn evaluate(
             continue;
         }
 
-        let (observed, subject_key) = if cap.metric == RiskCapMetric::Active {
-            let observed = active_order_count(cache, cap.scope, subject);
-            (observed, subject.key(cap.scope)?)
+        let subject_key = subject.key(cap.scope)?;
+
+        if let Some(quantity_limit) = cap.quantity_limit {
+            let observed = if cap.metric == RiskCapMetric::Inventory {
+                inventory_quantity(cache, cap.scope, subject)
+            } else {
+                counters.volume(
+                    &RiskCounterKey::new(cap, subject_key.clone(), request),
+                    ts_event,
+                )
+            };
+
+            if observed >= quantity_limit {
+                return Some(RiskCapDecision {
+                    metric: cap.metric,
+                    scope: cap.scope,
+                    subject: subject_key,
+                    request: None,
+                    observed: 0,
+                    limit: 0,
+                    observed_quantity: Some(observed),
+                    limit_quantity: Some(quantity_limit),
+                    window: cap.window,
+                    ts_event,
+                });
+            }
+
+            continue;
+        }
+
+        let observed = if cap.metric == RiskCapMetric::Active {
+            active_order_count(cache, cap.scope, subject)
         } else {
-            let subject_key = subject.key(cap.scope)?;
-            let key = RiskCounterKey::new(cap, subject_key.clone(), request);
-            (counters.count(&key, ts_event), subject_key)
+            counters.count(
+                &RiskCounterKey::new(cap, subject_key.clone(), request),
+                ts_event,
+            )
         };
 
         if observed >= cap.limit {
@@ -448,6 +592,8 @@ pub fn evaluate(
                 request,
                 observed,
                 limit: cap.limit,
+                observed_quantity: None,
+                limit_quantity: None,
                 window: cap.window,
                 ts_event,
             });
@@ -455,6 +601,39 @@ pub fn evaluate(
     }
 
     None
+}
+
+/// Returns the absolute position size `subject` holds in the instrument it is trading.
+///
+/// Every selector reads the same instrument, because a size summed across instruments is not a
+/// size; what the selector changes is whose position is read. A closed or absent position observes
+/// zero, which is the honest reading of a scope that holds nothing.
+fn inventory_quantity(cache: &Cache, selector: RiskCapScope, subject: &RiskSubject) -> Decimal {
+    let strategy_id = &subject.strategy_id;
+    let instrument_id = &subject.instrument_id;
+    let account_id = subject.account_id.as_ref();
+    let venue = &subject.instrument_id.venue;
+
+    let positions = match selector {
+        RiskCapScope::Global | RiskCapScope::Instrument => {
+            cache.positions(None, Some(instrument_id), None, None, None)
+        }
+        RiskCapScope::Strategy | RiskCapScope::StrategyInstrument => {
+            cache.positions(None, Some(instrument_id), Some(strategy_id), None, None)
+        }
+        RiskCapScope::Account => match account_id {
+            Some(account_id) => {
+                cache.positions(None, Some(instrument_id), None, Some(account_id), None)
+            }
+            None => return Decimal::ZERO,
+        },
+        RiskCapScope::Venue => cache.positions(Some(venue), Some(instrument_id), None, None, None),
+    };
+
+    positions
+        .iter()
+        .map(|position| position.quantity.as_decimal().abs())
+        .sum()
 }
 
 /// Returns the number of open orders `subject` has for a cap scoped to `selector`.
@@ -500,6 +679,177 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    #[rstest]
+    fn test_participation_cap_sums_fills_over_the_window_and_denies() {
+        use nautilus_common::cache::Cache;
+        use rust_decimal_macros::dec;
+
+        let scope = RiskCapScope::StrategyInstrument;
+        let cap = RiskCap::new_quantity(
+            RiskCapMetric::Participation,
+            scope,
+            dec!(1.5),
+            Some(window_secs(60)),
+        );
+        let subject = subject(true);
+        let mut counters = RiskCounters::default();
+        let cache = Cache::default();
+        let key = RiskCounterKey::new(&cap, subject.key(scope).unwrap(), None);
+
+        counters.record_volume(key.clone(), UnixNanos::from(1_000_000_000), dec!(1.0));
+        counters.record_volume(key.clone(), UnixNanos::from(2_000_000_000), dec!(0.25));
+
+        // 1.25 is inside the 1.5 budget, so nothing is refused.
+        assert_eq!(
+            counters.volume(&key, UnixNanos::from(2_000_000_000)),
+            dec!(1.25)
+        );
+        assert!(
+            evaluate(
+                std::slice::from_ref(&cap),
+                &mut counters,
+                &cache,
+                RiskCapMetric::Submit,
+                &subject,
+                None,
+                UnixNanos::from(2_000_000_000),
+            )
+            .is_none()
+        );
+
+        // A third fill takes the window to 1.75, past the budget, and the refusal names it.
+        counters.record_volume(key.clone(), UnixNanos::from(3_000_000_000), dec!(0.5));
+        let decision = evaluate(
+            std::slice::from_ref(&cap),
+            &mut counters,
+            &cache,
+            RiskCapMetric::Submit,
+            &subject,
+            None,
+            UnixNanos::from(3_000_000_000),
+        )
+        .expect("the participation budget should be reached");
+
+        assert_eq!(decision.observed_quantity, Some(dec!(1.75)));
+        assert_eq!(decision.limit_quantity, Some(dec!(1.5)));
+
+        let rendered = decision.reason().to_string();
+        assert!(
+            rendered.starts_with("PARTICIPATION_LIMIT_REACHED:")
+                && rendered.contains("observed=1.75")
+                && rendered.contains("limit=1.5"),
+            "{rendered}"
+        );
+
+        // The window expires the oldest fills: at 62 s only the last 0.5 remains.
+        assert!(
+            evaluate(
+                std::slice::from_ref(&cap),
+                &mut counters,
+                &cache,
+                RiskCapMetric::Submit,
+                &subject,
+                None,
+                UnixNanos::from(62_000_000_000),
+            )
+            .is_none()
+        );
+        assert_eq!(
+            counters.volume(&key, UnixNanos::from(62_000_000_000)),
+            dec!(0.5)
+        );
+
+        // A voided fill releases the quantity it recorded.
+        counters.void_last_volume(&key, UnixNanos::from(62_000_000_000));
+        assert_eq!(
+            counters.volume(&key, UnixNanos::from(62_000_000_000)),
+            dec!(0.0)
+        );
+    }
+
+    #[rstest]
+    fn test_inventory_cap_reads_the_open_position_and_denies() {
+        use nautilus_common::cache::Cache;
+        use nautilus_model::{
+            enums::OmsType,
+            events::OrderEventAny,
+            instruments::{Instrument, InstrumentAny, stubs::audusd_sim},
+            orders::stubs::TestOrderEventStubs,
+            position::Position,
+        };
+        use rust_decimal_macros::dec;
+
+        let instrument = InstrumentAny::CurrencyPair(audusd_sim());
+        let entry = OrderTestBuilder::new(OrderType::Market)
+            .instrument_id(instrument.id())
+            .side(OrderSide::Buy)
+            .quantity(Quantity::from("5000"))
+            .build();
+        let filled = TestOrderEventStubs::filled(
+            &entry,
+            &instrument,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let OrderEventAny::Filled(filled) = filled else {
+            panic!("expected a filled order event")
+        };
+        let position = Position::new(&instrument, filled);
+        assert_eq!(position.quantity, Quantity::from("5000"));
+
+        let mut cache = Cache::default();
+        cache.add_instrument(instrument).unwrap();
+        cache.add_position(&position, OmsType::Netting).unwrap();
+
+        let scope = RiskCapScope::Instrument;
+        let subject = subject(true);
+        let mut counters = RiskCounters::default();
+
+        let cap = RiskCap::new_quantity(RiskCapMetric::Inventory, scope, dec!(1000), None);
+        let decision = evaluate(
+            std::slice::from_ref(&cap),
+            &mut counters,
+            &cache,
+            RiskCapMetric::Submit,
+            &subject,
+            None,
+            UnixNanos::from(1),
+        )
+        .expect("a position above the inventory limit should be refused");
+
+        assert_eq!(decision.observed_quantity, Some(dec!(5000)));
+        assert_eq!(decision.limit_quantity, Some(dec!(1000)));
+
+        let rendered = decision.reason().to_string();
+        assert!(
+            rendered.starts_with("INVENTORY_LIMIT_REACHED:") && rendered.contains("observed=5000"),
+            "{rendered}"
+        );
+
+        // The same inventory passes a limit it does not exceed, so the cap reads the size rather
+        // than refusing every order. A limit exactly equal to the inventory is refused, because
+        // every cap in this vocabulary treats its limit as inclusive.
+        let cap = RiskCap::new_quantity(RiskCapMetric::Inventory, scope, dec!(6000), None);
+        assert!(
+            evaluate(
+                std::slice::from_ref(&cap),
+                &mut counters,
+                &cache,
+                RiskCapMetric::Submit,
+                &subject,
+                None,
+                UnixNanos::from(1),
+            )
+            .is_none()
+        );
+    }
 
     fn subject(account: bool) -> RiskSubject {
         RiskSubject::new(

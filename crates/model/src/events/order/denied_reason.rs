@@ -387,6 +387,32 @@ pub enum OrderDeniedReason {
         window_ns: u64,
     },
 
+    /// A configured participation limit was reached for the scope.
+    #[error(
+        "PARTICIPATION_LIMIT_REACHED: scope={scope}, observed={observed}, limit={limit}, window_ns={window_ns}"
+    )]
+    ParticipationLimitReached {
+        /// The scope kind the reached cap counts over.
+        scope: RiskCapScope,
+        /// The filled quantity observed within the window, in the instrument's units.
+        observed: Decimal,
+        /// The configured quantity limit.
+        limit: Decimal,
+        /// The rolling window the quantity was taken over, in nanoseconds.
+        window_ns: u64,
+    },
+
+    /// A configured inventory limit was reached for the scope.
+    #[error("INVENTORY_LIMIT_REACHED: scope={scope}, observed={observed}, limit={limit}")]
+    InventoryLimitReached {
+        /// The scope kind the reached cap counts over.
+        scope: RiskCapScope,
+        /// The absolute position size observed, in the instrument's units.
+        observed: Decimal,
+        /// The configured quantity limit.
+        limit: Decimal,
+    },
+
     /// The order submission rate limit was exceeded.
     #[error("RATE_LIMIT_EXCEEDED")]
     RateLimitExceeded,
@@ -550,6 +576,8 @@ impl OrderDeniedCode {
             Self::OrderCountLimitReached => "The configured order count limit for the scope was reached.",
             Self::ActiveOrderLimitReached => "The configured active order limit for the scope was reached.",
             Self::RepeatedRequestLimitReached => "The configured repeated request limit for the scope was reached.",
+            Self::ParticipationLimitReached => "The configured participation limit for the scope was reached.",
+            Self::InventoryLimitReached => "The configured inventory limit for the scope was reached.",
             Self::RateLimitExceeded => "The order submission rate limit was exceeded.",
             Self::StreamReconciling => "The execution stream is unavailable or recovering; retry after recovery.",
             Self::NoExecutionClient => "No execution client was found for the routed command.",
@@ -1012,6 +1040,17 @@ mod tests {
                 observed: 10,
                 limit: 10,
                 window_ns: 1_000_000_000,
+            },
+            OrderDeniedReason::ParticipationLimitReached {
+                scope: RiskCapScope::StrategyInstrument,
+                observed: Decimal::new(175, 2),
+                limit: Decimal::new(15, 1),
+                window_ns: 60_000_000_000,
+            },
+            OrderDeniedReason::InventoryLimitReached {
+                scope: RiskCapScope::Instrument,
+                observed: Decimal::new(100, 1),
+                limit: Decimal::new(50, 1),
             },
             OrderDeniedReason::ActiveOrderLimitReached {
                 scope: RiskCapScope::Global,

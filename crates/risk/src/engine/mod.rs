@@ -600,7 +600,7 @@ impl RiskEngine {
         let ts_event = self.clock.borrow().timestamp_ns();
 
         for cap in &self.caps {
-            if !cap.counts(action) || cap.window.is_none() {
+            if !cap.counts(action) || cap.window.is_none() || cap.measures_quantity() {
                 continue;
             }
 
@@ -623,13 +623,62 @@ impl RiskEngine {
         let ts_event = self.clock.borrow().timestamp_ns();
 
         for cap in &self.caps {
-            if !cap.counts(action) || cap.window.is_none() {
+            if !cap.counts(action) || cap.window.is_none() || cap.measures_quantity() {
                 continue;
             }
 
             if let Some(subject_key) = subject.key(cap.scope) {
                 self.counters
                     .void_last(&RiskCounterKey::new(cap, subject_key, request), ts_event);
+            }
+        }
+    }
+
+    /// Records the quantity of every cap measuring quantity for `action`.
+    ///
+    /// A quantity cap with no window is an all-time budget rather than a meaningless count, so
+    /// unlike an occurrence cap it is recorded without one.
+    fn record_cap_volumes(
+        &mut self,
+        action: RiskCapMetric,
+        subject: &RiskSubject,
+        request: Option<&RiskRequestKey>,
+        quantity: Decimal,
+    ) {
+        let ts_event = self.clock.borrow().timestamp_ns();
+
+        for cap in &self.caps {
+            if !cap.counts(action) || !cap.measures_quantity() {
+                continue;
+            }
+
+            if let Some(subject_key) = subject.key(cap.scope) {
+                self.counters.record_volume(
+                    RiskCounterKey::new(cap, subject_key, request),
+                    ts_event,
+                    quantity,
+                );
+            }
+        }
+    }
+
+    /// Removes the most recent quantity of every cap measuring quantity for `action`.
+    fn void_last_cap_volume(
+        &mut self,
+        action: RiskCapMetric,
+        subject: &RiskSubject,
+        request: Option<&RiskRequestKey>,
+    ) {
+        let ts_event = self.clock.borrow().timestamp_ns();
+
+        for cap in &self.caps {
+            if !cap.counts(action) || !cap.measures_quantity() {
+                continue;
+            }
+
+            if let Some(subject_key) = subject.key(cap.scope) {
+                self.counters
+                    .void_last_volume(&RiskCounterKey::new(cap, subject_key, request), ts_event);
             }
         }
     }
@@ -644,11 +693,20 @@ impl RiskEngine {
             OrderEventAny::Canceled(_) => {
                 self.record_cap_occurrences(RiskCapMetric::Cancel, &RiskSubject::from(event), None);
             }
-            OrderEventAny::Filled(_) => {
-                self.record_cap_occurrences(RiskCapMetric::Fill, &RiskSubject::from(event), None);
+            OrderEventAny::Filled(fill) => {
+                let subject = RiskSubject::from(event);
+                self.record_cap_occurrences(RiskCapMetric::Fill, &subject, None);
+                self.record_cap_volumes(
+                    RiskCapMetric::Fill,
+                    &subject,
+                    None,
+                    fill.last_qty.as_decimal(),
+                );
             }
             OrderEventAny::FillVoided(_) => {
-                self.void_last_cap_occurrence(RiskCapMetric::Fill, &RiskSubject::from(event), None);
+                let subject = RiskSubject::from(event);
+                self.void_last_cap_occurrence(RiskCapMetric::Fill, &subject, None);
+                self.void_last_cap_volume(RiskCapMetric::Fill, &subject, None);
             }
             _ => {}
         }

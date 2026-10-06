@@ -59,13 +59,22 @@ class RiskCap:
     def limit(self) -> int: ...
     @property
     def window(self) -> int | None: ...
+    @property
+    def quantity_limit(self) -> decimal.Decimal | None: ...
     def __new__(
-        cls, metric: RiskCapMetric, scope: RiskCapScope, limit: int, window: int | None = None
+        cls,
+        metric: RiskCapMetric,
+        scope: RiskCapScope,
+        limit: int,
+        window: int | None = None,
+        quantity_limit: decimal.Decimal | None = None,
     ) -> RiskCap: ...
 
 @typing.final
 class RiskCapMetric:
     Active: RiskCapMetric
+    Participation: RiskCapMetric
+    Inventory: RiskCapMetric
     Submit: RiskCapMetric
     Modify: RiskCapMetric
     Cancel: RiskCapMetric

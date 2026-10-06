@@ -125,8 +125,10 @@ impl RiskEngineConfig {
         let mut seen_caps = AHashSet::new();
 
         for cap in &self.count_caps {
+            validate_quantity_cap(cap, &mut errors);
+
             errors.check(
-                cap.limit > 0,
+                cap.limit > 0 || cap.measures_quantity(),
                 ConfigError::range(
                     "count_caps",
                     format!(
@@ -137,13 +139,23 @@ impl RiskEngineConfig {
             );
 
             match (cap.metric, cap.window) {
-                (RiskCapMetric::Active, None) => {}
+                (RiskCapMetric::Active | RiskCapMetric::Inventory, None) => {}
                 (RiskCapMetric::Active, Some(window)) => errors.check(
                     false,
                     ConfigError::invalid_value(
                         "count_caps",
                         format!(
                             "an ACTIVE cap counts the open order set and takes no window, was {} ns",
+                            window.as_u64()
+                        ),
+                    ),
+                ),
+                (RiskCapMetric::Inventory, Some(window)) => errors.check(
+                    false,
+                    ConfigError::invalid_value(
+                        "count_caps",
+                        format!(
+                            "an INVENTORY cap reads the standing position and takes no window, was {} ns",
                             window.as_u64()
                         ),
                     ),
@@ -174,6 +186,60 @@ impl RiskEngineConfig {
     }
 }
 
+/// Validates the quantity-limit half of a cap, which is a pair with the metric it measures.
+///
+/// A metric measured in occurrences must not carry one and a metric measured in quantity must, so
+/// a configuration cannot read a size as a number of events or leave a size cap without a size.
+fn validate_quantity_cap(cap: &RiskCap, errors: &mut ConfigErrorCollector) {
+    match cap.quantity_limit {
+        Some(quantity_limit) => {
+            errors.check(
+                matches!(
+                    cap.metric,
+                    RiskCapMetric::Participation | RiskCapMetric::Inventory
+                ),
+                ConfigError::invalid_value(
+                    "count_caps",
+                    format!(
+                        "the {} metric is measured in occurrences, not quantity",
+                        cap.metric
+                    ),
+                ),
+            );
+            errors.check(
+                quantity_limit > Decimal::ZERO,
+                ConfigError::range(
+                    "count_caps",
+                    format!(
+                        "the {} quantity limit for {} must be positive, was {quantity_limit}",
+                        cap.metric, cap.scope
+                    ),
+                ),
+            );
+            errors.check(
+                cap.limit == 0,
+                ConfigError::invalid_value(
+                    "count_caps",
+                    format!(
+                        "a {} cap measured in quantity carries no occurrence limit, was {}",
+                        cap.metric, cap.limit
+                    ),
+                ),
+            );
+        }
+        None => errors.check(
+            !matches!(
+                cap.metric,
+                RiskCapMetric::Participation | RiskCapMetric::Inventory
+            ),
+            ConfigError::invalid_value(
+                "count_caps",
+                format!("the {} metric requires a quantity limit", cap.metric),
+            ),
+        ),
+    }
+}
+
 impl Default for RiskEngineConfig {
     fn default() -> Self {
         Self::builder()
@@ -186,8 +252,83 @@ impl Default for RiskEngineConfig {
 mod tests {
     use nautilus_model::risk::RiskCapScope;
     use rstest::rstest;
+    use rust_decimal_macros::dec;
 
     use super::*;
+
+    #[rstest]
+    fn test_quantity_caps_are_validated_as_a_pair_with_their_metric() {
+        // A quantity limit below or at zero is refused.
+        let zero = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new_quantity(
+                RiskCapMetric::Participation,
+                RiskCapScope::Instrument,
+                Decimal::ZERO,
+                Some(DurationNanos::from_secs(60)),
+            )])
+            .build();
+        assert!(matches!(zero, Err(ConfigError::Range { field, .. }) if field == "count_caps"));
+
+        // An occurrence metric cannot carry one.
+        let wrong_metric = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap {
+                quantity_limit: Some(dec!(1.0)),
+                ..RiskCap::new(
+                    RiskCapMetric::Submit,
+                    RiskCapScope::Instrument,
+                    0,
+                    Some(DurationNanos::from_secs(60)),
+                )
+            }])
+            .build();
+        assert!(matches!(
+            wrong_metric,
+            Err(ConfigError::InvalidValue { .. })
+        ));
+
+        // A quantity metric must carry one.
+        let missing = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new(
+                RiskCapMetric::Inventory,
+                RiskCapScope::Instrument,
+                10,
+                None,
+            )])
+            .build();
+        assert!(matches!(missing, Err(ConfigError::InvalidValue { .. })));
+
+        // An inventory cap reads the standing position and takes no window.
+        let windowed = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new_quantity(
+                RiskCapMetric::Inventory,
+                RiskCapScope::Instrument,
+                dec!(1.0),
+                Some(DurationNanos::from_secs(60)),
+            )])
+            .build();
+        assert!(matches!(windowed, Err(ConfigError::InvalidValue { .. })));
+
+        // Both quantity metrics are accepted in the shape their measurement needs.
+        let participation = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new_quantity(
+                RiskCapMetric::Participation,
+                RiskCapScope::Instrument,
+                dec!(1.0),
+                Some(DurationNanos::from_secs(60)),
+            )])
+            .build();
+        assert!(participation.is_ok());
+
+        let inventory = RiskEngineConfig::builder()
+            .count_caps(vec![RiskCap::new_quantity(
+                RiskCapMetric::Inventory,
+                RiskCapScope::Instrument,
+                dec!(1.0),
+                None,
+            )])
+            .build();
+        assert!(inventory.is_ok());
+    }
 
     #[rstest]
     fn test_default_config_is_valid() {

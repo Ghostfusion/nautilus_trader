@@ -147,6 +147,28 @@ impl PyRiskCapMetric {
         Self::new(RiskCapMetric::Active)
     }
 
+    /// The quantity a scope has filled over the window; takes a quantity limit.
+    #[classattr]
+    #[expect(
+        non_snake_case,
+        clippy::use_self,
+        reason = "PyO3 stub generation needs the concrete Python enum type"
+    )]
+    fn Participation() -> PyRiskCapMetric {
+        Self::new(RiskCapMetric::Participation)
+    }
+
+    /// The absolute position size a scope holds in the instrument; takes a quantity limit.
+    #[classattr]
+    #[expect(
+        non_snake_case,
+        clippy::use_self,
+        reason = "PyO3 stub generation needs the concrete Python enum type"
+    )]
+    fn Inventory() -> PyRiskCapMetric {
+        Self::new(RiskCapMetric::Inventory)
+    }
+
     /// Orders admitted for submission.
     #[classattr]
     #[expect(
@@ -394,9 +416,13 @@ impl From<PyRiskCap> for RiskCap {
 impl PyRiskCap {
     /// Creates a new `RiskCap`.
     ///
-    /// `window` is the rolling window in nanoseconds, omitted for an `Active` cap.
+    /// `window` is the rolling window in nanoseconds, omitted for an `Active` cap and for an
+    /// `Inventory` cap, which reads the standing position.
+    ///
+    /// `quantity_limit` is the limit for a `Participation` or `Inventory` cap, in the instrument's
+    /// units, and replaces the occurrence `limit` rather than adding to it.
     #[new]
-    #[pyo3(signature = (metric, scope, limit, window=None))]
+    #[pyo3(signature = (metric, scope, limit, window=None, quantity_limit=None))]
     #[allow(
         clippy::needless_pass_by_value,
         reason = "PyO3 #[new] requires owned params"
@@ -406,13 +432,16 @@ impl PyRiskCap {
         scope: PyRiskCapScope,
         limit: u32,
         window: Option<u64>,
+        quantity_limit: Option<Decimal>,
     ) -> Self {
-        Self::new(RiskCap::new(
-            metric.inner(),
-            scope.inner(),
-            limit,
-            window.map(DurationNanos::new),
-        ))
+        let window = window.map(DurationNanos::new);
+
+        Self::new(match quantity_limit {
+            Some(quantity_limit) => {
+                RiskCap::new_quantity(metric.inner(), scope.inner(), quantity_limit, window)
+            }
+            None => RiskCap::new(metric.inner(), scope.inner(), limit, window),
+        })
     }
 
     /// Returns the metric counted.
@@ -443,11 +472,24 @@ impl PyRiskCap {
         self.inner.window.map(|window| window.as_u64())
     }
 
+    /// Returns the quantity limit in the instrument's units, `None` for an occurrence cap.
+    #[getter]
+    #[pyo3(name = "quantity_limit")]
+    const fn py_quantity_limit(&self) -> Option<Decimal> {
+        self.inner.quantity_limit
+    }
+
     fn __repr__(&self) -> String {
-        format!(
-            "RiskCap(metric={}, scope={}, limit={}, window={:?})",
-            self.inner.metric, self.inner.scope, self.inner.limit, self.inner.window,
-        )
+        match self.inner.quantity_limit {
+            Some(quantity_limit) => format!(
+                "RiskCap(metric={}, scope={}, quantity_limit={quantity_limit}, window={:?})",
+                self.inner.metric, self.inner.scope, self.inner.window,
+            ),
+            None => format!(
+                "RiskCap(metric={}, scope={}, limit={}, window={:?})",
+                self.inner.metric, self.inner.scope, self.inner.limit, self.inner.window,
+            ),
+        }
     }
 
     fn __str__(&self) -> String {

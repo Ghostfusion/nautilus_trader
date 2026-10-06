@@ -345,9 +345,25 @@ pub(crate) fn parse_count_caps(field: &str, values: &[String]) -> ConfigResult<V
         let scope = parts[1]
             .parse::<RiskCapScope>()
             .map_err(|e| ConfigError::invalid_value(entry.clone(), format!("scope: {e}")))?;
-        let limit = parts[2]
-            .parse::<u32>()
-            .map_err(|e| ConfigError::invalid_value(entry.clone(), format!("limit: {e}")))?;
+        // A metric measured in quantity takes its limit as a decimal in the instrument's units, so
+        // the field that holds a count for the occurrence metrics holds a size here.
+        let quantity_limit = if matches!(
+            metric,
+            RiskCapMetric::Participation | RiskCapMetric::Inventory
+        ) {
+            Some(parts[2].parse::<Decimal>().map_err(|e| {
+                ConfigError::invalid_value(entry.clone(), format!("quantity limit: {e}"))
+            })?)
+        } else {
+            None
+        };
+
+        let limit = match quantity_limit {
+            Some(_) => 0,
+            None => parts[2]
+                .parse::<u32>()
+                .map_err(|e| ConfigError::invalid_value(entry.clone(), format!("limit: {e}")))?,
+        };
         let window = match parts.get(3) {
             Some(raw) => {
                 let nanos = raw.parse::<u64>().map_err(|e| {
@@ -358,7 +374,10 @@ pub(crate) fn parse_count_caps(field: &str, values: &[String]) -> ConfigResult<V
             None => None,
         };
 
-        caps.push(RiskCap::new(metric, scope, limit, window));
+        caps.push(match quantity_limit {
+            Some(quantity_limit) => RiskCap::new_quantity(metric, scope, quantity_limit, window),
+            None => RiskCap::new(metric, scope, limit, window),
+        });
     }
 
     Ok(caps)
