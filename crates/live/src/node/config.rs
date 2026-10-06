@@ -218,6 +218,10 @@ pub struct LiveRiskEngineConfig {
     /// Validated exits skip bounds that apply only to their placeholder quantity and notional.
     #[builder(default)]
     pub full_position_exit_venues: Vec<Venue>,
+    /// Venues that refuse a submission whose price is not a whole multiple of the instrument's
+    /// price increment.
+    #[builder(default)]
+    pub tick_alignment_venues: Vec<Venue>,
     /// If debug mode is active (will provide extra debug logging).
     #[builder(default)]
     pub debug: bool,
@@ -250,6 +254,7 @@ impl From<LiveRiskEngineConfig> for RiskEngineConfig {
             .collect::<AHashMap<_, _>>();
 
         let full_position_exit_venues = config.full_position_exit_venues.into_iter().collect();
+        let tick_alignment_venues = config.tick_alignment_venues.into_iter().collect();
 
         Self {
             bypass: config.bypass,
@@ -267,6 +272,7 @@ impl From<LiveRiskEngineConfig> for RiskEngineConfig {
             count_caps: parse_count_caps(LIVE_COUNT_CAP_FIELD, &config.count_caps)
                 .expect("validate_runtime_support must run before RiskEngineConfig conversion"),
             full_position_exit_venues,
+            tick_alignment_venues,
             debug: config.debug,
         }
     }
@@ -1687,6 +1693,7 @@ mean_dispatch_ns_clear = 700
                 "1000.5".to_string(),
             )]),
             full_position_exit_venues: vec![Venue::from("BINANCE")],
+            tick_alignment_venues: vec![Venue::from("BINANCE")],
             debug: true,
             ..Default::default()
         };
@@ -1708,6 +1715,10 @@ mean_dispatch_ns_clear = 700
         );
         assert_eq!(
             converted.full_position_exit_venues,
+            [Venue::from("BINANCE")].into_iter().collect(),
+        );
+        assert_eq!(
+            converted.tick_alignment_venues,
             [Venue::from("BINANCE")].into_iter().collect(),
         );
         assert!(converted.debug);
@@ -2395,6 +2406,7 @@ mean_dispatch_ns_clear = 700
         assert_eq!(config.max_order_modify_rate, DEFAULT_ORDER_RATE_LIMIT);
         assert!(config.max_notional_per_order.is_empty());
         assert!(config.full_position_exit_venues.is_empty());
+        assert!(config.tick_alignment_venues.is_empty());
         assert!(!config.debug);
         assert_eq!(config.qsize, 100_000);
     }

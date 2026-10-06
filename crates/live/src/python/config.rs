@@ -320,7 +320,7 @@ impl LiveDataEngineConfig {
 impl LiveRiskEngineConfig {
     /// Configuration for live risk engines.
     #[new]
-    #[pyo3(signature = (bypass=None, max_order_submit_rate=None, max_order_modify_rate=None, max_notional_per_order=None, full_position_exit_venues=None, debug=None, count_caps=None))]
+    #[pyo3(signature = (bypass=None, max_order_submit_rate=None, max_order_modify_rate=None, max_notional_per_order=None, full_position_exit_venues=None, debug=None, count_caps=None, tick_alignment_venues=None))]
     fn py_new(
         bypass: Option<bool>,
         max_order_submit_rate: Option<String>,
@@ -329,6 +329,7 @@ impl LiveRiskEngineConfig {
         full_position_exit_venues: Option<Vec<Venue>>,
         debug: Option<bool>,
         count_caps: Option<Vec<String>>,
+        tick_alignment_venues: Option<Vec<Venue>>,
     ) -> PyResult<Self> {
         let default = Self::default();
         let max_order_submit_rate =
@@ -343,6 +344,7 @@ impl LiveRiskEngineConfig {
 
         let full_position_exit_venues = full_position_exit_venues.unwrap_or_default();
         let count_caps = count_caps.unwrap_or_default();
+        let tick_alignment_venues = tick_alignment_venues.unwrap_or_default();
 
         parse_rate_limit(
             "LiveRiskEngineConfig.max_order_submit_rate",
@@ -368,6 +370,7 @@ impl LiveRiskEngineConfig {
             max_notional_per_order,
             count_caps,
             full_position_exit_venues,
+            tick_alignment_venues,
             debug: debug.unwrap_or(default.debug),
             qsize: default.qsize,
         })
@@ -407,6 +410,12 @@ impl LiveRiskEngineConfig {
     #[pyo3(name = "full_position_exit_venues")]
     fn py_full_position_exit_venues(&self) -> Vec<Venue> {
         self.full_position_exit_venues.clone()
+    }
+
+    #[getter]
+    #[pyo3(name = "tick_alignment_venues")]
+    fn py_tick_alignment_venues(&self) -> Vec<Venue> {
+        self.tick_alignment_venues.clone()
     }
 
     #[getter]
