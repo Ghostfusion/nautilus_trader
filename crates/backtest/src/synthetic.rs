@@ -31,10 +31,20 @@
 //! against a declared band, carried with a [`SyntheticRecoveryCheck`]. A series shorter than the
 //! check's declared readable length is reported as unreadable rather than estimated, because at
 //! that length the estimator's finite-size bias is large enough to invent a result.
+//!
+//! The generator also serves the impact interval's coverage check: a
+//! [`FlowImpactCoverage`] draws paths whose fill sizes are the flow's magnitudes and whose impacts
+//! are the square-root law at a known prefactor, so the calibration's fitted interval can be
+//! measured against a prefactor that is known by construction rather than asserted.
 
 use std::fmt;
 
 use anyhow::{Result, bail};
+use nautilus_execution::models::market_impact::PrefactorInterval;
+use nautilus_execution::models::market_impact_calibration::{
+    ImpactObservation, PrefactorCoverageModel, fit_prefactor_from_fills,
+};
+use nautilus_model::types::Quantity;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 /// The maximum number of moving-average coefficients retained by the generator.
@@ -209,6 +219,54 @@ impl SyntheticFlowConfig {
             impact_exponent: self.impact_exponent,
             seed: self.seed,
         })
+    }
+
+    /// Generates the observed impacts this flow's fill sizes leave at `prefactor`.
+    ///
+    /// Each period's fill size is the magnitude of the generated flow, and the impact the
+    /// square-root law predicts at `prefactor` is rounded to the nearest whole increment, which is
+    /// what a tape records. A period whose flow is too small to move the price by an increment is
+    /// dropped, because it says nothing about the prefactor. The result is the path a
+    /// [`PrefactorCoverageModel`] fits an interval from, with the prefactor known by construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the flow cannot be generated or an observation cannot be formed; the
+    /// configuration was validated at construction, so this is otherwise infallible.
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the reference quantity is a declared volume and the rounded increment count is a small whole number, so both are represented exactly as f64"
+    )]
+    pub fn generate_impact_observations(
+        &self,
+        prefactor: f64,
+        reference_quantity: u64,
+    ) -> Result<Vec<ImpactObservation>> {
+        if reference_quantity == 0 {
+            bail!("reference_quantity must be greater than zero");
+        }
+
+        let flow = self.generate()?;
+        let reference = Quantity::from(reference_quantity.to_string());
+        let mut observations = Vec::with_capacity(flow.quantities().len());
+        for quantity in flow.quantities() {
+            // A quantity carries at most nine decimal places, so the flow's magnitude is rounded
+            // to six before it is handed over rather than formatted in full.
+            let magnitude = (quantity.abs() * 1_000_000.0).round() / 1_000_000.0;
+            let relative = (magnitude / reference_quantity as f64).sqrt();
+            let increments = (prefactor * relative).round();
+            if increments < 1.0 {
+                continue;
+            }
+            observations.push(ImpactObservation::new(
+                Quantity::from(format!("{magnitude:.6}")),
+                reference,
+                increments as u64,
+            )?);
+        }
+        Ok(observations)
     }
 }
 
@@ -561,6 +619,65 @@ fn regression_slope(x: &[f64], y: &[f64]) -> Option<f64> {
     Some(covariance / variance)
 }
 
+/// A prefactor-coverage model whose paths are drawn from the synthetic flow.
+///
+/// Each period's fill size is the magnitude of the flow, and the impact the square-root law
+/// predicts at the known prefactor is rounded to the nearest whole increment, which is what a tape
+/// records ([`SyntheticFlowConfig::generate_impact_observations`]). The interval it fits is the
+/// span of the per-observation estimates, which is the calibration's own fit, so the coverage this
+/// model reports is the coverage of the calibration when the true prefactor is known by
+/// construction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlowImpactCoverage {
+    /// The target Hurst exponent of the flow the paths are drawn from.
+    pub target_hurst: f64,
+    /// The impact exponent of the flow the paths are drawn from.
+    pub impact_exponent: f64,
+    /// The number of periods in each generated path.
+    pub count: usize,
+    /// The reference quantity the impacts are expressed against.
+    pub reference_quantity: u64,
+}
+
+impl FlowImpactCoverage {
+    /// Creates a new [`FlowImpactCoverage`] instance, validating its declarations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the flow configuration they describe is invalid or if
+    /// `reference_quantity` is zero.
+    pub fn new(
+        target_hurst: f64,
+        impact_exponent: f64,
+        count: usize,
+        reference_quantity: u64,
+    ) -> Result<Self> {
+        // Validate the flow declaration here rather than at the first draw, so an invalid model is
+        // refused when it is built.
+        SyntheticFlowConfig::new(target_hurst, impact_exponent, count, 0)?;
+        if reference_quantity == 0 {
+            bail!("reference_quantity must be greater than zero");
+        }
+        Ok(Self {
+            target_hurst,
+            impact_exponent,
+            count,
+            reference_quantity,
+        })
+    }
+}
+
+impl PrefactorCoverageModel for FlowImpactCoverage {
+    fn draw(&self, truth: f64, seed: u64) -> Result<Vec<ImpactObservation>> {
+        SyntheticFlowConfig::new(self.target_hurst, self.impact_exponent, self.count, seed)?
+            .generate_impact_observations(truth, self.reference_quantity)
+    }
+
+    fn fit(&self, observations: &[ImpactObservation]) -> Result<PrefactorInterval> {
+        fit_prefactor_from_fills(observations)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
@@ -854,5 +971,49 @@ mod tests {
             .estimate(&check);
         assert_eq!(first, second);
         assert_eq!(first.to_string(), second.to_string());
+    }
+
+    #[rstest]
+    fn test_the_impact_path_recovers_the_known_prefactor() {
+        let observations = SyntheticFlowConfig::new(0.7, 0.5, 1_024, 7)
+            .expect("the calibration parameters are valid")
+            .generate_impact_observations(2.0, 1)
+            .expect("generation succeeds");
+
+        let fitted = fit_prefactor_from_fills(&observations).expect("the path fits");
+        assert!(
+            fitted.lower() <= 2.0 && 2.0 <= fitted.upper(),
+            "the fitted span must contain the known prefactor: {fitted}"
+        );
+    }
+
+    #[rstest]
+    fn test_the_impact_path_drops_periods_that_did_not_move_the_price() {
+        let observations = SyntheticFlowConfig::new(0.7, 0.5, 512, 11)
+            .expect("the calibration parameters are valid")
+            .generate_impact_observations(2.0, 1)
+            .expect("generation succeeds");
+
+        assert!(!observations.is_empty());
+        for observation in &observations {
+            assert!(
+                observation.increments() >= 1,
+                "a dropped period must carry no observation"
+            );
+            assert!(observation.prefactor().is_some());
+        }
+    }
+
+    #[rstest]
+    fn test_the_coverage_model_is_deterministic_at_a_seed() {
+        let model = FlowImpactCoverage::new(0.7, 0.5, 512, 1).expect("valid model");
+        let first = model.draw(2.0, 0x5EED).expect("draw succeeds");
+        let second = model.draw(2.0, 0x5EED).expect("draw succeeds");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            model.fit(&first).expect("fit succeeds"),
+            model.fit(&second).expect("fit succeeds")
+        );
     }
 }

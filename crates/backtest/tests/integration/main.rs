@@ -27,6 +27,7 @@ mod fee_model;
 mod fill_cause;
 mod grid_mm;
 mod grid_mm_itch;
+mod impact_coverage;
 mod netting_fill_void;
 mod option_chain_backtest;
 mod option_chain_data_client;
