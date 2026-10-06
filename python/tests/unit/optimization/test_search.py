@@ -54,8 +54,8 @@ if TYPE_CHECKING:
     from nautilus_trader.optimization.space import Experiment
 
 
-SCORE = "Sharpe Ratio (252 days)"
-GATE = "Max Drawdown"
+SCORE = "Sharpe Ratio (simple, sample, 252 days)"
+GATE = "Max Drawdown (simple)"
 
 SEARCH_WINDOW = (1_000, 2_000)
 HELD_OUT_WINDOW = (2_000, 3_000)

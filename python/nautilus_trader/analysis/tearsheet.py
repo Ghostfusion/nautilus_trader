@@ -1035,7 +1035,7 @@ def create_tearsheet_from_stats(
     Examples
     --------
     >>> # Offline analysis with precomputed stats
-    >>> stats_returns = {"Sharpe Ratio (252 days)": 1.5}
+    >>> stats_returns = {"Sharpe Ratio (simple, sample, 252 days)": 1.5}
     >>> stats_general = {"Win Rate": 0.55}
     >>> stats_pnls = {"PnL (total)": 10000.0}
     >>> returns = pd.Series([0.01, -0.02])

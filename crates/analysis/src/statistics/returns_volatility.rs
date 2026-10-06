@@ -64,7 +64,11 @@ impl ReturnsVolatility {
 
 impl Display for ReturnsVolatility {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Returns Volatility ({} days)", self.period)
+        write!(
+            f,
+            "Returns Volatility (simple, sample, {} days)",
+            self.period
+        )
     }
 }
 
@@ -78,11 +82,13 @@ impl PortfolioStatistic for ReturnsVolatility {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "returns_volatility",
-            "Returns Volatility ({annualisation} days)",
+            "Returns Volatility ({compounding}, {divisor}, {annualisation} days)",
             MetricUnits::Fraction,
             MetricDirection::Minimize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "sample")
         .with_count("annualisation", self.period)
         .with_tags([MetricTag::Risk, MetricTag::Annualised])
     }
@@ -170,6 +176,9 @@ mod tests {
     #[rstest]
     fn test_name() {
         let volatility = ReturnsVolatility::new(None);
-        assert_eq!(volatility.name(), "Returns Volatility (252 days)");
+        assert_eq!(
+            volatility.name(),
+            "Returns Volatility (simple, sample, 252 days)"
+        );
     }
 }

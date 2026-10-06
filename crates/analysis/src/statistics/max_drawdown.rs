@@ -64,17 +64,18 @@ impl PortfolioStatistic for MaxDrawdown {
     type Item = f64;
 
     fn name(&self) -> String {
-        "Max Drawdown".to_string()
+        "Max Drawdown (simple)".to_string()
     }
 
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "max_drawdown",
-            "Max Drawdown",
+            "Max Drawdown ({compounding})",
             MetricUnits::Fraction,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_tags([MetricTag::Drawdown, MetricTag::Risk])
     }
 
@@ -143,7 +144,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let stat = MaxDrawdown::new();
-        assert_eq!(stat.name(), "Max Drawdown");
+        assert_eq!(stat.name(), "Max Drawdown (simple)");
     }
 
     #[rstest]

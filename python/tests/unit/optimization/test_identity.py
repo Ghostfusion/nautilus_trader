@@ -67,8 +67,8 @@ def _dataset(**overrides: object) -> DatasetIdentity:
 
 def _objective_definition() -> dict[str, object]:
     terms = [
-        ObjectiveTerm("Sharpe Ratio (252 days)", 1.0, ObjectiveDirection.MAXIMIZE),
-        ObjectiveTerm("Max Drawdown", 1.0, ObjectiveDirection.MAXIMIZE),
+        ObjectiveTerm("Sharpe Ratio (simple, sample, 252 days)", 1.0, ObjectiveDirection.MAXIMIZE),
+        ObjectiveTerm("Max Drawdown (simple)", 1.0, ObjectiveDirection.MAXIMIZE),
     ]
 
     return objective_definition_from_terms(terms)
@@ -81,7 +81,7 @@ def _study(**overrides: object) -> StudyIdentity:
         "parameter_space_digest": "sha256:00000000000000000000000000000000000000000000000000000000000000cc",
         "objective_definition": definition,
         "selection_rule": SelectionRule.RANK_FIRST,
-        "metric_set": ("Sharpe Ratio (252 days)", "Max Drawdown"),
+        "metric_set": ("Sharpe Ratio (simple, sample, 252 days)", "Max Drawdown (simple)"),
         "study_seed": 7,
     }
     fields.update(overrides)
@@ -265,14 +265,18 @@ def test_the_objective_definition_is_canonical_and_sensitive() -> None:
     terms = definition["terms"]
     assert isinstance(terms, list)
     assert terms[0] == {
-        "metric": "Sharpe Ratio (252 days)",
+        "metric": "Sharpe Ratio (simple, sample, 252 days)",
         "weight": 1.0,
         "direction": "maximize",
     }
 
     # A different objective is a different study.
     changed = objective_definition_from_terms(
-        [ObjectiveTerm("Sharpe Ratio (252 days)", 0.5, ObjectiveDirection.MAXIMIZE)],
+        [
+            ObjectiveTerm(
+                "Sharpe Ratio (simple, sample, 252 days)", 0.5, ObjectiveDirection.MAXIMIZE
+            )
+        ],
     )
     assert _study(objective_definition=changed).study_id != _study().study_id
 
@@ -280,9 +284,11 @@ def test_the_objective_definition_is_canonical_and_sensitive() -> None:
     assert _study(selection_rule=SelectionRule.RANK_FIRST_FEASIBLE).study_id != _study().study_id
 
     # The real objective type converts without depending on a Python string form of its direction.
-    objective = Objective([ObjectiveTerm("Max Drawdown", 1.0, ObjectiveDirection.MAXIMIZE)])
+    objective = Objective(
+        [ObjectiveTerm("Max Drawdown (simple)", 1.0, ObjectiveDirection.MAXIMIZE)]
+    )
     assert objective_definition_from_terms(objective.terms) == {
-        "terms": [{"metric": "Max Drawdown", "weight": 1.0, "direction": "maximize"}],
+        "terms": [{"metric": "Max Drawdown (simple)", "weight": 1.0, "direction": "maximize"}],
     }
 
 

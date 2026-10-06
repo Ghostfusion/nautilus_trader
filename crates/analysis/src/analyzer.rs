@@ -924,10 +924,10 @@ impl PortfolioAnalyzer {
     /// what distinguishes this from [`Self::get_performance_stats_returns`].
     ///
     /// A request is matched against a statistic's stable definition id first and its display
-    /// name second, so both `"sharpe_ratio"` and `"Sharpe Ratio (252 days)"` address the same
-    /// metric. A statistic whose definition declares the benchmark input is calculated from the
-    /// returns and the supplied benchmark; when the definition requires a benchmark and
-    /// `benchmark` is `None` the metric is reported `unavailable` with
+    /// name second, so both `"sharpe_ratio"` and `"Sharpe Ratio (simple, sample, 252 days)"`
+    /// address the same metric. A statistic whose definition declares the benchmark input is
+    /// calculated from the returns and the supplied benchmark; when the definition requires a
+    /// benchmark and `benchmark` is `None` the metric is reported `unavailable` with
     /// [`MetricReason::MissingBenchmark`] rather than calculated from the returns alone.
     #[must_use]
     pub fn report_returns_metrics(
@@ -2896,11 +2896,11 @@ mod tests {
         assert_eq!(stats.len(), 1);
         assert!(approx_eq!(
             f64,
-            *stats.get("Beta").unwrap(),
+            *stats.get("Beta (simple, sample)").unwrap(),
             6.0,
             epsilon = 1e-9
         ));
-        assert!(!stats.contains_key("Sharpe Ratio (252 days)"));
+        assert!(!stats.contains_key("Sharpe Ratio (simple, sample, 252 days)"));
     }
 
     fn daily_returns(values: &[f64]) -> Returns {
@@ -2932,7 +2932,7 @@ mod tests {
         assert_eq!(computed.status(), MetricStatus::Computed);
         assert!(computed.value().is_some());
         assert_eq!(computed.reason(), None);
-        assert_eq!(computed.title(), "Max Drawdown");
+        assert_eq!(computed.title(), "Max Drawdown (simple)");
 
         // Unavailable: a position statistic requested from a returns report.
         let unavailable = report.get("long_ratio").unwrap();
@@ -2979,7 +2979,7 @@ mod tests {
         assert_eq!(invalid.status(), MetricStatus::Invalid);
         assert_eq!(invalid.reason(), Some(MetricReason::NonFiniteInput));
         assert_eq!(invalid.value(), None);
-        assert_eq!(invalid.title(), "Sharpe Ratio (252 days)");
+        assert_eq!(invalid.title(), "Sharpe Ratio (simple, sample, 252 days)");
 
         // Unavailable is a different state for a different cause: a missing benchmark.
         let unavailable = report.get("beta").unwrap();
@@ -3004,7 +3004,8 @@ mod tests {
         }
 
         let by_id = analyzer.report_returns_metrics(&["sharpe_ratio"], None);
-        let by_name = analyzer.report_returns_metrics(&["Sharpe Ratio (252 days)"], None);
+        let by_name =
+            analyzer.report_returns_metrics(&["Sharpe Ratio (simple, sample, 252 days)"], None);
 
         let by_id = by_id.get("sharpe_ratio").unwrap();
         let by_name = by_name.get("sharpe_ratio").unwrap();
@@ -3094,6 +3095,169 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), count);
         assert_eq!(count, 42);
+    }
+
+    /// The declared bookkeeping basis of every statistic that is defined over a returns series.
+    ///
+    /// The table is the contract, not a copy of the declarations: a statistic that appears here
+    /// must declare exactly these values, and every statistic defined over returns must appear
+    /// here, so a new one cannot reach a report without a basis.
+    const RETURNS_BASIS: &[(&str, &str, Option<&str>)] = &[
+        ("alpha", "simple", Some("sample")),
+        ("autocorrelation", "simple", None),
+        ("beta", "simple", Some("sample")),
+        ("cagr", "simple", None),
+        ("calmar_ratio", "simple", None),
+        ("down_capture_ratio", "simple", None),
+        ("expected_shortfall", "simple", None),
+        (
+            "exponentially_weighted_sharpe",
+            "simple",
+            Some("population"),
+        ),
+        ("information_ratio", "simple", Some("sample")),
+        ("max_drawdown", "simple", None),
+        ("omega_ratio", "simple", None),
+        ("profit_factor", "simple", None),
+        ("rescaled_range", "simple", Some("population")),
+        ("returns_average", "simple", None),
+        ("returns_average_loss", "simple", None),
+        ("returns_average_win", "simple", None),
+        ("returns_kurtosis", "simple", Some("sample")),
+        ("returns_skewness", "simple", Some("sample")),
+        ("returns_volatility", "simple", Some("sample")),
+        ("risk_return_ratio", "simple", Some("sample")),
+        ("sharpe_ratio", "simple", Some("sample")),
+        ("sortino_ratio", "simple", Some("population")),
+        ("tail_ratio", "simple", None),
+        ("tracking_error", "simple", Some("sample")),
+        ("treynor_ratio", "simple", Some("sample")),
+        ("ulcer_index", "simple", Some("population")),
+        ("up_capture_ratio", "simple", None),
+        ("value_at_risk", "simple", None),
+        ("variance_ratio", "simple", Some("population")),
+    ];
+
+    #[test]
+    fn test_every_returns_statistic_declares_its_bookkeeping_basis() {
+        // The bookkeeping basis is a declaration on the definition, not a convention a reader is
+        // expected to remember: every statistic computed from a returns series must name how the
+        // series was compounded and, when it forms a dispersion, which divisor that dispersion
+        // used, and its rendered title must carry both.
+        let mut statistics: AHashMap<String, Statistic> = AHashMap::new();
+
+        for statistic in crate::objective::builtin_statistics() {
+            statistics.insert(statistic.definition().id().to_string(), statistic);
+        }
+
+        for statistic in PortfolioAnalyzer::default().statistics.values() {
+            statistics.insert(
+                statistic.definition().id().to_string(),
+                Arc::clone(statistic),
+            );
+        }
+
+        // The built-in set does not carry these three, and each is defined over returns.
+        statistics.insert(
+            "autocorrelation".to_string(),
+            Arc::new(
+                crate::statistics::autocorrelation::Autocorrelation::new(None)
+                    .expect("valid default lag"),
+            ),
+        );
+        statistics.insert(
+            "variance_ratio".to_string(),
+            Arc::new(
+                crate::statistics::variance_ratio::VarianceRatio::new(None)
+                    .expect("valid default period"),
+            ),
+        );
+        statistics.insert(
+            "rescaled_range".to_string(),
+            Arc::new(crate::statistics::rescaled_range::RescaledRange::new()),
+        );
+
+        for statistic in statistics.values() {
+            let definition = statistic.definition();
+
+            if !definition.is_defined_over(MetricInput::Returns) {
+                continue;
+            }
+
+            let id = definition.id();
+            let Some((_, compounding, divisor)) =
+                RETURNS_BASIS.iter().find(|(expected, ..)| *expected == id)
+            else {
+                panic!("`{id}` is defined over returns but is not in the basis contract");
+            };
+
+            let declared = definition
+                .parameters()
+                .get("compounding")
+                .unwrap_or_else(|| panic!("`{id}` declares no compounding basis"));
+            assert_eq!(
+                declared.as_str(),
+                *compounding,
+                "`{id}` declares the wrong compounding basis",
+            );
+            assert!(
+                matches!(declared.as_str(), "simple" | "log"),
+                "`{id}` declares `{declared}`, which is not a compounding convention",
+            );
+            assert!(
+                definition.title().contains(declared.as_str()),
+                "`{id}` renders `{}` without its compounding basis `{declared}`",
+                definition.title(),
+            );
+            assert_eq!(
+                statistic.name(),
+                definition.title(),
+                "`{id}` renders a report row that disagrees with its definition title",
+            );
+
+            match divisor {
+                Some(expected) => {
+                    let declared = definition.parameters().get("divisor").unwrap_or_else(|| {
+                        panic!("`{id}` forms a dispersion but declares no divisor")
+                    });
+                    assert_eq!(
+                        declared.as_str(),
+                        *expected,
+                        "`{id}` declares the wrong divisor basis",
+                    );
+                    assert!(
+                        matches!(declared.as_str(), "sample" | "population"),
+                        "`{id}` declares `{declared}`, which is not a divisor convention",
+                    );
+                    assert!(
+                        definition.title().contains(declared.as_str()),
+                        "`{id}` renders `{}` without its divisor basis `{declared}`",
+                        definition.title(),
+                    );
+                }
+                None => assert!(
+                    definition.parameters().get("divisor").is_none(),
+                    "`{id}` declares a divisor but forms no dispersion",
+                ),
+            }
+        }
+
+        // The contract is fully covered: a statistic that joins the returns-based set without
+        // joining the contract fails here rather than passing unexamined.
+        let returns_ids: Vec<String> = statistics
+            .values()
+            .filter(|statistic| statistic.definition().is_defined_over(MetricInput::Returns))
+            .map(|statistic| statistic.definition().id().to_string())
+            .collect();
+
+        for (expected_id, ..) in RETURNS_BASIS {
+            assert!(
+                returns_ids.iter().any(|id| id == expected_id),
+                "`{expected_id}` is in the basis contract but was not reached by the checked set",
+            );
+        }
+
+        assert_eq!(returns_ids.len(), RETURNS_BASIS.len());
     }
 
     /// Returns a period with the given starting equity, net PnL, commission and turnover.

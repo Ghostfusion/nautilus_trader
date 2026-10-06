@@ -147,10 +147,10 @@ impl PortfolioAnalyzer {
     /// what distinguishes this from `Self.get_performance_stats_returns`.
     ///
     /// A request is matched against a statistic's stable definition id first and its display
-    /// name second, so both `"sharpe_ratio"` and `"Sharpe Ratio (252 days)"` address the same
-    /// metric. A statistic whose definition declares the benchmark input is calculated from the
-    /// returns and the supplied benchmark; when the definition requires a benchmark and
-    /// `benchmark` is `None` the metric is reported `unavailable` with
+    /// name second, so both `"sharpe_ratio"` and `"Sharpe Ratio (simple, sample, 252 days)"`
+    /// address the same metric. A statistic whose definition declares the benchmark input is
+    /// calculated from the returns and the supplied benchmark; when the definition requires a
+    /// benchmark and `benchmark` is `None` the metric is reported `unavailable` with
     /// `MetricReason.MissingBenchmark` rather than calculated from the returns alone.
     #[expect(clippy::needless_pass_by_value)]
     #[pyo3(name = "report_returns_metrics", signature = (requested, benchmark=None))]

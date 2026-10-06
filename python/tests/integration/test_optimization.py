@@ -92,8 +92,8 @@ MAX_ROWS = 120
 TRADE_SIZE = "0.010000"
 STRATEGY = "strategies.ema_cross:EMACross"
 STRATEGY_CONFIG = "strategies.ema_cross:EMACrossConfig"
-SHARPE = "Sharpe Ratio (252 days)"
-DRAWDOWN = "Max Drawdown"
+SHARPE = "Sharpe Ratio (simple, sample, 252 days)"
+DRAWDOWN = "Max Drawdown (simple)"
 
 
 def _config_parts(start, end, *, catalog_path, instrument_id, bar_type):

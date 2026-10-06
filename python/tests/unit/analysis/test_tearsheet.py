@@ -1190,9 +1190,14 @@ def test_create_tearsheet_end_to_end_real_engine() -> None:
     assert result.summary["orders.open"] == "0"
     assert result.summary["positions.open"] == "0"
     assert result.stats_pnls["USD"]["PnL (total)"] == pytest.approx(47.2)
-    assert result.stats_returns["Average (Return)"] == pytest.approx(returns.mean())
+    assert result.stats_returns["Average (Return, simple)"] == pytest.approx(returns.mean())
     assert (1 + returns).prod() == pytest.approx(1.0000472)
-    assert result.stats_general == {"Long Ratio": 1.0}
+    # The general map carries the frame's money totals beside the position-based statistics.
+    assert result.stats_general == {
+        "Long Ratio": 1.0,
+        "Total Commissions": pytest.approx(2.8),
+        "Total Turnover": pytest.approx(140050.0),
+    }
     assert len(orders) == result.total_orders
     assert orders["status"].tolist() == ["FILLED", "FILLED"]
     assert len(order_fills) == 2

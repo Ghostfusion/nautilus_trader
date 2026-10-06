@@ -66,7 +66,11 @@ impl SortinoRatio {
 
 impl Display for SortinoRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Sortino Ratio ({} days)", self.period)
+        write!(
+            f,
+            "Sortino Ratio (simple, population, {} days)",
+            self.period
+        )
     }
 }
 
@@ -80,11 +84,13 @@ impl PortfolioStatistic for SortinoRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "sortino_ratio",
-            "Sortino Ratio ({annualisation} days)",
+            "Sortino Ratio ({compounding}, {divisor}, {annualisation} days)",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "population")
         .with_count("annualisation", self.period)
         .with_tags([MetricTag::RiskAdjusted, MetricTag::Annualised])
     }
@@ -197,6 +203,6 @@ mod tests {
     #[rstest]
     fn test_name() {
         let ratio = SortinoRatio::new(None);
-        assert_eq!(ratio.name(), "Sortino Ratio (252 days)");
+        assert_eq!(ratio.name(), "Sortino Ratio (simple, population, 252 days)");
     }
 }

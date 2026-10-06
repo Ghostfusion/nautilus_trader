@@ -83,7 +83,7 @@ impl OmegaRatio {
 
 impl Display for OmegaRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Omega Ratio (threshold {})", self.threshold)
+        write!(f, "Omega Ratio (simple, threshold {})", self.threshold)
     }
 }
 
@@ -97,11 +97,12 @@ impl PortfolioStatistic for OmegaRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "omega_ratio",
-            "Omega Ratio (threshold {threshold})",
+            "Omega Ratio ({compounding}, threshold {threshold})",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_number("threshold", self.threshold)
         .with_tags([MetricTag::RiskAdjusted, MetricTag::Tail])
     }
@@ -166,7 +167,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let ratio = OmegaRatio::new(None);
-        assert_eq!(ratio.name(), "Omega Ratio (threshold 0)");
+        assert_eq!(ratio.name(), "Omega Ratio (simple, threshold 0)");
     }
 
     #[rstest]

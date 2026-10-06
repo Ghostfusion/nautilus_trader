@@ -76,7 +76,7 @@ impl Autocorrelation {
 
 impl Display for Autocorrelation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Autocorrelation (lag {})", self.lag)
+        write!(f, "Autocorrelation (simple, lag {})", self.lag)
     }
 }
 
@@ -90,11 +90,12 @@ impl PortfolioStatistic for Autocorrelation {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "autocorrelation",
-            "Autocorrelation (lag {lag})",
+            "Autocorrelation ({compounding}, lag {lag})",
             MetricUnits::Ratio,
             MetricDirection::Informational,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_count("lag", self.lag)
         .with_tags([MetricTag::Returns, MetricTag::Distribution])
     }
@@ -201,7 +202,7 @@ mod tests {
     #[rstest]
     fn test_display_name_carries_the_lag_but_metric_id_does_not() {
         let statistic = Autocorrelation::new(Some(4)).unwrap();
-        assert_eq!(statistic.name(), "Autocorrelation (lag 4)");
+        assert_eq!(statistic.name(), "Autocorrelation (simple, lag 4)");
         assert_eq!(statistic.definition().id(), "autocorrelation");
     }
 

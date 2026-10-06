@@ -41,7 +41,7 @@ pub struct ReturnsAverage {}
 
 impl Display for ReturnsAverage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Average (Return)")
+        write!(f, "Average (Return, simple)")
     }
 }
 
@@ -55,11 +55,12 @@ impl PortfolioStatistic for ReturnsAverage {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "returns_average",
-            "Average (Return)",
+            "Average (Return, {compounding})",
             MetricUnits::Fraction,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_tags([MetricTag::Returns])
     }
 
@@ -146,6 +147,6 @@ mod tests {
     #[rstest]
     fn test_name() {
         let avg = ReturnsAverage {};
-        assert_eq!(avg.name(), "Average (Return)");
+        assert_eq!(avg.name(), "Average (Return, simple)");
     }
 }

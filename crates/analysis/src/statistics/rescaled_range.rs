@@ -68,17 +68,22 @@ impl PortfolioStatistic for RescaledRange {
     type Item = f64;
 
     fn name(&self) -> String {
-        "Rescaled Range".to_string()
+        "Rescaled Range (simple, population)".to_string()
     }
 
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "rescaled_range",
-            "Rescaled Range",
+            "Rescaled Range ({compounding}, {divisor})",
             MetricUnits::Ratio,
             MetricDirection::Informational,
             [MetricInput::Returns],
         )
+        // The series reaches the estimator as simple per-period returns and is summed unlogged;
+        // the logarithms are taken inside the estimator, on its own ratios and window lengths,
+        // so the basis of the series itself is simple.
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "population")
         .with_tags([MetricTag::Returns, MetricTag::Distribution])
     }
 
@@ -253,7 +258,7 @@ mod tests {
     #[rstest]
     fn test_metric_id_is_stable() {
         let statistic = RescaledRange::new();
-        assert_eq!(statistic.name(), "Rescaled Range");
+        assert_eq!(statistic.name(), "Rescaled Range (simple, population)");
         assert_eq!(statistic.definition().id(), "rescaled_range");
     }
 }

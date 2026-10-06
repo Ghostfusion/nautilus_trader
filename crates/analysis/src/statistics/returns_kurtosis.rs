@@ -66,17 +66,19 @@ impl PortfolioStatistic for ReturnsKurtosis {
     type Item = f64;
 
     fn name(&self) -> String {
-        "Returns Kurtosis".to_string()
+        "Returns Kurtosis (simple, sample)".to_string()
     }
 
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "returns_kurtosis",
-            "Returns Kurtosis",
+            "Returns Kurtosis ({compounding}, {divisor})",
             MetricUnits::Ratio,
             MetricDirection::Informational,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "sample")
         .with_tags([MetricTag::Distribution, MetricTag::Returns])
     }
 
@@ -143,7 +145,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let kurtosis = ReturnsKurtosis::new();
-        assert_eq!(kurtosis.name(), "Returns Kurtosis");
+        assert_eq!(kurtosis.name(), "Returns Kurtosis (simple, sample)");
     }
 
     #[rstest]

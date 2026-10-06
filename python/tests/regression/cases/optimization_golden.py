@@ -70,8 +70,8 @@ CSV_NAME = "btc-perp-20211231-20220201_1m.csv"
 MAX_ROWS = 120
 TRADE_SIZE = "0.010000"
 
-SHARPE = "Sharpe Ratio (252 days)"
-DRAWDOWN = "Max Drawdown"
+SHARPE = "Sharpe Ratio (simple, sample, 252 days)"
+DRAWDOWN = "Max Drawdown (simple)"
 
 
 def config_factory(start: int | None, end: int | None) -> tuple[list, list, BacktestEngineConfig]:

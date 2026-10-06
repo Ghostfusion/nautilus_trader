@@ -34,11 +34,13 @@ def test_objective_over_sharpe_and_max_drawdown() -> None:
     """
     objective = Objective(
         [
-            ObjectiveTerm("Sharpe Ratio (252 days)", 1.0, ObjectiveDirection.MAXIMIZE),
-            ObjectiveTerm("Max Drawdown", 1.0, ObjectiveDirection.MAXIMIZE),
+            ObjectiveTerm(
+                "Sharpe Ratio (simple, sample, 252 days)", 1.0, ObjectiveDirection.MAXIMIZE
+            ),
+            ObjectiveTerm("Max Drawdown (simple)", 1.0, ObjectiveDirection.MAXIMIZE),
         ],
     )
-    values = {"Sharpe Ratio (252 days)": 2.0, "Max Drawdown": -0.25}
+    values = {"Sharpe Ratio (simple, sample, 252 days)": 2.0, "Max Drawdown (simple)": -0.25}
 
     # 1.0 * 2.0 + 1.0 * -0.25
     assert objective.evaluate(values) == 1.75
@@ -48,10 +50,10 @@ def test_constraint_verdict_on_max_drawdown() -> None:
     """
     Test a constraint verdict on maximum drawdown.
     """
-    values = {"Sharpe Ratio (252 days)": 2.0, "Max Drawdown": -0.25}
+    values = {"Sharpe Ratio (simple, sample, 252 days)": 2.0, "Max Drawdown (simple)": -0.25}
 
-    satisfied = Constraint("Max Drawdown", ConstraintComparison.AT_LEAST, -0.30)
-    violated = Constraint("Max Drawdown", ConstraintComparison.AT_LEAST, -0.20)
+    satisfied = Constraint("Max Drawdown (simple)", ConstraintComparison.AT_LEAST, -0.30)
+    violated = Constraint("Max Drawdown (simple)", ConstraintComparison.AT_LEAST, -0.20)
 
     assert satisfied.is_satisfied(values) is True
     assert violated.is_satisfied(values) is False
@@ -78,8 +80,8 @@ def test_objective_evaluate_with_missing_metric_value_raises() -> None:
     Test evaluating an objective with a missing metric value raises.
     """
     objective = Objective(
-        [ObjectiveTerm("Max Drawdown", 1.0, ObjectiveDirection.MAXIMIZE)],
+        [ObjectiveTerm("Max Drawdown (simple)", 1.0, ObjectiveDirection.MAXIMIZE)],
     )
 
     with pytest.raises(ValueError, match="no value supplied"):
-        objective.evaluate({"Sharpe Ratio (252 days)": 2.0})
+        objective.evaluate({"Sharpe Ratio (simple, sample, 252 days)": 2.0})

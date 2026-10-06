@@ -74,7 +74,7 @@ impl TreynorRatio {
 
 impl Display for TreynorRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Treynor Ratio ({} days)", self.period)
+        write!(f, "Treynor Ratio (simple, sample, {} days)", self.period)
     }
 }
 
@@ -88,11 +88,13 @@ impl PortfolioStatistic for TreynorRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "treynor_ratio",
-            "Treynor Ratio ({annualisation} days)",
+            "Treynor Ratio ({compounding}, {divisor}, {annualisation} days)",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns, MetricInput::Benchmark],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "sample")
         .with_count("annualisation", self.period)
         .with_parameter("risk_free_rate", format!("{}", self.risk_free_rate))
         .with_tags([
@@ -164,13 +166,13 @@ mod tests {
     #[rstest]
     fn test_name() {
         let stat = TreynorRatio::new(None, None);
-        assert_eq!(stat.name(), "Treynor Ratio (252 days)");
+        assert_eq!(stat.name(), "Treynor Ratio (simple, sample, 252 days)");
     }
 
     #[rstest]
     fn test_name_non_default_period() {
         let stat = TreynorRatio::new(Some(63), None);
-        assert_eq!(stat.name(), "Treynor Ratio (63 days)");
+        assert_eq!(stat.name(), "Treynor Ratio (simple, sample, 63 days)");
     }
 
     #[rstest]

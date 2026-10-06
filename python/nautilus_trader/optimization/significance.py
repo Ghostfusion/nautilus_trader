@@ -31,10 +31,11 @@ number can name the rules it was computed under.
 
 Three boundaries are enforced rather than documented:
 
-- **Annualised inputs are refused.** The built-in `Sharpe Ratio (252 days)` statistic is annualised
-  and tagged `Annualised`; feeding it to a correction that works per period would silently divide it
-  and produce a number nobody could audit. `SharpeFrequency` exists so the declaration is explicit
-  and the annualised case is an error at the boundary.
+- **Annualised inputs are refused.** The built-in
+  `Sharpe Ratio (simple, sample, 252 days)` statistic is annualised and tagged `Annualised`;
+  feeding it to a correction that works per period would silently divide it and produce a number
+  nobody could audit. `SharpeFrequency` exists so the declaration is explicit and the annualised
+  case is an error at the boundary.
 - **The kurtosis convention is non-excess.** `kurtosis` below 1 is impossible for any distribution,
   so a caller passing an excess kurtosis (0 for normal returns) is refused rather than silently
   given a different statistic than the one asked for.

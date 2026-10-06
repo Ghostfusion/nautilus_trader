@@ -74,17 +74,19 @@ impl PortfolioStatistic for UlcerIndex {
     type Item = f64;
 
     fn name(&self) -> String {
-        "Ulcer Index".to_string()
+        "Ulcer Index (simple, population)".to_string()
     }
 
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "ulcer_index",
-            "Ulcer Index",
+            "Ulcer Index ({compounding}, {divisor})",
             MetricUnits::Fraction,
             MetricDirection::Minimize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "population")
         .with_tags([MetricTag::Drawdown, MetricTag::Risk])
     }
 
@@ -141,7 +143,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let stat = UlcerIndex::new();
-        assert_eq!(stat.name(), "Ulcer Index");
+        assert_eq!(stat.name(), "Ulcer Index (simple, population)");
     }
 
     #[rstest]

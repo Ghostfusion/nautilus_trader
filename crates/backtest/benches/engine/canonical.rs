@@ -182,7 +182,7 @@ impl CanonicalScenario {
                     "blake3:405c9f219087dbff0f0641cfdc5fc41c84296981f4158bc9ea0978a1c81aee2c"
                         .to_string(),
                 result_digest:
-                    "blake3:f6d6318e0335908d881e0853aa39a01d3083469f1e628db5634bf12d3a866ba0"
+                    "blake3:4c7f6034d049cd87910c407d1834d244264dc52707c1dfbe88307b436a2e08fe"
                         .to_string(),
             },
             Self::ScheduledMarketOrders => CanonicalFingerprint {
@@ -198,8 +198,8 @@ impl CanonicalScenario {
                     "blake3:be57c858fd2d34e157342f64260c4d517abc2f7a5f67dce73d43858ea1b2bf1a"
                         .to_string(),
                 result_digest: expected_result_digest(
-                    "blake3:dee4085cbbbe1d16ba30a5e0f2d31d080ee66916f01e5040a8bf13d4869ccb2d",
-                    "blake3:f6ef1139dbe8e3a1d9836588500da86043a498373e10cfa55ce838f3779ada72",
+                    "blake3:a741f9598a1dcbbd35c98c62877818ea21e14199ebe96ac06e9d9d172b2893bd",
+                    "blake3:3cdc90a5f540a7faaeb66eef3eb40b7f8995effca4013e69c73101611fbf3f5c",
                 ),
             },
             Self::PassiveLimitOrders => CanonicalFingerprint {
@@ -215,7 +215,7 @@ impl CanonicalScenario {
                     "blake3:7702ff4aa9ca1d26061419e9185a5bcfed0418fb0f24725ee36fd7d4323d79f5"
                         .to_string(),
                 result_digest:
-                    "blake3:280f1fab0d4a8bbeae96b46833c70645163315df48fcf08585cc5d12272ebdb4"
+                    "blake3:9201d2816d7d140892b2fb509b79e49a3ecc4242eb6dd9619d1c6f9499727166"
                         .to_string(),
             },
             Self::BarEmaCross => CanonicalFingerprint {
@@ -231,8 +231,8 @@ impl CanonicalScenario {
                     "blake3:ba1b5311a979bcfb6b58a4a9c478b4f00d0c577ce0c5c9cb3328f84ee921d9fc"
                         .to_string(),
                 result_digest: expected_result_digest(
-                    "blake3:391bf30ff46833ee2c6fff27c027492eba0809581e6af54c9c32e4194b0d3317",
-                    "blake3:6b89c1df9972d611613ecbea77d4db9ab25c25211bfea358d38ad54fa3e0b9e5",
+                    "blake3:1be7072d807a412ce989f5d071e356954ec11bdf9538342bf3f2e86774451e0d",
+                    "blake3:53c003be8dbcf636739142b518f80f3b8e2f5cec6b4503698f94e399b7aab00a",
                 ),
             },
         }

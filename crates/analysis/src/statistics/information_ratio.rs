@@ -67,7 +67,11 @@ impl InformationRatio {
 
 impl Display for InformationRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Information Ratio ({} days)", self.period)
+        write!(
+            f,
+            "Information Ratio (simple, sample, {} days)",
+            self.period
+        )
     }
 }
 
@@ -81,11 +85,13 @@ impl PortfolioStatistic for InformationRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "information_ratio",
-            "Information Ratio ({annualisation} days)",
+            "Information Ratio ({compounding}, {divisor}, {annualisation} days)",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns, MetricInput::Benchmark],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "sample")
         .with_count("annualisation", self.period)
         .with_tags([
             MetricTag::RiskAdjusted,
@@ -151,13 +157,13 @@ mod tests {
     #[rstest]
     fn test_name() {
         let stat = InformationRatio::new(None);
-        assert_eq!(stat.name(), "Information Ratio (252 days)");
+        assert_eq!(stat.name(), "Information Ratio (simple, sample, 252 days)");
     }
 
     #[rstest]
     fn test_name_non_default_period() {
         let stat = InformationRatio::new(Some(63));
-        assert_eq!(stat.name(), "Information Ratio (63 days)");
+        assert_eq!(stat.name(), "Information Ratio (simple, sample, 63 days)");
     }
 
     #[rstest]

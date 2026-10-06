@@ -78,7 +78,7 @@ impl DownCaptureRatio {
 
 impl Display for DownCaptureRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Down Capture Ratio ({} days)", self.period)
+        write!(f, "Down Capture Ratio (simple, {} days)", self.period)
     }
 }
 
@@ -92,11 +92,12 @@ impl PortfolioStatistic for DownCaptureRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "down_capture_ratio",
-            "Down Capture Ratio ({annualisation} days)",
+            "Down Capture Ratio ({compounding}, {annualisation} days)",
             MetricUnits::Fraction,
             MetricDirection::Minimize,
             [MetricInput::Returns, MetricInput::Benchmark],
         )
+        .with_parameter("compounding", "simple")
         .with_count("annualisation", self.period)
         .with_tags([MetricTag::BenchmarkRelative, MetricTag::Annualised])
     }
@@ -152,13 +153,13 @@ mod tests {
     #[rstest]
     fn test_name() {
         let stat = DownCaptureRatio::new(None);
-        assert_eq!(stat.name(), "Down Capture Ratio (252 days)");
+        assert_eq!(stat.name(), "Down Capture Ratio (simple, 252 days)");
     }
 
     #[rstest]
     fn test_name_non_default_period() {
         let stat = DownCaptureRatio::new(Some(63));
-        assert_eq!(stat.name(), "Down Capture Ratio (63 days)");
+        assert_eq!(stat.name(), "Down Capture Ratio (simple, 63 days)");
     }
 
     #[rstest]

@@ -23,7 +23,7 @@
 //! # Metric names
 //!
 //! A metric is named by the exact string the statistic's own [`PortfolioStatistic::name`]
-//! returns, for example `"Sharpe Ratio (252 days)"` or `"Max Drawdown"`. The accepted set is
+//! returns, for example `"Sharpe Ratio (simple, sample, 252 days)"` or `"Max Drawdown (simple)"`. The accepted set is
 //! derived from the crate's built-in statistics rather than a hand-written table, so the names
 //! cannot drift from the statistics themselves. A name outside that set is rejected at
 //! construction with [`ObjectiveError::UnknownMetric`].
@@ -485,16 +485,20 @@ mod tests {
     #[rstest]
     fn test_objective_weighted_combination() {
         let objective = Objective::new(vec![
-            ObjectiveTerm::new("Sharpe Ratio (252 days)", 2.0, ObjectiveDirection::Maximize)
-                .unwrap(),
-            ObjectiveTerm::new("Max Drawdown", 1.0, ObjectiveDirection::Maximize).unwrap(),
+            ObjectiveTerm::new(
+                "Sharpe Ratio (simple, sample, 252 days)",
+                2.0,
+                ObjectiveDirection::Maximize,
+            )
+            .unwrap(),
+            ObjectiveTerm::new("Max Drawdown (simple)", 1.0, ObjectiveDirection::Maximize).unwrap(),
         ])
         .unwrap();
 
         let score = objective
             .evaluate(&values(&[
-                ("Sharpe Ratio (252 days)", 2.0),
-                ("Max Drawdown", -0.25),
+                ("Sharpe Ratio (simple, sample, 252 days)", 2.0),
+                ("Max Drawdown (simple)", -0.25),
             ]))
             .unwrap();
 
@@ -504,11 +508,11 @@ mod tests {
 
     #[rstest]
     fn test_objective_direction_convention() {
-        let input = values(&[("Returns Volatility (252 days)", 0.25)]);
+        let input = values(&[("Returns Volatility (simple, sample, 252 days)", 0.25)]);
 
         let maximize = Objective::new(vec![
             ObjectiveTerm::new(
-                "Returns Volatility (252 days)",
+                "Returns Volatility (simple, sample, 252 days)",
                 4.0,
                 ObjectiveDirection::Maximize,
             )
@@ -517,7 +521,7 @@ mod tests {
         .unwrap();
         let minimize = Objective::new(vec![
             ObjectiveTerm::new(
-                "Returns Volatility (252 days)",
+                "Returns Volatility (simple, sample, 252 days)",
                 4.0,
                 ObjectiveDirection::Minimize,
             )
@@ -531,14 +535,14 @@ mod tests {
 
     #[rstest]
     fn test_objective_direction_on_negative_max_drawdown() {
-        let input = values(&[("Max Drawdown", -0.25)]);
+        let input = values(&[("Max Drawdown (simple)", -0.25)]);
 
         let maximize = Objective::new(vec![
-            ObjectiveTerm::new("Max Drawdown", 1.0, ObjectiveDirection::Maximize).unwrap(),
+            ObjectiveTerm::new("Max Drawdown (simple)", 1.0, ObjectiveDirection::Maximize).unwrap(),
         ])
         .unwrap();
         let minimize = Objective::new(vec![
-            ObjectiveTerm::new("Max Drawdown", 1.0, ObjectiveDirection::Minimize).unwrap(),
+            ObjectiveTerm::new("Max Drawdown (simple)", 1.0, ObjectiveDirection::Minimize).unwrap(),
         ])
         .unwrap();
 
@@ -552,14 +556,17 @@ mod tests {
     #[case(1.499_999, false)]
     fn test_constraint_at_least_boundary_is_inclusive(#[case] value: f64, #[case] expected: bool) {
         let constraint = Constraint::new(
-            "Sharpe Ratio (252 days)",
+            "Sharpe Ratio (simple, sample, 252 days)",
             ConstraintComparison::AtLeast,
             1.5,
         )
         .unwrap();
 
         let verdict = constraint
-            .is_satisfied(&values(&[("Sharpe Ratio (252 days)", value)]))
+            .is_satisfied(&values(&[(
+                "Sharpe Ratio (simple, sample, 252 days)",
+                value,
+            )]))
             .unwrap();
 
         assert_eq!(verdict, expected);
@@ -570,10 +577,10 @@ mod tests {
     #[case(-0.299_999_9, false)]
     fn test_constraint_at_most_boundary_is_inclusive(#[case] value: f64, #[case] expected: bool) {
         let constraint =
-            Constraint::new("Max Drawdown", ConstraintComparison::AtMost, -0.3).unwrap();
+            Constraint::new("Max Drawdown (simple)", ConstraintComparison::AtMost, -0.3).unwrap();
 
         let verdict = constraint
-            .is_satisfied(&values(&[("Max Drawdown", value)]))
+            .is_satisfied(&values(&[("Max Drawdown (simple)", value)]))
             .unwrap();
 
         assert_eq!(verdict, expected);
@@ -602,8 +609,12 @@ mod tests {
     #[rstest]
     fn test_objective_missing_metric_value_errors() {
         let objective = Objective::new(vec![
-            ObjectiveTerm::new("Sharpe Ratio (252 days)", 1.0, ObjectiveDirection::Maximize)
-                .unwrap(),
+            ObjectiveTerm::new(
+                "Sharpe Ratio (simple, sample, 252 days)",
+                1.0,
+                ObjectiveDirection::Maximize,
+            )
+            .unwrap(),
         ])
         .unwrap();
 
@@ -612,7 +623,7 @@ mod tests {
         assert_eq!(
             result,
             Err(ObjectiveError::MissingMetricValue(
-                "Sharpe Ratio (252 days)".to_string()
+                "Sharpe Ratio (simple, sample, 252 days)".to_string()
             ))
         );
     }
@@ -620,14 +631,14 @@ mod tests {
     #[rstest]
     fn test_constraint_missing_metric_value_errors() {
         let constraint =
-            Constraint::new("Max Drawdown", ConstraintComparison::AtLeast, -0.5).unwrap();
+            Constraint::new("Max Drawdown (simple)", ConstraintComparison::AtLeast, -0.5).unwrap();
 
         let result = constraint.is_satisfied(&values(&[]));
 
         assert_eq!(
             result,
             Err(ObjectiveError::MissingMetricValue(
-                "Max Drawdown".to_string()
+                "Max Drawdown (simple)".to_string()
             ))
         );
     }
@@ -640,7 +651,7 @@ mod tests {
     #[rstest]
     fn test_objective_term_non_finite_weight_errors() {
         let result = ObjectiveTerm::new(
-            "Sharpe Ratio (252 days)",
+            "Sharpe Ratio (simple, sample, 252 days)",
             f64::NAN,
             ObjectiveDirection::Maximize,
         );
@@ -651,47 +662,47 @@ mod tests {
     #[rstest]
     fn test_supported_metric_names_are_the_builtin_statistic_names() {
         let expected: Vec<String> = [
-            "Alpha (252 days)",
-            "Average (Return)",
-            "Average Loss (Return)",
-            "Average Win (Return)",
+            "Alpha (simple, sample, 252 days)",
+            "Average (Return, simple)",
+            "Average Loss (Return, simple)",
+            "Average Win (Return, simple)",
             "Avg Loser",
             "Avg Winner",
-            "Beta",
+            "Beta (simple, sample)",
             "Breakeven Cost (basis points of turnover)",
-            "CAGR (252 days)",
-            "Calmar Ratio (252 days)",
+            "CAGR (simple, 252 days)",
+            "Calmar Ratio (simple, 252 days)",
             "Cost (basis points of turnover)",
-            "Down Capture Ratio (252 days)",
+            "Down Capture Ratio (simple, 252 days)",
             "Expectancy",
-            "Expected Shortfall (confidence 0.95)",
-            "Exponentially Weighted Sharpe (252 days, halflife 6)",
+            "Expected Shortfall (simple, confidence 0.95)",
+            "Exponentially Weighted Sharpe (simple, population, 252 days, halflife 6)",
             "Gross Return",
-            "Information Ratio (252 days)",
+            "Information Ratio (simple, sample, 252 days)",
             "Long Ratio",
-            "Max Drawdown",
+            "Max Drawdown (simple)",
             "Max Drawdown Duration (days)",
             "Max Loser",
             "Max Winner",
             "Min Loser",
             "Min Winner",
             "Net Return",
-            "Omega Ratio (threshold 0)",
-            "Profit Factor",
-            "Returns Kurtosis",
-            "Returns Skewness",
-            "Returns Volatility (252 days)",
-            "Risk Return Ratio",
-            "Sharpe Ratio (252 days)",
-            "Sortino Ratio (252 days)",
-            "Tail Ratio",
+            "Omega Ratio (simple, threshold 0)",
+            "Profit Factor (simple)",
+            "Returns Kurtosis (simple, sample)",
+            "Returns Skewness (simple, sample)",
+            "Returns Volatility (simple, sample, 252 days)",
+            "Risk Return Ratio (simple, sample)",
+            "Sharpe Ratio (simple, sample, 252 days)",
+            "Sortino Ratio (simple, population, 252 days)",
+            "Tail Ratio (simple)",
             "Total Commissions",
             "Total Turnover",
-            "Tracking Error (252 days)",
-            "Treynor Ratio (252 days)",
-            "Ulcer Index",
-            "Up Capture Ratio (252 days)",
-            "Value at Risk (confidence 0.95)",
+            "Tracking Error (simple, sample, 252 days)",
+            "Treynor Ratio (simple, sample, 252 days)",
+            "Ulcer Index (simple, population)",
+            "Up Capture Ratio (simple, 252 days)",
+            "Value at Risk (simple, confidence 0.95)",
             "Win Rate",
         ]
         .into_iter()

@@ -16,8 +16,8 @@
 The bridge from a completed run's statistics to the objective's metric values.
 
 A default run reports its returns statistics in `BacktestResult.stats_returns`, but that set is
-the engine's own default and does not include every built-in statistic. "Max Drawdown" is the
-important example: the kernel portfolio's analyzer does not register it, so it is absent from a
+the engine's own default and does not include every built-in statistic. "Max Drawdown (simple)" is
+the important example: the kernel portfolio's analyzer does not register it, so it is absent from a
 run's dictionary. The bridge closes that gap without computing any metric itself.
 
 The bridge feeds the completed run's own `BacktestResult.returns_series` into a fresh

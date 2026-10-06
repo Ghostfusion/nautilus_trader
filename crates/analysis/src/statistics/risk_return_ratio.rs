@@ -52,7 +52,7 @@ impl RiskReturnRatio {
 
 impl Display for RiskReturnRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Risk Return Ratio")
+        write!(f, "Risk Return Ratio (simple, sample)")
     }
 }
 
@@ -66,11 +66,13 @@ impl PortfolioStatistic for RiskReturnRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "risk_return_ratio",
-            "Risk Return Ratio",
+            "Risk Return Ratio ({compounding}, {divisor})",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "sample")
         .with_tags([MetricTag::RiskAdjusted])
     }
 
@@ -155,6 +157,6 @@ mod tests {
     #[rstest]
     fn test_name() {
         let ratio = RiskReturnRatio::new();
-        assert_eq!(ratio.name(), "Risk Return Ratio");
+        assert_eq!(ratio.name(), "Risk Return Ratio (simple, sample)");
     }
 }

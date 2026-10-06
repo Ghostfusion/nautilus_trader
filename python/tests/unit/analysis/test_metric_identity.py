@@ -101,7 +101,7 @@ def test_metric_report_distinguishes_the_four_states() -> None:
     assert computed.status == MetricStatus.COMPUTED
     assert computed.value is not None
     assert computed.reason is None
-    assert computed.title == "Max Drawdown"
+    assert computed.title == "Max Drawdown (simple)"
 
     # A position statistic requested from a returns report is available but not applicable.
     unavailable = report.get("long_ratio")
@@ -133,7 +133,7 @@ def test_metric_report_separates_invalid_from_unavailable() -> None:
     assert result.status == MetricStatus.INVALID
     assert result.reason == MetricReason.NON_FINITE_INPUT
     assert result.value is None
-    assert result.title == "Sharpe Ratio (252 days)"
+    assert result.title == "Sharpe Ratio (simple, sample, 252 days)"
 
     # The same metric with no inputs at all is unavailable, not invalid.
     analyzer_empty = _analyzer(SharpeRatio())
@@ -151,7 +151,9 @@ def test_metric_report_addresses_a_metric_by_id_and_by_name() -> None:
     _add_returns(analyzer, [0.02, -0.05, 0.01, -0.02])
 
     by_id = analyzer.report_returns_metrics(["sharpe_ratio"]).get("sharpe_ratio")
-    by_name = analyzer.report_returns_metrics(["Sharpe Ratio (252 days)"]).get("sharpe_ratio")
+    by_name = analyzer.report_returns_metrics(["Sharpe Ratio (simple, sample, 252 days)"]).get(
+        "sharpe_ratio"
+    )
 
     assert by_id.id == by_name.id
     assert by_id.title == by_name.title
@@ -169,9 +171,15 @@ def test_metric_definitions_declare_the_metadata_of_every_registered_statistic()
     assert set(definitions) == {"sharpe_ratio", "max_drawdown"}
 
     sharpe = definitions["sharpe_ratio"]
-    assert sharpe.title == "Sharpe Ratio (252 days)"
-    assert sharpe.title_template == "Sharpe Ratio ({annualisation} days)"
-    assert sharpe.parameters == {"annualisation": "252"}
+    assert sharpe.title == "Sharpe Ratio (simple, sample, 252 days)"
+    assert sharpe.title_template == (
+        "Sharpe Ratio ({compounding}, {divisor}, {annualisation} days)"
+    )
+    assert sharpe.parameters == {
+        "annualisation": "252",
+        "compounding": "simple",
+        "divisor": "sample",
+    }
     assert sharpe.units == MetricUnits.RATIO
     assert MetricTag.RISK_ADJUSTED in sharpe.tags
     assert MetricTag.ANNUALISED in sharpe.tags

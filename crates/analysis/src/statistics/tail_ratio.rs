@@ -93,17 +93,18 @@ impl PortfolioStatistic for TailRatio {
     type Item = f64;
 
     fn name(&self) -> String {
-        "Tail Ratio".to_string()
+        "Tail Ratio (simple)".to_string()
     }
 
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "tail_ratio",
-            "Tail Ratio",
+            "Tail Ratio ({compounding})",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_tags([MetricTag::Tail, MetricTag::Risk])
     }
 
@@ -164,7 +165,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let tail_ratio = TailRatio::new();
-        assert_eq!(tail_ratio.name(), "Tail Ratio");
+        assert_eq!(tail_ratio.name(), "Tail Ratio (simple)");
     }
 
     #[rstest]

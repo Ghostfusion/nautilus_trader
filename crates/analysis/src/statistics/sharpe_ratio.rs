@@ -63,7 +63,7 @@ impl SharpeRatio {
 
 impl Display for SharpeRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Sharpe Ratio ({} days)", self.period)
+        write!(f, "Sharpe Ratio (simple, sample, {} days)", self.period)
     }
 }
 
@@ -77,11 +77,13 @@ impl PortfolioStatistic for SharpeRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "sharpe_ratio",
-            "Sharpe Ratio ({annualisation} days)",
+            "Sharpe Ratio ({compounding}, {divisor}, {annualisation} days)",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "sample")
         .with_count("annualisation", self.period)
         .with_tags([MetricTag::RiskAdjusted, MetricTag::Annualised])
     }
@@ -169,6 +171,6 @@ mod tests {
     #[rstest]
     fn test_name() {
         let ratio = SharpeRatio::new(None);
-        assert_eq!(ratio.name(), "Sharpe Ratio (252 days)");
+        assert_eq!(ratio.name(), "Sharpe Ratio (simple, sample, 252 days)");
     }
 }

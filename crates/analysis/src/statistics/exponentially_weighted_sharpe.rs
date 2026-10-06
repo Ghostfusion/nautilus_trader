@@ -73,7 +73,7 @@ impl std::fmt::Display for ExponentiallyWeightedSharpe {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Exponentially Weighted Sharpe ({} days, halflife {})",
+            "Exponentially Weighted Sharpe (simple, population, {} days, halflife {})",
             self.annualisation, self.halflife
         )
     }
@@ -89,11 +89,13 @@ impl PortfolioStatistic for ExponentiallyWeightedSharpe {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "exponentially_weighted_sharpe",
-            "Exponentially Weighted Sharpe ({annualisation} days, halflife {halflife})",
+            "Exponentially Weighted Sharpe ({compounding}, {divisor}, {annualisation} days, halflife {halflife})",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "population")
         .with_count("annualisation", self.annualisation)
         .with_count("halflife", self.halflife)
         .with_tags([MetricTag::RiskAdjusted, MetricTag::Annualised])
@@ -194,7 +196,7 @@ mod tests {
         let statistic = ExponentiallyWeightedSharpe::new(Some(252), Some(6));
         assert_eq!(
             statistic.name(),
-            "Exponentially Weighted Sharpe (252 days, halflife 6)"
+            "Exponentially Weighted Sharpe (simple, population, 252 days, halflife 6)"
         );
     }
 

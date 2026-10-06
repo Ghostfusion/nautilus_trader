@@ -91,7 +91,7 @@ impl ValueAtRisk {
 
 impl Display for ValueAtRisk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Value at Risk (confidence {})", self.confidence)
+        write!(f, "Value at Risk (simple, confidence {})", self.confidence)
     }
 }
 
@@ -127,11 +127,12 @@ impl PortfolioStatistic for ValueAtRisk {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "value_at_risk",
-            "Value at Risk (confidence {confidence})",
+            "Value at Risk ({compounding}, confidence {confidence})",
             MetricUnits::Fraction,
             MetricDirection::Minimize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_number("confidence", self.confidence)
         .with_tags([MetricTag::Risk, MetricTag::Tail])
     }
@@ -194,7 +195,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let var = ValueAtRisk::new(None);
-        assert_eq!(var.name(), "Value at Risk (confidence 0.95)");
+        assert_eq!(var.name(), "Value at Risk (simple, confidence 0.95)");
     }
 
     #[rstest]

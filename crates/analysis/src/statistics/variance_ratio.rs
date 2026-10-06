@@ -77,7 +77,11 @@ impl VarianceRatio {
 
 impl Display for VarianceRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Variance Ratio (period {})", self.period)
+        write!(
+            f,
+            "Variance Ratio (simple, population, period {})",
+            self.period
+        )
     }
 }
 
@@ -91,11 +95,13 @@ impl PortfolioStatistic for VarianceRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "variance_ratio",
-            "Variance Ratio (period {period})",
+            "Variance Ratio ({compounding}, {divisor}, period {period})",
             MetricUnits::Ratio,
             MetricDirection::Informational,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "population")
         .with_count("period", self.period)
         .with_tags([MetricTag::Returns, MetricTag::Distribution])
     }
@@ -208,7 +214,10 @@ mod tests {
     #[rstest]
     fn test_display_name_carries_the_period_but_metric_id_does_not() {
         let statistic = VarianceRatio::new(Some(5)).unwrap();
-        assert_eq!(statistic.name(), "Variance Ratio (period 5)");
+        assert_eq!(
+            statistic.name(),
+            "Variance Ratio (simple, population, period 5)"
+        );
         assert_eq!(statistic.definition().id(), "variance_ratio");
     }
 

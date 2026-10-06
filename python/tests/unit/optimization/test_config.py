@@ -62,10 +62,16 @@ def document() -> dict[str, Any]:
         "window": {"start": 100, "end": 200},
         "objective": {
             "terms": [
-                {"metric": "Sharpe Ratio (252 days)", "weight": 1.0, "direction": "maximize"},
+                {
+                    "metric": "Sharpe Ratio (simple, sample, 252 days)",
+                    "weight": 1.0,
+                    "direction": "maximize",
+                },
             ],
         },
-        "constraints": [{"metric": "Max Drawdown", "comparison": "at_least", "bound": -0.013}],
+        "constraints": [
+            {"metric": "Max Drawdown (simple)", "comparison": "at_least", "bound": -0.013}
+        ],
         "stage": {"kind": "optimize"},
         "concurrency": {"max_workers": 2, "memory_fraction": 0.5},
         "store": {"directory": "store"},
@@ -92,7 +98,7 @@ def test_valid_document_parses_into_the_declared_types(tmp_path: Path) -> None:
     assert config.start == 100
     assert config.end == 200
     assert len(list(config.space.expand())) == 4
-    assert config.objective.terms[0].metric == "Sharpe Ratio (252 days)"
+    assert config.objective.terms[0].metric == "Sharpe Ratio (simple, sample, 252 days)"
     assert config.objective.terms[0].direction == ObjectiveDirection.MAXIMIZE
     assert config.constraints[0].comparison == ConstraintComparison.AT_LEAST
     assert config.constraints[0].bound == -0.013

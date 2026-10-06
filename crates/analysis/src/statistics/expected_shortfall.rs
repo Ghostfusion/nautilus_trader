@@ -91,7 +91,11 @@ impl ExpectedShortfall {
 
 impl Display for ExpectedShortfall {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Expected Shortfall (confidence {})", self.confidence)
+        write!(
+            f,
+            "Expected Shortfall (simple, confidence {})",
+            self.confidence
+        )
     }
 }
 
@@ -105,11 +109,12 @@ impl PortfolioStatistic for ExpectedShortfall {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "expected_shortfall",
-            "Expected Shortfall (confidence {confidence})",
+            "Expected Shortfall ({compounding}, confidence {confidence})",
             MetricUnits::Fraction,
             MetricDirection::Minimize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_number("confidence", self.confidence)
         .with_tags([MetricTag::Risk, MetricTag::Tail])
     }
@@ -188,7 +193,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let es = ExpectedShortfall::new(None);
-        assert_eq!(es.name(), "Expected Shortfall (confidence 0.95)");
+        assert_eq!(es.name(), "Expected Shortfall (simple, confidence 0.95)");
     }
 
     #[rstest]

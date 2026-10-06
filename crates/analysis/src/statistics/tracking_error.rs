@@ -67,7 +67,7 @@ impl TrackingError {
 
 impl Display for TrackingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Tracking Error ({} days)", self.period)
+        write!(f, "Tracking Error (simple, sample, {} days)", self.period)
     }
 }
 
@@ -81,11 +81,13 @@ impl PortfolioStatistic for TrackingError {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "tracking_error",
-            "Tracking Error ({annualisation} days)",
+            "Tracking Error ({compounding}, {divisor}, {annualisation} days)",
             MetricUnits::Fraction,
             MetricDirection::Target,
             [MetricInput::Returns, MetricInput::Benchmark],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "sample")
         .with_count("annualisation", self.period)
         .with_target(0.0)
         .with_tags([
@@ -168,13 +170,13 @@ mod tests {
     #[rstest]
     fn test_name() {
         let stat = TrackingError::new(None);
-        assert_eq!(stat.name(), "Tracking Error (252 days)");
+        assert_eq!(stat.name(), "Tracking Error (simple, sample, 252 days)");
     }
 
     #[rstest]
     fn test_name_non_default_period() {
         let stat = TrackingError::new(Some(63));
-        assert_eq!(stat.name(), "Tracking Error (63 days)");
+        assert_eq!(stat.name(), "Tracking Error (simple, sample, 63 days)");
     }
 
     #[rstest]

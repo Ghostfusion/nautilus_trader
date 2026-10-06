@@ -75,7 +75,7 @@ impl Alpha {
 
 impl Display for Alpha {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Alpha ({} days)", self.period)
+        write!(f, "Alpha (simple, sample, {} days)", self.period)
     }
 }
 
@@ -89,11 +89,13 @@ impl PortfolioStatistic for Alpha {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "alpha",
-            "Alpha ({annualisation} days)",
+            "Alpha ({compounding}, {divisor}, {annualisation} days)",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns, MetricInput::Benchmark],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "sample")
         .with_count("annualisation", self.period)
         .with_parameter("risk_free_rate", format!("{}", self.risk_free_rate))
         .with_tags([
@@ -167,13 +169,13 @@ mod tests {
     #[rstest]
     fn test_name() {
         let stat = Alpha::new(None, None);
-        assert_eq!(stat.name(), "Alpha (252 days)");
+        assert_eq!(stat.name(), "Alpha (simple, sample, 252 days)");
     }
 
     #[rstest]
     fn test_name_non_default_period() {
         let stat = Alpha::new(Some(4), None);
-        assert_eq!(stat.name(), "Alpha (4 days)");
+        assert_eq!(stat.name(), "Alpha (simple, sample, 4 days)");
     }
 
     #[rstest]

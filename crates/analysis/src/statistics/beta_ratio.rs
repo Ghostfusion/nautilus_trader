@@ -63,7 +63,7 @@ impl BetaRatio {
 
 impl Display for BetaRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Beta")
+        write!(f, "Beta (simple, sample)")
     }
 }
 
@@ -77,11 +77,13 @@ impl PortfolioStatistic for BetaRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "beta",
-            "Beta",
+            "Beta ({compounding}, {divisor})",
             MetricUnits::Ratio,
             MetricDirection::Informational,
             [MetricInput::Returns, MetricInput::Benchmark],
         )
+        .with_parameter("compounding", "simple")
+        .with_parameter("divisor", "sample")
         .with_tags([MetricTag::BenchmarkRelative, MetricTag::Risk])
     }
 
@@ -162,7 +164,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let stat = BetaRatio::new();
-        assert_eq!(stat.name(), "Beta");
+        assert_eq!(stat.name(), "Beta (simple, sample)");
     }
 
     #[rstest]

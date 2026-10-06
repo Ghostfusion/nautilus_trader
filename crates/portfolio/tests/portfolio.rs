@@ -8713,7 +8713,7 @@ fn test_portfolio_statistics_use_daily_equity_curve(simple_cache: Cache, clock: 
     assert_eq!(portfolio.snapshots(&account_id).len(), 3);
     assert!(approx_eq!(
         f64,
-        statistics.returns["Average (Return)"],
+        statistics.returns["Average (Return, simple)"],
         0.15,
         epsilon = 1e-12
     ));

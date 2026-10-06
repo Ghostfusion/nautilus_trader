@@ -68,17 +68,18 @@ impl PortfolioStatistic for CalmarRatio {
     type Item = f64;
 
     fn name(&self) -> String {
-        format!("Calmar Ratio ({} days)", self.period)
+        format!("Calmar Ratio (simple, {} days)", self.period)
     }
 
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "calmar_ratio",
-            "Calmar Ratio ({annualisation} days)",
+            "Calmar Ratio ({compounding}, {annualisation} days)",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_count("annualisation", self.period)
         .with_tags([
             MetricTag::RiskAdjusted,
@@ -147,7 +148,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let ratio = CalmarRatio::new(Some(252));
-        assert_eq!(ratio.name(), "Calmar Ratio (252 days)");
+        assert_eq!(ratio.name(), "Calmar Ratio (simple, 252 days)");
     }
 
     #[rstest]

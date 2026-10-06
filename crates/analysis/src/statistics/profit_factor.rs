@@ -54,7 +54,7 @@ pub struct ProfitFactor {}
 
 impl Display for ProfitFactor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Profit Factor")
+        write!(f, "Profit Factor (simple)")
     }
 }
 
@@ -68,11 +68,12 @@ impl PortfolioStatistic for ProfitFactor {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "profit_factor",
-            "Profit Factor",
+            "Profit Factor ({compounding})",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_tags([MetricTag::Trade])
     }
 
@@ -191,6 +192,6 @@ mod profit_factor_tests {
     #[rstest]
     fn test_name() {
         let profit_factor = ProfitFactor {};
-        assert_eq!(profit_factor.name(), "Profit Factor");
+        assert_eq!(profit_factor.name(), "Profit Factor (simple)");
     }
 }

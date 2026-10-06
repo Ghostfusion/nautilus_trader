@@ -68,17 +68,18 @@ impl PortfolioStatistic for CAGR {
     type Item = f64;
 
     fn name(&self) -> String {
-        format!("CAGR ({} days)", self.period)
+        format!("CAGR (simple, {} days)", self.period)
     }
 
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "cagr",
-            "CAGR ({annualisation} days)",
+            "CAGR ({compounding}, {annualisation} days)",
             MetricUnits::Fraction,
             MetricDirection::Maximize,
             [MetricInput::Returns],
         )
+        .with_parameter("compounding", "simple")
         .with_count("annualisation", self.period)
         .with_tags([MetricTag::Returns, MetricTag::Annualised])
     }
@@ -142,7 +143,7 @@ mod tests {
     #[rstest]
     fn test_name() {
         let cagr = CAGR::new(Some(252));
-        assert_eq!(cagr.name(), "CAGR (252 days)");
+        assert_eq!(cagr.name(), "CAGR (simple, 252 days)");
     }
 
     #[rstest]
