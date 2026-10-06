@@ -131,6 +131,7 @@
 
 pub mod aggregation;
 pub mod client;
+pub mod cross_venue;
 pub mod engine;
 pub mod option_chains;
 

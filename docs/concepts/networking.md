@@ -567,6 +567,43 @@ Treat them as a backstop. The heartbeat timeout usually fires first, and unlike 
 configuration and still bound a connection whose reader task has stopped making progress. A socket
 that rejects an option is still usable, so failures are logged and the connection proceeds.
 
+## Clock offset and cross-venue lead-lag
+
+Two venues stamp the same event on two clocks, and the difference between them is not one number: a
+single vantage cannot separate a constant clock offset from the propagation delay it waited for, so
+an offset measured from paired timestamps is known only to within the pairing's own ambiguity.
+
+`ClockOffsetEstimator` (`crates/common/src/clock/offset.rs`) estimates the offset between a venue
+clock and the local clock from paired timestamps. It applies a minimum filter per bucket, because a
+sample delayed in flight can only make the venue's timestamp look older than it is, and reports the
+spread of the per-bucket minima over its twelve-bucket window as the drift bound. It refuses to
+estimate from fewer than three completed buckets, so a window with too little evidence returns
+`None` rather than a number the data cannot support.
+
+`crates/data/src/cross_venue.rs` takes that estimate and refuses to read a lead-lag without it. The
+tool accepts no evidence other than a `CrossVenueOffset`, whose only constructor consumes a
+`ClockOffsetEstimate` plus the ambiguity the caller declares, so an unestimated read cannot be
+requested at all. A read is Hayashi-Yoshida style: each venue's series is reduced to the returns over
+the intervals between its own events, the two interval grids are paired within a declared window at
+each lag on a grid, and the highest correlation on the grid is the read, with a positive lag meaning
+the first venue leads the second.
+
+What the read can be said to be is a function of the bound it carries:
+
+- the peak is outside the pairing ambiguity, and the lag can be read as a lead-lag;
+- the peak is inside the ambiguity, and the read is reported as a null with the bound that swallowed
+  it rather than as an edge;
+- too few returns paired at that window, and no peak is reported at all.
+
+The drift bound travels beside the ambiguity, and a peak inside the drift is flagged separately,
+because the two bounds answer different questions: the ambiguity is what the vantage cannot resolve,
+the drift is what the offset was observed doing. The read is repeated at every pairing window the
+caller supplies, because the window is a choice that moves the answer, and a ladder whose windows
+disagree is reported as unstable rather than averaged away.
+
+The shape comes from the corpus: an apparent 16 ms edge between two venues is a null once the
+single-vantage ambiguity of about +/-99 ms is applied, with drift bounded to 6 ms over the window.
+
 ## Testing
 
 The network crate separates algorithm checks from operating-system I/O and simulated failure
