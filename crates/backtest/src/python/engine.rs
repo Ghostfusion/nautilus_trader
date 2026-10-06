@@ -49,7 +49,7 @@ use nautilus_model::{
         InstrumentClose, InstrumentStatus, MarkPriceUpdate, OptionGreeks, OrderBookDelta,
         OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
     },
-    enums::{AccountType, BookType, OmsType, OtoTriggerMode},
+    enums::{AccountType, BookType, OmsType, OtoTriggerMode, TradingState},
     identifiers::{AccountId, ActorId, ClientId, ExecAlgorithmId, InstrumentId, TraderId, Venue},
     python::instruments::pyobject_to_instrument_any,
     types::{Currency, Money},
@@ -177,6 +177,7 @@ impl PyBacktestEngine {
             instrument_fill_models = None,
             slippage_model = None,
             market_impact_model = None,
+            cancel_on_halt = false,
         )
     )]
     #[expect(
@@ -223,6 +224,7 @@ impl PyBacktestEngine {
         instrument_fill_models: Option<HashMap<InstrumentId, Py<PyAny>>>,
         slippage_model: Option<Py<PyAny>>,
         market_impact_model: Option<Py<PyAny>>,
+        cancel_on_halt: bool,
     ) -> PyResult<()> {
         let leverages: AHashMap<InstrumentId, Decimal> = leverages
             .map(|m| m.into_iter().collect())
@@ -316,6 +318,7 @@ impl PyBacktestEngine {
             .liquidation_enabled(liquidation_enabled)
             .liquidation_trigger_ratio(liquidation_trigger_ratio.unwrap_or(1.0))
             .liquidation_cancel_open_orders(liquidation_cancel_open_orders)
+            .cancel_on_halt(cancel_on_halt)
             .build()
             .map_err(config_error_to_pyvalue_err)?;
 
@@ -558,6 +561,26 @@ impl PyBacktestEngine {
     #[pyo3(name = "dispose")]
     fn py_dispose(&mut self) {
         self.0.dispose();
+    }
+
+    /// Sets the trading state enforced by the risk engine.
+    ///
+    /// `HALTED` denies all new submit and modify commands, while `REDUCING` permits only cancels,
+    /// queries and eligible reduce-only submissions. A state change does not cancel existing
+    /// orders.
+    #[pyo3(name = "set_trading_state")]
+    fn py_set_trading_state(&mut self, state: TradingState) {
+        self.0
+            .kernel()
+            .risk_engine
+            .borrow_mut()
+            .set_trading_state(state);
+    }
+
+    /// Returns the trading state enforced by the risk engine.
+    #[pyo3(name = "trading_state")]
+    fn py_trading_state(&self) -> TradingState {
+        self.0.kernel().risk_engine.borrow().trading_state()
     }
 
     /// Returns the backtest result from the last run.

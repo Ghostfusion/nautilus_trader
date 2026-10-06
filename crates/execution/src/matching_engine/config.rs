@@ -61,6 +61,14 @@ pub struct OrderMatchingEngineConfig {
     pub oto_full_trigger: bool,
     #[builder(default)]
     pub defer_option_settlement: bool,
+    /// Cancels all open orders for the instrument when the market is halted.
+    ///
+    /// A halt blocks new submissions and matching either way, and leaves the resting book in
+    /// place to be resolved by a reopen. With this flag the halt also empties the book, and each
+    /// cancellation carries the venue reason `MARKET_HALTED`, so the emptied book is
+    /// attributable in the resulting events. Defaults to false.
+    #[builder(default)]
+    pub cancel_on_halt: bool,
     pub price_protection_points: Option<u32>,
 }
 
@@ -94,6 +102,7 @@ mod tests {
         assert!(!config.passive_fill_microprice);
         assert!(!config.oto_full_trigger);
         assert!(!config.defer_option_settlement);
+        assert!(!config.cancel_on_halt);
         assert_eq!(config.price_protection_points, None);
     }
 }

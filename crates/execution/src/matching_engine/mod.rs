@@ -2722,9 +2722,18 @@ impl OrderMatchingEngine {
             MarketStatusAction::Suspend if self.market_status == MarketStatus::Open => {
                 self.market_status = MarketStatus::Suspended;
             }
-            MarketStatusAction::Halt | MarketStatusAction::Close
-                if self.market_status == MarketStatus::Open =>
-            {
+            MarketStatusAction::Halt if self.market_status == MarketStatus::Open => {
+                self.market_status = MarketStatus::Closed;
+
+                if self.config.cancel_on_halt {
+                    self.cancel_open_orders(&[], Some(Ustr::from("MARKET_HALTED")));
+                    log::info!(
+                        "{} halted with cancel-on-halt enabled; open orders canceled",
+                        self.instrument.id()
+                    );
+                }
+            }
+            MarketStatusAction::Close if self.market_status == MarketStatus::Open => {
                 self.market_status = MarketStatus::Closed;
             }
             _ => {}
@@ -2768,13 +2777,16 @@ impl OrderMatchingEngine {
         matches!(self.instrument, InstrumentAny::BinaryOption(_))
     }
 
-    fn cancel_open_orders_for_expiration(&mut self, excluded: &[ClientOrderId]) {
-        // Build a single de-duplicated cancellation set across the matching
-        // core and cache. Resting orders may still only be represented in the
-        // core while inflight orders can remain cache-only during the
-        // submitted/pending transition window.
+    /// Cancels every open order for the instrument, leaving `excluded` untouched.
+    ///
+    /// The set is built across the matching core and cache, because resting orders may only be
+    /// represented in the core while inflight orders can remain cache-only during the
+    /// submitted/pending transition window. `reason` is attached to each cancellation, so an
+    /// emptied book is attributable in the resulting events: expiration passes `None`, a halt
+    /// passes its venue reason.
+    fn cancel_open_orders(&mut self, excluded: &[ClientOrderId], reason: Option<Ustr>) {
         let instrument_id = self.instrument.id();
-        let expiration_order_ids: IndexSet<ClientOrderId> = {
+        let open_order_ids: IndexSet<ClientOrderId> = {
             let cache = self.cache.borrow();
             let mut order_ids = IndexSet::new();
 
@@ -2792,14 +2804,14 @@ impl OrderMatchingEngine {
             order_ids
         };
 
-        for client_order_id in expiration_order_ids {
+        for client_order_id in open_order_ids {
             let order = {
                 let cache = self.cache.borrow();
                 cache.order(&client_order_id).map(|order| order.clone())
             };
 
             if let Some(order) = order {
-                self.cancel_order_excluding(&order, None, excluded);
+                self.cancel_order_excluding(&order, None, excluded, reason);
             }
         }
     }
@@ -2811,7 +2823,7 @@ impl OrderMatchingEngine {
 
         self.pending_resolution = true;
         self.market_status = MarketStatus::Closed;
-        self.cancel_open_orders_for_expiration(excluded);
+        self.cancel_open_orders(excluded, None);
         log::info!(
             "{} expired and is now pending resolution; open orders canceled and new orders blocked",
             self.instrument.id()
@@ -2890,7 +2902,7 @@ impl OrderMatchingEngine {
         self.pending_resolution = false;
         let close = self.instrument_close.take();
         log::info!("{} reached expiration", self.instrument.id());
-        self.cancel_open_orders_for_expiration(excluded);
+        self.cancel_open_orders(excluded, None);
 
         let instrument_id = self.instrument.id();
         let positions: Vec<(
@@ -3693,7 +3705,7 @@ impl OrderMatchingEngine {
                 continue;
             }
 
-            self.cancel_order_excluding(&order, None, excluded);
+            self.cancel_order_excluding(&order, None, excluded, None);
         }
     }
 
@@ -6397,16 +6409,17 @@ impl OrderMatchingEngine {
     }
 
     fn cancel_order(&mut self, order: &OrderAny, cancel_contingencies: Option<bool>) {
-        self.cancel_order_excluding(order, cancel_contingencies, &[]);
+        self.cancel_order_excluding(order, cancel_contingencies, &[], None);
     }
 
     /// Cancels `order`, leaving `excluded` untouched should the cancellation cascade into its
-    /// contingent orders.
+    /// contingent orders, and attaching `reason` to the resulting cancellation event.
     fn cancel_order_excluding(
         &mut self,
         order: &OrderAny,
         cancel_contingencies: Option<bool>,
         excluded: &[ClientOrderId],
+        reason: Option<Ustr>,
     ) {
         if self.inflight_orders.contains(order.client_order_id()) {
             return;
@@ -6439,7 +6452,7 @@ impl OrderMatchingEngine {
         self.cached_filled_qty.swap_remove(&order.client_order_id());
 
         let venue_order_id = self.ids_generator.get_venue_order_id(order).unwrap();
-        self.generate_order_canceled(order, venue_order_id);
+        self.generate_order_canceled(order, venue_order_id, reason);
 
         if self.config.support_contingent_orders
             && order.contingency_type().is_some()
@@ -7029,7 +7042,12 @@ impl OrderMatchingEngine {
         self.dispatch_order_event(OrderEventAny::Updated(event));
     }
 
-    fn generate_order_canceled(&self, order: &OrderAny, venue_order_id: VenueOrderId) {
+    fn generate_order_canceled(
+        &self,
+        order: &OrderAny,
+        venue_order_id: VenueOrderId,
+        reason: Option<Ustr>,
+    ) {
         let ts_now = self.clock.borrow().timestamp_ns();
         let event = OrderEventAny::Canceled(OrderCanceled::new(
             order.trader_id(),
@@ -7042,7 +7060,7 @@ impl OrderMatchingEngine {
             false,
             Some(venue_order_id),
             order.account_id(),
-            None,
+            reason,
         ));
         self.dispatch_order_event(event);
     }

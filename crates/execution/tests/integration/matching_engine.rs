@@ -909,6 +909,84 @@ fn test_market_status_pause_blocks_matching_until_trading_resumes(
 }
 
 #[rstest]
+fn test_halt_with_cancel_on_halt_empties_the_book(
+    order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    account_id: AccountId,
+    instrument_eth_usdt: InstrumentAny,
+) {
+    let config = OrderMatchingEngineConfig {
+        cancel_on_halt: true,
+        ..OrderMatchingEngineConfig::default()
+    };
+    let mut engine =
+        get_order_matching_engine_l2(instrument_eth_usdt.clone(), None, None, None, Some(config));
+
+    let resting_bid_id = ClientOrderId::from("O-19700101-000000-001-001-1");
+    let mut resting_bid = OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument_eth_usdt.id())
+        .side(OrderSide::Buy)
+        .price(Price::from("1499.00"))
+        .quantity(Quantity::from("1.000"))
+        .client_order_id(resting_bid_id)
+        .submit(true)
+        .build();
+    engine.process_order(&mut resting_bid, account_id);
+    clear_order_event_handler_messages(&order_event_handler);
+    assert!(engine.order_exists(resting_bid_id));
+
+    engine.process_status(MarketStatusAction::Halt);
+
+    assert_eq!(engine.market_status, MarketStatus::Closed);
+    assert!(!engine.order_exists(resting_bid_id));
+
+    let messages = get_order_event_handler_messages(&order_event_handler);
+    let canceled = messages
+        .iter()
+        .find_map(|event| match event {
+            OrderEventAny::Canceled(canceled) => Some(canceled),
+            _ => None,
+        })
+        .expect("a halt with cancel-on-halt enabled should cancel the resting order");
+    assert_eq!(canceled.client_order_id, resting_bid_id);
+    assert_eq!(canceled.reason, Some(Ustr::from("MARKET_HALTED")));
+}
+
+#[rstest]
+fn test_halt_without_cancel_on_halt_keeps_the_book(
+    order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    account_id: AccountId,
+    instrument_eth_usdt: InstrumentAny,
+) {
+    let mut engine =
+        get_order_matching_engine_l2(instrument_eth_usdt.clone(), None, None, None, None);
+
+    let resting_bid_id = ClientOrderId::from("O-19700101-000000-001-001-1");
+    let mut resting_bid = OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument_eth_usdt.id())
+        .side(OrderSide::Buy)
+        .price(Price::from("1499.00"))
+        .quantity(Quantity::from("1.000"))
+        .client_order_id(resting_bid_id)
+        .submit(true)
+        .build();
+    engine.process_order(&mut resting_bid, account_id);
+    clear_order_event_handler_messages(&order_event_handler);
+
+    engine.process_status(MarketStatusAction::Halt);
+
+    assert_eq!(engine.market_status, MarketStatus::Closed);
+    assert!(engine.order_exists(resting_bid_id));
+
+    let messages = get_order_event_handler_messages(&order_event_handler);
+    assert!(
+        messages
+            .iter()
+            .all(|event| !matches!(event, OrderEventAny::Canceled(_))),
+        "a halt without cancel-on-halt enabled must not cancel resting orders, was {messages:?}",
+    );
+}
+
+#[rstest]
 fn test_process_order_when_invalid_contingent_orders(
     order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
     account_id: AccountId,

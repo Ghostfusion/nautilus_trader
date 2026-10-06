@@ -398,6 +398,13 @@ pub struct SimulatedVenueConfig {
     /// If option settlement waits for expiry processing after same-timestamp market data.
     #[builder(default = true)]
     pub defer_option_settlement: bool,
+    /// If a market halt cancels all open orders for the instrument.
+    ///
+    /// A halt blocks new submissions and matching either way. With this flag the halt also empties
+    /// the resting book, and each cancellation carries the venue reason `MARKET_HALTED`. Defaults
+    /// to false, which leaves resting orders in place for a reopen.
+    #[builder(default = false)]
+    pub cancel_on_halt: bool,
     /// The market order price protection distance in ticks, or zero to disable protection.
     #[builder(default = 0)]
     pub price_protection_points: u32,

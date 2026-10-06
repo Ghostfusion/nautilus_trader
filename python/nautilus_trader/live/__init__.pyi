@@ -864,6 +864,8 @@ class LiveRiskEngineConfig:
     @property
     def full_position_exit_venues(self) -> list[model.Venue]: ...
     @property
+    def tick_alignment_venues(self) -> list[model.Venue]: ...
+    @property
     def debug(self) -> bool: ...
     def __new__(
         cls,
@@ -874,6 +876,7 @@ class LiveRiskEngineConfig:
         full_position_exit_venues: typing.Sequence[model.Venue] | None = None,
         debug: bool | None = None,
         count_caps: typing.Sequence[str] | None = None,
+        tick_alignment_venues: typing.Sequence[model.Venue] | None = None,
     ) -> LiveRiskEngineConfig: ...
 
 @typing.final
