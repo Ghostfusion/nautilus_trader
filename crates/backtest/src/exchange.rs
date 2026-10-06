@@ -74,7 +74,7 @@ use rust_decimal::Decimal;
 use ustr::Ustr;
 
 use crate::{
-    config::SimulatedVenueConfig,
+    config::{MarketImpactIdentification, SimulatedVenueConfig},
     modules::{
         AccountAdjustmentError, AccountAdjustmentOutcome, ExchangeContext, SimulationModule,
         SimulationModuleHandle, SimulationModuleResult,
@@ -172,6 +172,8 @@ pub struct SimulatedExchange {
     fill_models: FillModelSelection,
     slippage_model: Option<SlippageModelHandle>,
     market_impact_model: Option<MarketImpactModelHandle>,
+    /// The declared identification of `market_impact_model`, carried from the venue config.
+    market_impact_identification: Option<MarketImpactIdentification>,
     latency_model: Option<LatencyModelHandle>,
     competitor_set: Option<CompetitorSetHandle>,
     instruments: AHashMap<InstrumentId, InstrumentAny>,
@@ -286,6 +288,7 @@ impl SimulatedExchange {
             fill_models: FillModelSelection::new(config.fill_model, config.instrument_fill_models),
             slippage_model: config.slippage_model,
             market_impact_model: config.market_impact_model,
+            market_impact_identification: config.market_impact_identification,
             latency_model: config.latency_model,
             competitor_set: config.competitor_set,
             instruments: AHashMap::new(),
@@ -649,6 +652,15 @@ impl SimulatedExchange {
     #[must_use]
     pub const fn get_matching_engines(&self) -> &IndexMap<InstrumentId, OrderMatchingEngine> {
         &self.matching_engines
+    }
+
+    /// Returns the declared identification of the venue's market impact model, if any.
+    ///
+    /// The declaration is the caller's, carried unchanged from the venue config; the exchange is
+    /// a carrier, not an author, of it. `None` when the caller declared none.
+    #[must_use]
+    pub fn market_impact_identification(&self) -> Option<&MarketImpactIdentification> {
+        self.market_impact_identification.as_ref()
     }
 
     /// Returns the per-run totals of order events by cause across the venue's instruments.

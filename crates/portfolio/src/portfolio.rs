@@ -105,6 +105,11 @@ struct PortfolioState {
     /// The per-run totals of venue order events by cause, if any, keyed by each cause's stable
     /// string.
     fill_cause_counts: Option<BTreeMap<String, u64>>,
+    /// The label of a venue's market impact model whose parameters are not recoverable, if any.
+    ///
+    /// `None` when no venue declared an identification, or when the declared model is identified,
+    /// in which case the cost rows keep their own names: an absent label is not a zero.
+    market_impact_label: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -172,6 +177,7 @@ impl PortfolioState {
             aggressor_agreement_floor: None,
             signed_order_flow_imbalance: None,
             fill_cause_counts: None,
+            market_impact_label: None,
         }
     }
 
@@ -208,6 +214,7 @@ impl PortfolioState {
         self.aggressor_agreement_floor = None;
         self.signed_order_flow_imbalance = None;
         self.fill_cause_counts = None;
+        self.market_impact_label = None;
         self.analyzer.reset();
         self.initialized = false;
         log::debug!("READY");
@@ -2269,6 +2276,7 @@ impl Portfolio {
             .set_aggressor_agreement(inner.aggressor_agreement, inner.aggressor_agreement_floor);
         analyzer.set_signed_order_flow_imbalance(inner.signed_order_flow_imbalance);
         analyzer.set_fill_cause_counts(inner.fill_cause_counts.clone());
+        analyzer.set_market_impact_label(inner.market_impact_label.clone());
 
         analyzer
     }
@@ -2324,6 +2332,18 @@ impl Portfolio {
     /// at zero; the portfolio is a carrier, not a counter.
     pub fn set_fill_cause_counts(&mut self, counts: Option<BTreeMap<String, u64>>) {
         self.inner.borrow_mut().fill_cause_counts = counts;
+    }
+
+    /// Sets the label a venue's market impact model carries when its parameters are not
+    /// recoverable, if any.
+    ///
+    /// Carried onto every [`PortfolioAnalyzer`] this portfolio builds, so a report read from
+    /// [`Self::analyzer`] marks the cost rows the model's fills contribute to. `None` when no
+    /// venue declared an identification, or when the declared model is identified, in which case
+    /// the cost rows keep their own names. The label is built by the caller that holds the
+    /// verdict vocabulary; the portfolio is a carrier, not an author, of it.
+    pub fn set_market_impact_label(&mut self, label: Option<String>) {
+        self.inner.borrow_mut().market_impact_label = label;
     }
 
     /// Registers a statistic for inclusion in portfolio and backtest analysis.

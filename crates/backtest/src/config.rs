@@ -64,6 +64,108 @@ use crate::modules::{SimulationModuleAny, SimulationModuleHandle};
 
 pub(crate) const MAX_BACKTEST_CHUNK_SIZE: usize = 1_000_000;
 
+/// The declared recovery verdict of a venue's market impact model (`design D4`).
+///
+/// The vocabulary is the one parameter recovery uses in `nautilus-research`, and its strings are
+/// kept identical to that verdict's - `identified`, `weakly_identified`, `unidentified` - so a
+/// reader sees one vocabulary in a report. The type is declared here rather than imported from
+/// `nautilus-research` on purpose: `nautilus-backtest` must not depend on that crate, so the
+/// verdict travels as a declared value the caller supplies rather than as a type imported across
+/// the boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImpactModelVerdict {
+    /// The model's parameters are recoverable.
+    Identified,
+    /// The model's parameters are only partly recoverable.
+    WeaklyIdentified,
+    /// The model's parameters are not recoverable.
+    Unidentified,
+}
+
+impl ImpactModelVerdict {
+    /// Returns the stable lowercase name of the verdict.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Identified => "identified",
+            Self::WeaklyIdentified => "weakly_identified",
+            Self::Unidentified => "unidentified",
+        }
+    }
+}
+
+/// A venue's declared identification of its market impact model.
+///
+/// A model whose parameters are not recoverable can no longer be described with a point estimate
+/// alone, but the platform still runs it, because the caller is the one who decides to fix a
+/// parameter. This value is that caller saying which verdict a recovery check returned for the
+/// model it configured, and which parameter failed, so the run summary and the report can label a
+/// number computed with the model rather than apply it silently.
+///
+/// The type is local to this crate and carries only what a label needs; the recovery measurement
+/// itself lives in `nautilus-research`, which this crate does not depend on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketImpactIdentification {
+    verdict: ImpactModelVerdict,
+    parameter: Option<String>,
+}
+
+impl MarketImpactIdentification {
+    /// Declares the model identified: every parameter met the recovery tolerance.
+    #[must_use]
+    pub const fn identified() -> Self {
+        Self {
+            verdict: ImpactModelVerdict::Identified,
+            parameter: None,
+        }
+    }
+
+    /// Declares the model weakly identified, naming the parameter that failed.
+    #[must_use]
+    pub fn weakly_identified(parameter: impl Into<String>) -> Self {
+        Self {
+            verdict: ImpactModelVerdict::WeaklyIdentified,
+            parameter: Some(parameter.into()),
+        }
+    }
+
+    /// Declares the model unidentified, naming the parameter that failed.
+    #[must_use]
+    pub fn unidentified(parameter: impl Into<String>) -> Self {
+        Self {
+            verdict: ImpactModelVerdict::Unidentified,
+            parameter: Some(parameter.into()),
+        }
+    }
+
+    /// Returns the declared verdict.
+    #[must_use]
+    pub const fn verdict(&self) -> ImpactModelVerdict {
+        self.verdict
+    }
+
+    /// Returns the parameter that failed, absent only when the model is identified.
+    #[must_use]
+    pub fn parameter(&self) -> Option<&str> {
+        self.parameter.as_deref()
+    }
+
+    /// Returns the label the run summary and the report carry, or `None` when the model is
+    /// identified.
+    ///
+    /// An identified model prints no label at all, and an absent label is not a zero: the label
+    /// exists only when a parameter failed, so a report can tell a number computed with an
+    /// unrecoverable model from one computed with a recoverable model.
+    #[must_use]
+    pub fn label(&self) -> Option<String> {
+        let parameter = self.parameter.as_deref()?;
+        Some(format!(
+            "{} impact model: {parameter}",
+            self.verdict.as_str()
+        ))
+    }
+}
+
 /// Configuration for ``BacktestEngine`` instances.
 ///
 /// The `Serialize`/`Deserialize` implementations are the optional file schema for this
@@ -332,6 +434,14 @@ pub struct SimulatedVenueConfig {
     /// number of increments it returns, after the slippage adjustment. When unset, no market
     /// impact adjustment is applied, which is the default behavior.
     pub market_impact_model: Option<MarketImpactModelHandle>,
+    /// The declared identification of the venue's market impact model, if any.
+    ///
+    /// A model whose parameters are not recoverable is still run, because the caller decides
+    /// which parameter to fix; this field is the caller declaring the recovery verdict and the
+    /// failing parameter, so the run summary and the report label a number computed with that
+    /// model instead of applying it silently. When unset, the model is applied exactly as before
+    /// and no label is printed.
+    pub market_impact_identification: Option<MarketImpactIdentification>,
     /// The model used to calculate trading fees.
     ///
     /// Must be configured explicitly, including an explicit zero-fee model.

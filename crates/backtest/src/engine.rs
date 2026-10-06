@@ -72,7 +72,7 @@ use nautilus_trading::{
 
 use crate::{
     accumulator::TimeEventAccumulator,
-    config::{BacktestEngineConfig, SimulatedVenueConfig},
+    config::{BacktestEngineConfig, MarketImpactIdentification, SimulatedVenueConfig},
     data_client::BacktestDataClient,
     data_iterator::BacktestDataIterator,
     exchange::{SettlementScope, SimulatedExchange},
@@ -1342,10 +1342,11 @@ impl BacktestEngine {
     /// The observed aggressor-agreement rate lives on the data engine's counts and the declared
     /// floor on the data engine's config, while the refusal belongs to the portfolio's analysis;
     /// the engine's signed order-flow imbalance is the tape-fed value that metric reports. The
-    /// venue's per-cause fill totals meet the analysis at the same point. The portfolio is the one
-    /// place that rebuilds the analyzer for every statistics read, so the values are set there
-    /// rather than on an analyzer built for a single call: [`Portfolio::statistics`] and the
-    /// backtest result then agree, whichever is read first.
+    /// venue's per-cause fill totals and the label of a venue's unidentified impact model meet the
+    /// analysis at the same point. The portfolio is the one place that rebuilds the analyzer for
+    /// every statistics read, so the values are set there rather than on an analyzer built for a
+    /// single call: [`Portfolio::statistics`] and the backtest result then agree, whichever is read
+    /// first.
     fn carry_result_provenance(&self) {
         let data_engine = self.kernel.data_engine.borrow();
         let observed = data_engine.data_quality_counts().aggressor_agreement_rate();
@@ -1354,16 +1355,29 @@ impl BacktestEngine {
         drop(data_engine);
 
         // Every cause is carried, including the causes at zero, so a report renders a row for
-        // each cause rather than only the causes that occurred.
+        // each cause rather than only the causes that occurred. A venue whose declared impact
+        // model is not identified labels the cost rows its fills contribute to; the labels
+        // travel beside the counts so a report read from the portfolio marks the same numbers
+        // the result carries.
         let mut fill_cause_counts = FillCauseCounts::new();
+        let mut impact_labels: Vec<String> = Vec::new();
         for exchange in self.venues.values() {
-            fill_cause_counts.merge(&exchange.borrow().fill_cause_counts());
+            let exchange = exchange.borrow();
+            fill_cause_counts.merge(&exchange.fill_cause_counts());
+            if let Some(label) = exchange
+                .market_impact_identification()
+                .and_then(MarketImpactIdentification::label)
+            {
+                impact_labels.push(label);
+            }
         }
 
         let mut portfolio = self.kernel.portfolio.borrow_mut();
         portfolio.set_aggressor_agreement(observed, floor);
         portfolio.set_signed_order_flow_imbalance(imbalance);
         portfolio.set_fill_cause_counts(Some(fill_cause_counts.to_string_map()));
+        portfolio
+            .set_market_impact_label((!impact_labels.is_empty()).then(|| impact_labels.join("; ")));
     }
 
     /// Return the backtest result from the last run.
@@ -1634,6 +1648,28 @@ impl BacktestEngine {
                 summary.insert(format!("{balance_key}.free"), balance.free.to_string());
                 summary.insert(format!("{balance_key}.locked"), balance.locked.to_string());
             }
+        }
+
+        // A venue whose declared impact model is not identified says so in the summary and names
+        // the failing parameter, so a run cannot report a number computed with such a model
+        // without the label beside it. An identified declaration, and no declaration at all, add
+        // no entry: an absent label is not a zero.
+        for (venue, exchange) in &self.venues {
+            let exchange = exchange.borrow();
+            let Some(identification) = exchange.market_impact_identification() else {
+                continue;
+            };
+            let Some(parameter) = identification.parameter() else {
+                continue;
+            };
+            summary.insert(
+                format!("market_impact.{venue}.identification"),
+                identification.verdict().as_str().to_string(),
+            );
+            summary.insert(
+                format!("market_impact.{venue}.failed_parameter"),
+                parameter.to_string(),
+            );
         }
 
         // Data-quality violations are reported as a number rather than a log line; the entry is

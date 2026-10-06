@@ -77,6 +77,22 @@ use crate::{
 
 pub type Statistic = Arc<dyn PortfolioStatistic<Item = f64> + Send + Sync>;
 
+/// The definition ids of the cost rows a fill priced under a market impact model contributes to.
+///
+/// A market impact model moves the fill price of a liquidity-taking fill, and every cost row is
+/// computed from the run's fills: the gross and net returns from their realised PnL, the turnover
+/// and commissions from their notional and price, and the two rates from those figures. The set is
+/// named by the stable definition id rather than the rendered title, so renaming a title does not
+/// change which rows are marked.
+const MARKET_IMPACT_AFFECTED_METRIC_IDS: &[&str] = &[
+    "breakeven_cost",
+    "cost_basis_points",
+    "gross_return",
+    "net_return",
+    "total_commissions",
+    "total_turnover",
+];
+
 /// Analyzes portfolio performance and calculates various statistics.
 ///
 /// The `PortfolioAnalyzer` tracks account balances, positions, and realized PnLs
@@ -139,6 +155,15 @@ pub struct PortfolioAnalyzer {
     /// holds the venue's counts, and read only by [`Self::statistics`], which renders one row per
     /// cause, including the causes at zero.
     fill_cause_counts: Option<BTreeMap<String, u64>>,
+    /// The label a venue's market impact model carries when its parameters are not recoverable,
+    /// if any.
+    ///
+    /// `None` when no venue declared an identification, or when the declared model is identified:
+    /// an absent label is not a zero, and the cost rows keep their own names. Set with
+    /// [`Self::set_market_impact_label`] by whoever holds the label beside the model's verdict, and
+    /// read only by [`Self::statistics`], which marks the cost rows the model's fills contribute
+    /// to.
+    market_impact_label: Option<String>,
 }
 
 impl Default for PortfolioAnalyzer {
@@ -214,6 +239,7 @@ impl PortfolioAnalyzer {
             aggressor_agreement_floor: None,
             signed_order_flow_imbalance: None,
             fill_cause_counts: None,
+            market_impact_label: None,
         }
     }
 
@@ -258,6 +284,7 @@ impl PortfolioAnalyzer {
         self.aggressor_agreement_floor = None;
         self.signed_order_flow_imbalance = None;
         self.fill_cause_counts = None;
+        self.market_impact_label = None;
     }
 
     /// Returns all tracked currencies.
@@ -367,6 +394,24 @@ impl PortfolioAnalyzer {
     #[must_use]
     pub fn fill_cause_counts(&self) -> Option<&BTreeMap<String, u64>> {
         self.fill_cause_counts.as_ref()
+    }
+
+    /// Sets the label a venue's market impact model carries when its parameters are not
+    /// recoverable, if any.
+    ///
+    /// The label is built by the caller that holds the verdict vocabulary; the analyzer is a
+    /// carrier, not an author, of it. `None` when no venue declared an identification, or when the
+    /// declared model is identified: an absent label is not a zero, and the cost rows keep their
+    /// own names. When `Some`, every cost row the model's fills contribute to is rendered with the
+    /// label appended to its name, so a number computed with such a model is readable as such.
+    pub fn set_market_impact_label(&mut self, label: Option<String>) {
+        self.market_impact_label = label;
+    }
+
+    /// Returns the label a venue's market impact model carries, if any.
+    #[must_use]
+    pub fn market_impact_label(&self) -> Option<&str> {
+        self.market_impact_label.as_deref()
     }
 
     /// Returns the scoring-chain stage of every registered statistic that declares one.
@@ -574,6 +619,14 @@ impl PortfolioAnalyzer {
             }
         }
 
+        // A number computed with an impact model whose parameters are not recoverable is marked
+        // as such: each cost row the model's fills contribute to carries the label in its
+        // rendered name. The marking is applied after the stage and cause logic so those read the
+        // unmarked names and the stage attribution is unchanged.
+        if let Some(label) = &self.market_impact_label {
+            self.mark_market_impact_rows(&mut returns, &mut general, label);
+        }
+
         PortfolioStatistics {
             pnls,
             returns,
@@ -610,6 +663,42 @@ impl PortfolioAnalyzer {
         }
 
         rendered
+    }
+
+    /// Marks the cost rows a market-impact-adjusted fill contributes to with `label`.
+    ///
+    /// A marked row's rendered name carries the label, so the number it holds is readable as one
+    /// computed with the model the label names. The rows keep their values; nothing is dropped and
+    /// no zero is inserted for a row that was not marked.
+    fn mark_market_impact_rows(
+        &self,
+        returns: &mut AHashMap<String, f64>,
+        general: &mut AHashMap<String, f64>,
+        label: &str,
+    ) {
+        for rows in [returns, general] {
+            let affected: Vec<(String, f64)> = rows
+                .iter()
+                .filter(|(name, _)| self.is_market_impact_affected(name))
+                .map(|(name, value)| (name.clone(), *value))
+                .collect();
+
+            for (name, value) in affected {
+                rows.remove(&name);
+                rows.insert(format!("{name} [{label}]"), value);
+            }
+        }
+    }
+
+    /// Returns whether the row named `name` is a cost row a market impact model's fills
+    /// contribute to.
+    ///
+    /// The row is resolved through its registered statistic's stable definition id, so a row that
+    /// is not a registered cost row is not marked.
+    fn is_market_impact_affected(&self, name: &str) -> bool {
+        self.statistics.get(name).is_some_and(|statistic| {
+            MARKET_IMPACT_AFFECTED_METRIC_IDS.contains(&statistic.definition().id())
+        })
     }
 
     /// Adds new positions for analysis.
