@@ -17,7 +17,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::Debug,
     rc::Rc,
 };
@@ -26,6 +26,9 @@ use ahash::{AHashMap, AHashSet};
 use indexmap::{IndexMap, IndexSet};
 use nautilus_analysis::{
     analyzer::{PortfolioAnalyzer, Statistic},
+    period::{
+        CurrencyTotals, PerformancePeriod, PerformancePeriodReducer, PeriodKind, PeriodObservation,
+    },
     snapshot::PortfolioStatistics,
 };
 use nautilus_common::{
@@ -40,7 +43,9 @@ use nautilus_model::{
     accounts::{Account, AccountAny},
     data::{Bar, MarkPriceUpdate, QuoteTick},
     enums::{OmsType, OrderType, PositionSide, PriceType},
-    events::{AccountState, OrderEventAny, PortfolioSnapshot, position::PositionEvent},
+    events::{
+        AccountState, OrderEventAny, OrderFilled, PortfolioSnapshot, position::PositionEvent,
+    },
     identifiers::{AccountId, InstrumentId, PositionId, Venue},
     instruments::{Instrument, InstrumentAny},
     orders::{Order, OrderAny},
@@ -86,6 +91,10 @@ struct PortfolioState {
     portfolio_snapshots: AHashMap<AccountId, VecDeque<PortfolioSnapshot>>,
     pre_position_fill_events: AHashSet<UUID4>,
     balance_error: Option<String>,
+    /// The performance-period frame reduced from this state's own accounting during the run.
+    periods: Vec<PerformancePeriod>,
+    /// The reducer that closes the frame at UTC-day boundaries; created on the first observation.
+    reducer: Option<PerformancePeriodReducer>,
 }
 
 #[derive(Clone, Copy)]
@@ -147,6 +156,8 @@ impl PortfolioState {
             portfolio_snapshots: AHashMap::new(),
             pre_position_fill_events: AHashSet::new(),
             balance_error: None,
+            periods: Vec::new(),
+            reducer: None,
         }
     }
 
@@ -177,6 +188,8 @@ impl PortfolioState {
         self.portfolio_snapshots.clear();
         self.pre_position_fill_events.clear();
         self.balance_error = None;
+        self.periods.clear();
+        self.reducer = None;
         self.analyzer.reset();
         self.initialized = false;
         log::debug!("READY");
@@ -1066,6 +1079,152 @@ impl Portfolio {
             UUID4::new(),
             ts_now,
             ts_now,
+        ))
+    }
+
+    /// Closes the trailing partial period at the clock's current time into the frame.
+    ///
+    /// The reducer's flush returns `None` for a window of zero length, so repeated calls at the
+    /// same clock timestamp are idempotent: the still-open period is closed once and included in
+    /// the frame. A call at a later timestamp closes the window since the previous call as a
+    /// further row, so a caller that polls the frame fragments the current period by call timing;
+    /// the money still telescopes across the rows, and a run that reads the frame at its final
+    /// timestamp gets one row for the last period.
+    fn flush_periods(&self) {
+        let ts = self.clock.borrow().timestamp_ns();
+        let observation = self.period_observation();
+        let mut inner = self.inner.borrow_mut();
+
+        // The partial row is closed from the portfolio's current accounting, so the frame is
+        // observed here as well as at the period boundaries.
+        if let (Some(observation), Some(reducer)) = (observation, inner.reducer.as_mut()) {
+            reducer.observe(observation);
+
+            if let Some(row) = reducer.flush(ts) {
+                inner.periods.push(row);
+            }
+        }
+    }
+
+    /// Returns the performance-period frame reduced from the portfolio's own accounting.
+    ///
+    /// The trailing partial period is closed at the clock's current time before the frame is
+    /// read, so the last period of a run is included. Recomputes nothing; the frame was reduced
+    /// as the run's events were applied.
+    #[must_use]
+    pub fn performance_periods(&self) -> Vec<PerformancePeriod> {
+        self.flush_periods();
+        self.inner.borrow().periods.clone()
+    }
+
+    /// Builds the portfolio's own accounting snapshot for one performance-period observation.
+    ///
+    /// The observation is a projection of authorities that already exist, never a second ledger:
+    /// realised and unrealised PnL are the state's own per-instrument maps, equity follows the
+    /// same rule [`Self::build_snapshot`] uses (balances plus unrealised PnL for margin accounts,
+    /// plus mark-to-equity for cash, betting and wallet accounts), and the exposure totals come
+    /// from the same mark-value and net-exposure calculations.
+    ///
+    /// Returns `None` when an accounting total overflows or cannot be formed: a partial total is
+    /// not an observation, so the caller skips the step rather than reducing a wrong number.
+    fn period_observation(&self) -> Option<PeriodObservation> {
+        let mut realized_pnls: BTreeMap<InstrumentId, Money> = BTreeMap::new();
+        let mut unrealized_pnls: BTreeMap<InstrumentId, Money> = BTreeMap::new();
+
+        {
+            let inner = self.inner.borrow();
+            for (instrument_id, money) in &inner.realized_pnls {
+                realized_pnls.insert(*instrument_id, *money);
+            }
+            for (instrument_id, money) in &inner.unrealized_pnls {
+                unrealized_pnls.insert(*instrument_id, *money);
+            }
+        }
+
+        let (open_positions, venues) = {
+            let cache = self.cache.borrow();
+            let open = cache.positions_open(None, None, None, None, None);
+            let venues: IndexSet<Venue> = open.iter().map(|p| p.instrument_id.venue).collect();
+            (open.len(), venues)
+        };
+
+        let mut equity: IndexMap<Currency, Money> = IndexMap::new();
+        let accounts = self.cache.borrow().accounts_all_owned();
+
+        for account in &accounts {
+            let account_id = account.id();
+
+            for money in account.balances_total().into_values() {
+                checked_add_money_map(&mut equity, money, "period equity")?;
+            }
+
+            let account_venues: IndexSet<Venue> = self
+                .cache
+                .borrow()
+                .positions_open(None, None, None, Some(&account_id), None)
+                .iter()
+                .map(|position| position.instrument_id.venue)
+                .collect();
+
+            match account {
+                AccountAny::Margin(_) => {
+                    for venue in &account_venues {
+                        // A venue whose PnL cannot be resolved is refused for the whole
+                        // observation, as `build_snapshot` refuses the whole snapshot: the
+                        // balances are already in the total, so dropping only this venue would
+                        // reduce a partial equity.
+                        let (pnls, _unpriced) =
+                            self.unrealized_pnls_with_missing(*venue, Some(&account_id), None)?;
+
+                        for money in pnls.into_values() {
+                            checked_add_money_map(&mut equity, money, "period equity")?;
+                        }
+                    }
+                }
+                AccountAny::Cash(_) | AccountAny::Betting(_) | AccountAny::Wallet(_) => {
+                    for venue in &account_venues {
+                        for money in self
+                            .mark_values_with_mode(*venue, Some(&account_id), MarkValueMode::Equity)
+                            .into_values()
+                        {
+                            checked_add_money_map(&mut equity, money, "period equity")?;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut equity_totals = CurrencyTotals::new();
+        for money in equity.into_values() {
+            equity_totals.add_money(money);
+        }
+
+        let mut gross_exposure = CurrencyTotals::new();
+        let mut net_exposure = CurrencyTotals::new();
+
+        for venue in &venues {
+            for money in self
+                .mark_values_with_mode(*venue, None, MarkValueMode::Gross)
+                .into_values()
+            {
+                gross_exposure.add_money(money);
+            }
+
+            // A venue whose exposure cannot be resolved is skipped rather than rendered as zero.
+            if let Some(exposures) = self.net_exposures(venue, None, None) {
+                for money in exposures.into_values() {
+                    net_exposure.add_money(money);
+                }
+            }
+        }
+
+        Some(PeriodObservation::new(
+            equity_totals,
+            open_positions,
+            gross_exposure,
+            net_exposure,
+            realized_pnls,
+            unrealized_pnls,
         ))
     }
 
@@ -2054,6 +2213,10 @@ impl Portfolio {
     /// should invoke it sparingly.
     #[must_use]
     pub fn analyzer(&self) -> PortfolioAnalyzer {
+        // Close the trailing partial period at the clock's current time so the last, still-open
+        // period is included; the flush is idempotent across repeated calls.
+        self.flush_periods();
+
         let cache = self.cache.borrow();
         let accounts = cache.accounts_all_owned();
         let positions: Vec<Position> = cache
@@ -2068,6 +2231,8 @@ impl Portfolio {
 
         let inner = self.inner.borrow();
         let recorded = inner.analyzer.recorded_realized_pnls.clone();
+        let statistics = inner.analyzer.statistics.clone();
+        let periods = inner.periods.clone();
         let portfolio_snapshots = inner
             .portfolio_snapshots
             .values()
@@ -2080,7 +2245,8 @@ impl Portfolio {
             portfolio_snapshots,
             recorded,
         );
-        analyzer.replace_statistics(inner.analyzer.statistics.clone());
+        analyzer.replace_statistics(statistics);
+        analyzer.set_performance_periods(periods);
 
         analyzer
     }
@@ -3223,6 +3389,77 @@ fn update_quote_tick(
     update_instrument_id(cache, clock, inner, config, &quote.instrument_id);
 }
 
+/// Reduces one step of the portfolio's own accounting into the performance-period frame.
+///
+/// Called at the end of the bar, order, position and account handlers, after the event has been
+/// applied. A quote tick is deliberately not observed: it only re-marks equity, so a run whose
+/// only events are quotes is reduced at the flush instead. The frame is reduced at a fixed UTC-day
+/// cadence, and the reducer is created lazily on the first call once the portfolio has accounting
+/// authority; before that an absent authority is not rendered as a zero. A fill's activity is
+/// recorded before the observation so it belongs to the period it occurred in.
+///
+/// The fill is recorded without a realised PnL attribution, so the frame's `winning_trades` and
+/// `losing_trades` counts stay zero; the portfolio's realised PnL is recorded per trade rather
+/// than per fill, and attributing it to one fill would guess at the closed portion.
+///
+/// A step observes the portfolio's accounting when the opening state is not established yet or
+/// when the current period is closing, and otherwise records only the fill. The reducer reads a
+/// single latest observation when it closes a period, so observing between boundaries emits no
+/// different row while it would rebuild the portfolio's totals on every event.
+fn record_period_step(
+    cache: &Rc<RefCell<Cache>>,
+    clock: &Rc<RefCell<dyn Clock>>,
+    inner: &Rc<RefCell<PortfolioState>>,
+    config: PortfolioConfig,
+    ts: UnixNanos,
+    fill: Option<&OrderFilled>,
+) {
+    // `initialized` is set once the portfolio has resolved a non-empty account set, and a
+    // registered account is the accounting authority before that resolution. Either way, with no
+    // account there is no equity to attribute and an absent authority is not rendered as a zero.
+    if !inner.borrow().initialized && cache.borrow().accounts_all_owned().is_empty() {
+        return;
+    }
+
+    let observe = {
+        let inner = inner.borrow();
+
+        match inner.reducer.as_ref() {
+            None => true,
+            Some(reducer) => ts >= reducer.period_end(),
+        }
+    };
+
+    // An accounting total that cannot be formed is not an observation, so the step records the
+    // fill and emits no row rather than reducing a partial total.
+    let observation = if observe {
+        Portfolio {
+            clock: Rc::clone(clock),
+            cache: Rc::clone(cache),
+            inner: Rc::clone(inner),
+            config,
+        }
+        .period_observation()
+    } else {
+        None
+    };
+
+    let mut inner_mut = inner.borrow_mut();
+    let reducer = inner_mut
+        .reducer
+        .get_or_insert_with(|| PerformancePeriodReducer::new(PeriodKind::Day, ts));
+
+    if let Some(fill) = fill {
+        reducer.on_fill(fill, None);
+    }
+
+    if let Some(observation) = observation {
+        reducer.observe(observation);
+        let rows = reducer.advance(ts);
+        inner_mut.periods.extend(rows);
+    }
+}
+
 fn update_bar(
     cache: &Rc<RefCell<Cache>>,
     clock: &Rc<RefCell<dyn Clock>>,
@@ -3236,6 +3473,7 @@ fn update_bar(
         .bar_close_prices
         .insert(instrument_id, bar.close);
     update_instrument_id(cache, clock, inner, config, &instrument_id);
+    record_period_step(cache, clock, inner, config, bar.ts_event, None);
 }
 
 pub(crate) fn resolve_account<'a>(
@@ -3738,6 +3976,12 @@ fn update_order(
     }
 
     log::debug!("Updated {event}");
+
+    let fill = match event {
+        OrderEventAny::Filled(filled) => Some(filled),
+        _ => None,
+    };
+    record_period_step(cache, clock, inner, config, event.ts_event(), fill);
 }
 
 fn take_or_clone_account(cache: &Rc<RefCell<Cache>>, account_id: AccountId) -> Option<AccountAny> {
@@ -3909,6 +4153,10 @@ fn update_position(
             &account_state,
         );
     }
+
+    // `PositionEvent` carries no `ts_event`, so the clock supplies the step's timestamp.
+    let ts = clock.borrow().timestamp_ns();
+    record_period_step(cache, clock, inner, config, ts, None);
 }
 
 /// Recalculates the margin account for `instrument_id` from the currently open positions.
@@ -4117,6 +4365,7 @@ fn update_account(
     drop(inner_ref);
 
     register_equity_curve_account(clock, cache, inner, config, event.account_id);
+    record_period_step(cache, clock, inner, config, event.ts_event, None);
 }
 
 fn equity_curve_timer_name(account_id: AccountId) -> String {

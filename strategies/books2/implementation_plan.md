@@ -103,8 +103,9 @@ of starting equity for the returns). A statistic whose input is absent renders t
 name rather than `0.0`.
 
 **Acceptance.** A backtest on a zero-commission venue prints cost 0.00 bps and identical gross and
-net returns; the same run with a maker-taker fee prints net below gross, and the gap equals the
-printed cost in basis points.
+net returns; the same run with a maker-taker fee prints net below gross, where the gap equals the
+commission over the frame's starting equity and the printed cost row equals the commission over the
+frame's turnover in basis points (two different ratios, so a report must not present them as one).
 
 #### I0.2 Declare the bookkeeping basis on every return statistic
 
@@ -387,27 +388,27 @@ the fixture fail; an unrelated change to a run's seed does not.
 
 ## 5. Verification matrix
 
-| Item | Observation                                                          | Where the proof lives                                |
-| ---- | -------------------------------------------------------------------- | ---------------------------------------------------- |
-| I0.1 | Cost row renders, zero-fee run shows gross equal to net              | `python/tests/unit/analysis/test_tearsheet.py`       |
-| I0.2 | Every return row names its basis                                     | `python/tests/unit/analysis/test_metric_identity.py` |
-| I0.3 | Construction ratio flags an inflated series                          | `crates/analysis` statistic tests                    |
-| I0.4 | A declared chain renders a row per stage, a missing stage is flagged | `python/tests/unit/analysis/test_analysis.py`        |
-| I1.1 | Agreement rate and disagreement count on a scrambled tape            | `crates/data` gate tests                             |
-| I1.2 | Signed metrics refuse below the floor                                | `crates/analysis` statistics plus a gate fixture     |
-| I1.3 | Undefined-label count and the recorded definition                    | `crates/research/tests/reproducibility.rs`           |
-| I1.4 | Fills counted by cause under a breaker trip                          | `crates/backtest/tests/integration/`                 |
-| I2.1 | Identified and unidentified fixtures give their verdicts             | `crates/research` measurement tests                  |
-| I2.2 | Hurst recovered within the band, or refused as unreadable            | `crates/backtest` synthetic tests                    |
-| I2.3 | Interval coverage below nominal for a tight interval                 | `crates/execution` impact tests                      |
-| I2.4 | Unidentified model labelled in the run summary                       | backtest run summary fixture                         |
-| I3.1 | Paired correction prints both values and the delta                   | `python/tests/regression/`                           |
-| I3.2 | Base rate printed beside accuracy                                    | `python/tests/unit/analysis/`                        |
-| I3.3 | Specification spread of six and per-trial provenance                 | `python/tests/unit/optimization/`                    |
-| I3.4 | Two bounds, each naming its specification                            | `python/tests/unit/optimization/`                    |
-| I4.1 | Docs conventions pass with the new vocabulary                        | `.pre-commit-hooks/check_docs_conventions.sh`        |
-| I4.2 | Regeneration is idempotent                                           | a fresh `generate_stubs.py` run                      |
-| I4.3 | Fixture fails on a basis change, passes otherwise                    | `python/tests/regression/`                           |
+| Item | Observation                                                          | Where the proof lives                                           |
+| ---- | -------------------------------------------------------------------- | --------------------------------------------------------------- |
+| I0.1 | Cost row renders, zero-fee run shows gross equal to net              | `python/tests/unit/backtest/test_backtest_engine_statistics.py` |
+| I0.2 | Every return row names its basis                                     | `python/tests/unit/analysis/test_metric_identity.py`            |
+| I0.3 | Construction ratio flags an inflated series                          | `crates/analysis` statistic tests                               |
+| I0.4 | A declared chain renders a row per stage, a missing stage is flagged | `python/tests/unit/analysis/test_analysis.py`                   |
+| I1.1 | Agreement rate and disagreement count on a scrambled tape            | `crates/data` gate tests                                        |
+| I1.2 | Signed metrics refuse below the floor                                | `crates/analysis` statistics plus a gate fixture                |
+| I1.3 | Undefined-label count and the recorded definition                    | `crates/research/tests/reproducibility.rs`                      |
+| I1.4 | Fills counted by cause under a breaker trip                          | `crates/backtest/tests/integration/`                            |
+| I2.1 | Identified and unidentified fixtures give their verdicts             | `crates/research` measurement tests                             |
+| I2.2 | Hurst recovered within the band, or refused as unreadable            | `crates/backtest` synthetic tests                               |
+| I2.3 | Interval coverage below nominal for a tight interval                 | `crates/execution` impact tests                                 |
+| I2.4 | Unidentified model labelled in the run summary                       | backtest run summary fixture                                    |
+| I3.1 | Paired correction prints both values and the delta                   | `python/tests/regression/`                                      |
+| I3.2 | Base rate printed beside accuracy                                    | `python/tests/unit/analysis/`                                   |
+| I3.3 | Specification spread of six and per-trial provenance                 | `python/tests/unit/optimization/`                               |
+| I3.4 | Two bounds, each naming its specification                            | `python/tests/unit/optimization/`                               |
+| I4.1 | Docs conventions pass with the new vocabulary                        | `.pre-commit-hooks/check_docs_conventions.sh`                   |
+| I4.2 | Regeneration is idempotent                                           | a fresh `generate_stubs.py` run                                 |
+| I4.3 | Fixture fails on a basis change, passes otherwise                    | `python/tests/regression/`                                      |
 
 ## 6. Mechanics
 

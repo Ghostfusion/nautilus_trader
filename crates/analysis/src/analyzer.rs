@@ -31,6 +31,7 @@ use crate::{
     Returns,
     metric::{
         MetricDefinition, MetricInput, MetricReason, MetricReport, MetricResult, MetricStatus,
+        MetricUnits,
     },
     period::PerformancePeriod,
     snapshot::PortfolioStatistics,
@@ -76,6 +77,12 @@ pub struct PortfolioAnalyzer {
     /// Contains portfolio returns when available, otherwise position returns.
     /// Kept as a public field for API stability; prefer the `returns()` accessor.
     pub returns: Returns,
+    /// The performance-period frame supplied by the caller, if any.
+    ///
+    /// The frame is an input, not a derived ledger: it is set with
+    /// [`Self::set_performance_periods`] and only the period-defined statistics read it. It is
+    /// deliberately not exposed as a Python getter.
+    periods: Vec<PerformancePeriod>,
 }
 
 impl Default for PortfolioAnalyzer {
@@ -132,6 +139,7 @@ impl PortfolioAnalyzer {
             position_returns: BTreeMap::new(),
             portfolio_returns: BTreeMap::new(),
             returns: BTreeMap::new(),
+            periods: Vec::new(),
         }
     }
 
@@ -170,6 +178,7 @@ impl PortfolioAnalyzer {
         self.position_returns.clear();
         self.portfolio_returns.clear();
         self.returns.clear();
+        self.periods.clear();
     }
 
     /// Returns all tracked currencies.
@@ -203,6 +212,33 @@ impl PortfolioAnalyzer {
     #[must_use]
     pub const fn portfolio_returns(&self) -> &Returns {
         &self.portfolio_returns
+    }
+
+    /// Sets the performance-period frame the period-defined statistics are calculated over.
+    ///
+    /// Replaces any frame already held. An empty frame leaves every period-defined statistic
+    /// without a value, so no period row is added and the other maps are unchanged.
+    pub fn set_performance_periods(&mut self, periods: Vec<PerformancePeriod>) {
+        self.periods = periods;
+    }
+
+    /// Returns the period-defined statistics calculated over the currently held frame.
+    ///
+    /// Iterates the registered statistics exactly as [`Self::calculate_returns_stats`] does, so a
+    /// statistic that is not defined over a period frame contributes nothing (its
+    /// [`PortfolioStatistic::calculate_from_periods`] defaults to `None`) and a frame that cannot
+    /// be reduced contributes no row.
+    #[must_use]
+    pub fn calculate_period_stats(&self) -> AHashMap<String, f64> {
+        let mut output = AHashMap::new();
+
+        for (name, stat) in &self.statistics {
+            if let Some(value) = stat.calculate_from_periods(&self.periods) {
+                output.insert(name.clone(), value);
+            }
+        }
+
+        output
     }
 
     /// Calculates statistics based on account and position data.
@@ -308,6 +344,16 @@ impl PortfolioAnalyzer {
     }
 
     /// Collects an owned [`PortfolioStatistics`] snapshot from the current analyzer state.
+    ///
+    /// The period frame's rows are merged in beside the returns and general rows. A row is
+    /// grouped by its registered statistic's declared units: a [`MetricUnits::Currency`] amount
+    /// is a money total and belongs in `general`, while every other unit (`Ratio`, `Fraction`,
+    /// `BasisPoints`) is a dimensionless figure and belongs in `returns`. The frame's cost and
+    /// return metrics are ratios and rates, so they read beside the return statistics; only the
+    /// money totals are general.
+    ///
+    /// With an empty frame no period row is produced (`calculate_from_periods` returns `None`),
+    /// so the two maps are exactly what the returns and general calculations yield on their own.
     #[must_use]
     pub fn statistics(&self) -> PortfolioStatistics {
         let mut pnls = AHashMap::new();
@@ -317,10 +363,29 @@ impl PortfolioAnalyzer {
                 pnls.insert(currency.code.to_string(), stats);
             }
         }
+
+        let mut returns = self.get_performance_stats_returns();
+        let mut general = self.get_performance_stats_general();
+
+        for (name, value) in self.calculate_period_stats() {
+            match self
+                .statistics
+                .get(&name)
+                .map(|stat| stat.definition().units())
+            {
+                Some(MetricUnits::Currency) => {
+                    general.insert(name, value);
+                }
+                _ => {
+                    returns.insert(name, value);
+                }
+            }
+        }
+
         PortfolioStatistics {
             pnls,
-            returns: self.get_performance_stats_returns(),
-            general: self.get_performance_stats_general(),
+            returns,
+            general,
             returns_series: self.returns.clone(),
         }
     }
@@ -1340,6 +1405,9 @@ mod tests {
     use super::*;
     use crate::{
         metric::{MetricDirection, MetricUnits},
+        period::{
+            CurrencyTotals, PeriodAccounting, PeriodActivity, PeriodExposure, PeriodPerformance,
+        },
         statistics::{beta_ratio::BetaRatio, max_drawdown::MaxDrawdown},
     };
 
@@ -3026,5 +3094,134 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), count);
         assert_eq!(count, 42);
+    }
+
+    /// Returns a period with the given starting equity, net PnL, commission and turnover.
+    fn frame_period(
+        starting_equity: &[(Currency, f64)],
+        net_pnl: &[(Currency, f64)],
+        commission: &[(Currency, f64)],
+        turnover: &[(Currency, f64)],
+    ) -> PerformancePeriod {
+        fn totals(amounts: &[(Currency, f64)]) -> CurrencyTotals {
+            let mut totals = CurrencyTotals::new();
+            for &(currency, amount) in amounts {
+                totals.add_money(Money::new(amount, currency));
+            }
+            totals
+        }
+
+        PerformancePeriod {
+            accounting: PeriodAccounting {
+                start: UnixNanos::default(),
+                end: UnixNanos::default(),
+                starting_equity: totals(starting_equity),
+                ending_equity: CurrencyTotals::new(),
+                realized_pnl: CurrencyTotals::new(),
+                unrealized_pnl: CurrencyTotals::new(),
+                commission: totals(commission),
+            },
+            activity: PeriodActivity {
+                volume: Decimal::ZERO,
+                turnover: totals(turnover),
+                trade_count: 0,
+                winning_trades: 0,
+                losing_trades: 0,
+            },
+            exposure: PeriodExposure {
+                open_positions: 0,
+                gross_exposure: CurrencyTotals::new(),
+                net_exposure: CurrencyTotals::new(),
+            },
+            performance: PeriodPerformance {
+                net_pnl: totals(net_pnl),
+                net_return: None,
+                drawdown: CurrencyTotals::new(),
+                drawdown_percentage: None,
+            },
+        }
+    }
+
+    /// Returns a frame that traded 10,000 USD over two periods and paid 50 USD commission.
+    fn frame() -> Vec<PerformancePeriod> {
+        vec![
+            frame_period(
+                &[(Currency::USD(), 1000.0)],
+                &[(Currency::USD(), -30.0)],
+                &[(Currency::USD(), 20.0)],
+                &[(Currency::USD(), 6000.0)],
+            ),
+            frame_period(
+                &[],
+                &[(Currency::USD(), -20.0)],
+                &[(Currency::USD(), 30.0)],
+                &[(Currency::USD(), 4000.0)],
+            ),
+        ]
+    }
+
+    #[rstest]
+    fn test_statistics_without_a_frame_is_unchanged() {
+        let analyzer = PortfolioAnalyzer::default();
+        let stats = analyzer.statistics();
+
+        // With no frame supplied the two maps are exactly the returns and general calculations:
+        // no period row is produced, so the snapshot is what it was before the frame existed.
+        assert!(maps_equal_nan_aware(
+            &stats.returns,
+            &analyzer.get_performance_stats_returns()
+        ));
+        assert!(maps_equal_nan_aware(
+            &stats.general,
+            &analyzer.get_performance_stats_general()
+        ));
+
+        for name in [
+            "Cost (basis points of turnover)",
+            "Breakeven Cost (basis points of turnover)",
+            "Gross Return",
+            "Net Return",
+            "Total Commissions",
+            "Total Turnover",
+        ] {
+            assert!(!stats.returns.contains_key(name), "{name} must be absent");
+            assert!(!stats.general.contains_key(name), "{name} must be absent");
+        }
+    }
+
+    #[rstest]
+    fn test_period_rows_merge_by_units_into_the_statistics() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        let frame = frame();
+        analyzer.set_performance_periods(frame.clone());
+        let stats = analyzer.statistics();
+
+        // Every merged row carries exactly what its statistic computes from the frame directly.
+        let cost = CostBasisPoints::new()
+            .calculate_from_periods(&frame)
+            .unwrap();
+        let breakeven = BreakevenCost::new().calculate_from_periods(&frame).unwrap();
+        let gross = GrossReturn::new().calculate_from_periods(&frame).unwrap();
+        let net = NetReturn::new().calculate_from_periods(&frame).unwrap();
+        let commissions = TotalCommissions::new()
+            .calculate_from_periods(&frame)
+            .unwrap();
+        let turnover = TotalTurnover::new().calculate_from_periods(&frame).unwrap();
+
+        // The dimensionless cost and return figures land in `returns`; the money totals in `general`.
+        assert_eq!(stats.returns["Cost (basis points of turnover)"], cost);
+        assert_eq!(
+            stats.returns["Breakeven Cost (basis points of turnover)"],
+            breakeven
+        );
+        assert_eq!(stats.returns["Gross Return"], gross);
+        assert_eq!(stats.returns["Net Return"], net);
+        assert_eq!(stats.general["Total Commissions"], commissions);
+        assert_eq!(stats.general["Total Turnover"], turnover);
+
+        // The fixture pays 50 USD commission on 10,000 USD turnover, i.e. 50 basis points.
+        assert!(approx_eq!(f64, cost, 50.0, epsilon = 1e-12));
+        assert!(approx_eq!(f64, turnover, 10_000.0, epsilon = 1e-12));
+        assert!(approx_eq!(f64, commissions, 50.0, epsilon = 1e-12));
     }
 }
