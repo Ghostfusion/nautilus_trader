@@ -25,6 +25,14 @@
 //! impact response to a persistent flow is what stops the flow's memory from becoming a
 //! predictable return (W3.3). The draws are deterministic under the configured seed: the same
 //! configuration always yields the same flow.
+//!
+//! An estimator beside the generator recovers the target Hurst exponent and the impact exponent
+//! back from a generated series ([`SyntheticFlow::estimate`]) and reports the remaining bias
+//! against a declared band, carried with a [`SyntheticRecoveryCheck`]. A series shorter than the
+//! check's declared readable length is reported as unreadable rather than estimated, because at
+//! that length the estimator's finite-size bias is large enough to invent a result.
+
+use std::fmt;
 
 use anyhow::{Result, bail};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
@@ -34,6 +42,27 @@ use rand::{RngExt, SeedableRng, rngs::StdRng};
 /// The fractional kernel is summable, so truncating the tail at this length leaves the normalized
 /// flow effectively unchanged while bounding the per-period work.
 const MAX_TRUNCATION: usize = 256;
+
+/// The shortest series at which a synthetic-flow estimate is worth reading.
+///
+/// The aggregated-variance estimator's finite-size bias grows as the series shortens, and below
+/// this length it is large enough to invent a persistence the series does not support. The
+/// threshold is declared here rather than hidden inside the estimator so a reader can disagree
+/// with the number, and a series shorter than it is reported as unreadable rather than estimated.
+pub const SYNTHETIC_READABLE_LENGTH: usize = 8192;
+
+/// The default band, in absolute units, within which a recovered estimate counts as recovered.
+///
+/// The band is a declared convention, not a property of the estimator: a caller supplies its own
+/// with [`SyntheticRecoveryCheck`], and this constant is only the default. An estimate outside
+/// the band is still reported with its number; it is simply not counted as recovered.
+pub const SYNTHETIC_RECOVERY_BAND: f64 = 0.05;
+
+/// The block sizes the aggregated-variance Hurst estimator regresses over.
+const HURST_BLOCK_SIZES: [usize; 6] = [1, 2, 4, 8, 16, 32];
+
+/// The fewest blocks a block size must yield to enter the aggregated-variance regression.
+const MIN_HURST_BLOCKS: usize = 16;
 
 /// Configuration for a [`SyntheticFlow`] calibrated to a target Hurst exponent and impact
 /// exponent.
@@ -236,6 +265,300 @@ impl SyntheticFlow {
     pub const fn seed(&self) -> u64 {
         self.seed
     }
+
+    /// Estimates the target Hurst exponent and impact exponent from this generated series.
+    ///
+    /// The Hurst exponent is recovered from the flow by the aggregated-variance method: for a
+    /// long-memory flow the variance of a `q`-period block sum, divided by `q`, scales as
+    /// `q^(2H-1)`, so the slope of its logarithm against `ln q` is `2H - 1`. The impact exponent
+    /// is recovered from the induced price path by regressing `ln|price change|` on `ln|flow|`
+    /// through the origin, which is exact because the generator sets the change to
+    /// `sign(flow) * |flow|^impact`.
+    ///
+    /// A series shorter than the check's declared readable length is not estimated: the report
+    /// carries no number and names the reason, because at that length the estimator's bias is
+    /// large enough to invent a result. A series at or above the length that the estimator still
+    /// cannot resolve is reported as unreadable for the same reason rather than given a number.
+    ///
+    /// The estimate is a pure function of the series and the check, so the same seed and length
+    /// produce the same report.
+    #[must_use]
+    pub fn estimate(&self, check: &SyntheticRecoveryCheck) -> SyntheticFlowRecoveryReport {
+        let length = self.quantities.len();
+        let unreadable = |reason| SyntheticFlowRecoveryReport {
+            length,
+            readable_length: check.readable_length,
+            band: check.band,
+            hurst: None,
+            impact_exponent: None,
+            hurst_bias: None,
+            impact_bias: None,
+            unreadable: Some(reason),
+        };
+
+        if length < check.readable_length {
+            return unreadable(UnreadableReason::BelowReadableLength);
+        }
+
+        match (
+            estimate_hurst(&self.quantities),
+            estimate_impact_exponent(&self.quantities, &self.prices),
+        ) {
+            (Some(hurst), Some(impact_exponent)) => SyntheticFlowRecoveryReport {
+                length,
+                readable_length: check.readable_length,
+                band: check.band,
+                hurst: Some(hurst),
+                impact_exponent: Some(impact_exponent),
+                hurst_bias: Some(hurst - self.target_hurst),
+                impact_bias: Some(impact_exponent - self.impact_exponent),
+                unreadable: None,
+            },
+            _ => unreadable(UnreadableReason::DegenerateSeries),
+        }
+    }
+}
+
+/// The declared check a [`SyntheticFlow::estimate`] is run against.
+///
+/// Both the readable length and the recovery band are declared here rather than assumed inside
+/// the estimator: a caller can disagree with either number, and the report prints both with the
+/// estimate so the disagreement is visible.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SyntheticRecoveryCheck {
+    /// The shortest series at which an estimate is worth reading; below it no number is produced.
+    pub readable_length: usize,
+    /// The absolute band within which a recovered estimate counts as recovered.
+    pub band: f64,
+}
+
+impl SyntheticRecoveryCheck {
+    /// Creates a new check, validating the readable length and the band.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `readable_length` is below two, because a shorter series carries no
+    /// memory to estimate, or if `band` is not finite and positive.
+    pub fn new(readable_length: usize, band: f64) -> Result<Self> {
+        if readable_length < 2 {
+            bail!(
+                "readable_length must be at least 2, because a shorter series carries no memory to estimate, was {readable_length}"
+            );
+        }
+        if !band.is_finite() || band <= 0.0 {
+            bail!("band must be finite and positive, was {band}");
+        }
+        Ok(Self {
+            readable_length,
+            band,
+        })
+    }
+}
+
+impl Default for SyntheticRecoveryCheck {
+    fn default() -> Self {
+        Self {
+            readable_length: SYNTHETIC_READABLE_LENGTH,
+            band: SYNTHETIC_RECOVERY_BAND,
+        }
+    }
+}
+
+/// Why a [`SyntheticFlowRecoveryReport`] carries no number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnreadableReason {
+    /// The generated series is shorter than the check's declared readable length.
+    BelowReadableLength,
+    /// The series is long enough but the estimator could not resolve a number from it.
+    DegenerateSeries,
+}
+
+impl UnreadableReason {
+    /// Returns the stable lowercase name of the reason.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::BelowReadableLength => "below_readable_length",
+            Self::DegenerateSeries => "degenerate_series",
+        }
+    }
+}
+
+/// The estimate a generated [`SyntheticFlow`] makes of its own calibration.
+///
+/// The recovered Hurst exponent and impact exponent are `Option`s so that a series the estimator
+/// cannot support reports an absence rather than a plausible number, and the reason for the
+/// absence is a required field of that case. The band the estimate is judged against is carried
+/// with it, so the number and the convention it was read against travel together.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SyntheticFlowRecoveryReport {
+    /// The length of the series the estimate was formed from.
+    pub length: usize,
+    /// The declared readable length the estimate was formed against.
+    pub readable_length: usize,
+    /// The declared band within which a recovered estimate counts as recovered.
+    pub band: f64,
+    /// The recovered Hurst exponent, absent when the series could not support one.
+    pub hurst: Option<f64>,
+    /// The recovered impact exponent, absent when the series could not support one.
+    pub impact_exponent: Option<f64>,
+    /// The remaining Hurst bias, `estimate - target`, absent when the estimate is.
+    pub hurst_bias: Option<f64>,
+    /// The remaining impact bias, `estimate - target`, absent when the estimate is.
+    pub impact_bias: Option<f64>,
+    /// Why the estimate carries no number, present exactly when it carries none.
+    pub unreadable: Option<UnreadableReason>,
+}
+
+impl SyntheticFlowRecoveryReport {
+    /// Returns whether the series was long enough for the estimate to carry numbers.
+    #[must_use]
+    pub const fn is_readable(&self) -> bool {
+        self.unreadable.is_none()
+    }
+
+    /// Returns whether the recovered Hurst lies inside the declared band, absent when unreadable.
+    #[must_use]
+    pub fn hurst_recovered(&self) -> Option<bool> {
+        self.hurst_bias.map(|bias| bias.abs() <= self.band)
+    }
+
+    /// Returns whether the recovered impact exponent lies inside the declared band, absent when
+    /// unreadable.
+    #[must_use]
+    pub fn impact_recovered(&self) -> Option<bool> {
+        self.impact_bias.map(|bias| bias.abs() <= self.band)
+    }
+}
+
+impl fmt::Display for SyntheticFlowRecoveryReport {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(reason) = self.unreadable {
+            return write!(
+                formatter,
+                "estimate not readable at length {} against the declared readable length {} ({})",
+                self.length,
+                self.readable_length,
+                reason.name(),
+            );
+        }
+        match (
+            self.hurst,
+            self.impact_exponent,
+            self.hurst_bias,
+            self.impact_bias,
+        ) {
+            (Some(hurst), Some(impact), Some(hurst_bias), Some(impact_bias)) => write!(
+                formatter,
+                "hurst {hurst:.4} (band +/- {:.4}, bias {hurst_bias:+.4}), impact {impact:.4} (band +/- {:.4}, bias {impact_bias:+.4}), length {}",
+                self.band, self.band, self.length,
+            ),
+            _ => write!(
+                formatter,
+                "estimate malformed: readable but without numbers"
+            ),
+        }
+    }
+}
+
+/// Estimates the Hurst exponent of the flow by the aggregated-variance method.
+///
+/// For each declared block size the estimator sums non-overlapping blocks of the flow, takes the
+/// population variance of those sums divided by the block size, and regresses its logarithm on the
+/// logarithm of the block size. The slope is `2H - 1`, so the estimate is `(slope + 1) / 2`. A
+/// block size that would leave fewer than [`MIN_HURST_BLOCKS`] blocks is skipped, and a degenerate
+/// variance or fewer than two usable block sizes is an explicit absence.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "block sizes and counts are small enough to be represented exactly as f64"
+)]
+fn estimate_hurst(quantities: &[f64]) -> Option<f64> {
+    let mut log_sizes = Vec::with_capacity(HURST_BLOCK_SIZES.len());
+    let mut log_variances = Vec::with_capacity(HURST_BLOCK_SIZES.len());
+
+    for size in HURST_BLOCK_SIZES {
+        let blocks = quantities.len() / size;
+        if blocks < MIN_HURST_BLOCKS {
+            continue;
+        }
+
+        let sums: Vec<f64> = quantities
+            .chunks_exact(size)
+            .map(|block| block.iter().sum::<f64>())
+            .collect();
+        let mean = sums.iter().sum::<f64>() / blocks as f64;
+        let variance = sums.iter().map(|sum| (sum - mean).powi(2)).sum::<f64>() / blocks as f64;
+        let aggregated = variance / size as f64;
+        if !aggregated.is_finite() || aggregated <= 0.0 {
+            return None;
+        }
+
+        log_sizes.push((size as f64).ln());
+        log_variances.push(aggregated.ln());
+    }
+
+    let slope = regression_slope(&log_sizes, &log_variances)?;
+    Some(f64::midpoint(slope, 1.0))
+}
+
+/// Estimates the impact exponent by regressing `ln|price change|` on `ln|flow|` through the
+/// origin.
+///
+/// The generator sets the price change over a period to `sign(flow) * |flow|^impact`, so the
+/// log-log slope of the magnitudes is the exponent exactly. A period whose flow or change is zero
+/// is skipped, because its logarithm is undefined, and a regression with no usable period is an
+/// explicit absence.
+fn estimate_impact_exponent(quantities: &[f64], prices: &[f64]) -> Option<f64> {
+    let mut numerator = 0.0;
+    let mut denominator = 0.0;
+    for period in 1..quantities.len().min(prices.len()) {
+        let flow = quantities[period].abs();
+        let change = (prices[period] - prices[period - 1]).abs();
+        if flow <= 0.0 || change <= 0.0 {
+            continue;
+        }
+        let log_flow = flow.ln();
+        numerator += log_flow * change.ln();
+        denominator += log_flow * log_flow;
+    }
+
+    if !denominator.is_finite() || denominator <= 0.0 {
+        return None;
+    }
+    let impact = numerator / denominator;
+    if impact.is_finite() {
+        Some(impact)
+    } else {
+        None
+    }
+}
+
+/// Returns the ordinary least-squares slope of `y` on `x`, or an explicit absence when the
+/// regression is degenerate.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "the point count is small enough to be represented exactly as f64"
+)]
+fn regression_slope(x: &[f64], y: &[f64]) -> Option<f64> {
+    if x.len() < 2 || x.len() != y.len() {
+        return None;
+    }
+
+    let count = x.len() as f64;
+    let mean_x = x.iter().sum::<f64>() / count;
+    let mean_y = y.iter().sum::<f64>() / count;
+    let mut covariance = 0.0;
+    let mut variance = 0.0;
+    for (x, y) in x.iter().zip(y) {
+        let dx = x - mean_x;
+        covariance += dx * (y - mean_y);
+        variance += dx * dx;
+    }
+
+    if variance <= 0.0 {
+        return None;
+    }
+    Some(covariance / variance)
 }
 
 #[cfg(test)]
@@ -374,5 +697,162 @@ mod tests {
                 prices[t] - prices[t - 1]
             );
         }
+    }
+
+    #[rstest]
+    fn test_the_check_refuses_a_readable_length_below_two() {
+        let error = SyntheticRecoveryCheck::new(1, 0.05)
+            .expect_err("a readable length below two must be refused");
+        assert!(
+            error.to_string().contains("at least 2"),
+            "error did not name the two-period minimum: {error}"
+        );
+    }
+
+    #[rstest]
+    #[case(0.0)]
+    #[case(-0.05)]
+    #[case(f64::NAN)]
+    #[case(f64::INFINITY)]
+    fn test_the_check_refuses_a_band_that_is_not_finite_and_positive(#[case] band: f64) {
+        let error = SyntheticRecoveryCheck::new(64, band)
+            .expect_err("a band that is not finite and positive must be refused");
+        assert!(
+            error
+                .to_string()
+                .contains("band must be finite and positive"),
+            "error did not name the band condition: {error}"
+        );
+    }
+
+    #[rstest]
+    fn test_the_default_check_declares_the_readable_length_and_band() {
+        let check = SyntheticRecoveryCheck::default();
+        assert_eq!(check.readable_length, SYNTHETIC_READABLE_LENGTH);
+        assert!((check.band - SYNTHETIC_RECOVERY_BAND).abs() < f64::EPSILON);
+    }
+
+    #[rstest]
+    fn test_a_long_series_recovers_the_hurst_and_impact_within_the_band() {
+        let flow = SyntheticFlowConfig::new(0.6, 0.5, 16_384, 7)
+            .expect("the calibration parameters are valid")
+            .generate()
+            .expect("generation succeeds");
+        let estimate = flow.estimate(&SyntheticRecoveryCheck::default());
+        assert!(
+            estimate.is_readable(),
+            "a 16_384-period series is above the readable length"
+        );
+        assert_eq!(
+            estimate.hurst_recovered(),
+            Some(true),
+            "the recovered Hurst must lie inside the declared band: {estimate}"
+        );
+        assert_eq!(
+            estimate.impact_recovered(),
+            Some(true),
+            "the recovered impact exponent must lie inside the declared band: {estimate}"
+        );
+        assert!(
+            estimate.hurst_bias.expect("readable").abs() <= estimate.band,
+            "the remaining Hurst bias must be inside the band: {estimate}"
+        );
+        let printed = estimate.to_string();
+        assert!(
+            printed.contains("bias"),
+            "the report must print the remaining bias: {printed}"
+        );
+    }
+
+    #[rstest]
+    fn test_a_series_below_the_readable_length_reports_no_number() {
+        let flow = SyntheticFlowConfig::new(0.6, 0.5, SYNTHETIC_READABLE_LENGTH - 1, 7)
+            .expect("the calibration parameters are valid")
+            .generate()
+            .expect("generation succeeds");
+        let estimate = flow.estimate(&SyntheticRecoveryCheck::default());
+
+        assert!(
+            !estimate.is_readable(),
+            "a series below the readable length must not be estimated"
+        );
+        assert_eq!(estimate.hurst, None);
+        assert_eq!(estimate.impact_exponent, None);
+        assert_eq!(estimate.hurst_bias, None);
+        assert_eq!(estimate.impact_bias, None);
+        assert_eq!(
+            estimate.unreadable,
+            Some(UnreadableReason::BelowReadableLength)
+        );
+
+        let printed = estimate.to_string();
+        assert!(
+            printed.contains("not readable"),
+            "the report must state that the estimate is not readable: {printed}"
+        );
+        assert!(
+            !printed.contains("hurst") && !printed.contains("impact"),
+            "the report must print no estimate number: {printed}"
+        );
+    }
+
+    #[rstest]
+    fn test_a_series_at_the_readable_length_is_estimated() {
+        let flow = SyntheticFlowConfig::new(0.6, 0.5, SYNTHETIC_READABLE_LENGTH, 7)
+            .expect("the calibration parameters are valid")
+            .generate()
+            .expect("generation succeeds");
+        let estimate = flow.estimate(&SyntheticRecoveryCheck::default());
+
+        assert!(
+            estimate.is_readable(),
+            "a series at the readable length must be estimated: {estimate}"
+        );
+        assert!(estimate.hurst.is_some());
+        assert!(estimate.impact_exponent.is_some());
+    }
+
+    #[rstest]
+    fn test_the_readable_length_is_the_declared_check_not_a_constant() {
+        let flow = SyntheticFlowConfig::new(0.6, 0.5, 1_024, 7)
+            .expect("the calibration parameters are valid")
+            .generate()
+            .expect("generation succeeds");
+
+        assert!(
+            !flow
+                .estimate(&SyntheticRecoveryCheck::default())
+                .is_readable(),
+            "the default check must refuse a 1_024-period series"
+        );
+
+        let declared =
+            SyntheticRecoveryCheck::new(1_024, 0.2).expect("the check parameters are valid");
+        let estimate = flow.estimate(&declared);
+        assert!(
+            estimate.is_readable(),
+            "a check declaring a 1_024-period readable length must accept the series"
+        );
+        assert!((estimate.band - 0.2).abs() < f64::EPSILON);
+        assert_eq!(estimate.readable_length, 1_024);
+        assert_eq!(estimate.length, 1_024);
+    }
+
+    #[rstest]
+    fn test_the_same_seed_and_length_produce_the_same_estimate() {
+        let config = SyntheticFlowConfig::new(0.6, 0.5, 16_384, 42)
+            .expect("the calibration parameters are valid");
+        let check = SyntheticRecoveryCheck::default();
+
+        let first = config
+            .generate()
+            .expect("generation succeeds")
+            .estimate(&check);
+        let second = config
+            .generate()
+            .expect("generation succeeds")
+            .estimate(&check);
+        assert_eq!(first, second);
+        assert_eq!(first.to_string(), second.to_string());
     }
 }
