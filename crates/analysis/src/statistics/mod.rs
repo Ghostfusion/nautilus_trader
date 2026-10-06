@@ -16,6 +16,7 @@
 //! Trading performance statistics and portfolio metrics.
 
 pub mod alpha;
+pub mod arithmetic_compounding;
 pub mod autocorrelation;
 pub mod beta_ratio;
 pub mod breakeven_cost;

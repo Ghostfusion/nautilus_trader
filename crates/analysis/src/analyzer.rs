@@ -37,15 +37,36 @@ use crate::{
     snapshot::PortfolioStatistics,
     statistic::PortfolioStatistic,
     statistics::{
-        breakeven_cost::BreakevenCost, cost_basis_points::CostBasisPoints, expectancy::Expectancy,
-        gross_return::GrossReturn, long_ratio::LongRatio, loser_avg::AvgLoser, loser_max::MaxLoser,
-        loser_min::MinLoser, net_return::NetReturn, profit_factor::ProfitFactor,
-        returns_avg::ReturnsAverage, returns_avg_loss::ReturnsAverageLoss,
-        returns_avg_win::ReturnsAverageWin, returns_kurtosis::ReturnsKurtosis,
-        returns_skewness::ReturnsSkewness, returns_volatility::ReturnsVolatility,
-        risk_return_ratio::RiskReturnRatio, sharpe_ratio::SharpeRatio, sortino_ratio::SortinoRatio,
-        tail_ratio::TailRatio, total_commissions::TotalCommissions, total_turnover::TotalTurnover,
-        win_rate::WinRate, winner_avg::AvgWinner, winner_max::MaxWinner, winner_min::MinWinner,
+        arithmetic_compounding::{
+            ArithmeticCompoundingFlagged, ArithmeticCompoundingImpliedEquity,
+            ArithmeticCompoundingRatio, ArithmeticCompoundingRealisedEquity,
+        },
+        breakeven_cost::BreakevenCost,
+        cost_basis_points::CostBasisPoints,
+        expectancy::Expectancy,
+        gross_return::GrossReturn,
+        long_ratio::LongRatio,
+        loser_avg::AvgLoser,
+        loser_max::MaxLoser,
+        loser_min::MinLoser,
+        net_return::NetReturn,
+        profit_factor::ProfitFactor,
+        returns_avg::ReturnsAverage,
+        returns_avg_loss::ReturnsAverageLoss,
+        returns_avg_win::ReturnsAverageWin,
+        returns_kurtosis::ReturnsKurtosis,
+        returns_skewness::ReturnsSkewness,
+        returns_volatility::ReturnsVolatility,
+        risk_return_ratio::RiskReturnRatio,
+        sharpe_ratio::SharpeRatio,
+        sortino_ratio::SortinoRatio,
+        tail_ratio::TailRatio,
+        total_commissions::TotalCommissions,
+        total_turnover::TotalTurnover,
+        win_rate::WinRate,
+        winner_avg::AvgWinner,
+        winner_max::MaxWinner,
+        winner_min::MinWinner,
     },
 };
 
@@ -119,6 +140,14 @@ impl Default for PortfolioAnalyzer {
         analyzer.register_statistic(Arc::new(NetReturn::new()));
         analyzer.register_statistic(Arc::new(TotalCommissions::new()));
         analyzer.register_statistic(Arc::new(TotalTurnover::new()));
+        // The arithmetic-compounding check: the terminal equity the arithmetic mean net return
+        // implies, the terminal equity the frame actually realised, their ratio, and a discrete
+        // flag when the ratio is further from one than the declared tolerance. The two equity
+        // rows are money and land in `general`; the ratio and the flag land in `returns`.
+        analyzer.register_statistic(Arc::new(ArithmeticCompoundingImpliedEquity::new(None)));
+        analyzer.register_statistic(Arc::new(ArithmeticCompoundingRealisedEquity::new()));
+        analyzer.register_statistic(Arc::new(ArithmeticCompoundingRatio::new(None)));
+        analyzer.register_statistic(Arc::new(ArithmeticCompoundingFlagged::new(None)));
         analyzer
     }
 }
@@ -3387,5 +3416,61 @@ mod tests {
         assert!(approx_eq!(f64, cost, 50.0, epsilon = 1e-12));
         assert!(approx_eq!(f64, turnover, 10_000.0, epsilon = 1e-12));
         assert!(approx_eq!(f64, commissions, 50.0, epsilon = 1e-12));
+    }
+
+    #[rstest]
+    fn test_arithmetic_compounding_rows_merge_by_units_into_the_statistics() {
+        // A two-period frame of +50% then -50% that ended at 750 USD: the arithmetic mean net
+        // return is exactly zero, so compounding it leaves the starting 1,000 USD and the
+        // construction overstates the realised terminal equity by 1,000 / 750.
+        let mut first = frame_period(&[(Currency::USD(), 1000.0)], &[], &[], &[]);
+        first
+            .accounting
+            .ending_equity
+            .add_money(Money::new(1500.0, Currency::USD()));
+        first.performance.net_return = Some(0.5);
+
+        let mut second = frame_period(&[(Currency::USD(), 1500.0)], &[], &[], &[]);
+        second
+            .accounting
+            .ending_equity
+            .add_money(Money::new(750.0, Currency::USD()));
+        second.performance.net_return = Some(-0.5);
+
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_performance_periods(vec![first, second]);
+        let stats = analyzer.statistics();
+
+        // The two equity rows carry money and land in `general`; the ratio and the flag land in
+        // `returns`. The routing is pinned, not left to the units by convention.
+        let implied = "Arithmetic Compounding Implied Equity (simple, tolerance 0.01)";
+        let realised = "Arithmetic Compounding Realised Equity (simple)";
+        let ratio = "Arithmetic Compounding Ratio (simple, tolerance 0.01)";
+        let flagged = "Arithmetic Compounding Flagged (simple, tolerance 0.01)";
+
+        assert!(approx_eq!(
+            f64,
+            stats.general[implied],
+            1000.0,
+            epsilon = 1e-9
+        ));
+        assert!(approx_eq!(
+            f64,
+            stats.general[realised],
+            750.0,
+            epsilon = 1e-9
+        ));
+        assert!(approx_eq!(
+            f64,
+            stats.returns[ratio],
+            4.0 / 3.0,
+            epsilon = 1e-12
+        ));
+        assert_eq!(stats.returns[flagged], 1.0);
+
+        assert!(!stats.returns.contains_key(implied));
+        assert!(!stats.returns.contains_key(realised));
+        assert!(!stats.general.contains_key(ratio));
+        assert!(!stats.general.contains_key(flagged));
     }
 }

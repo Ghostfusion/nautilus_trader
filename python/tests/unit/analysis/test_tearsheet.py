@@ -1197,7 +1197,16 @@ def test_create_tearsheet_end_to_end_real_engine() -> None:
         "Long Ratio": 1.0,
         "Total Commissions": pytest.approx(2.8),
         "Total Turnover": pytest.approx(140050.0),
+        "Arithmetic Compounding Implied Equity (simple, tolerance 0.01)": pytest.approx(
+            1000047.2056951466,
+        ),
+        "Arithmetic Compounding Realised Equity (simple)": pytest.approx(1000047.2),
     }
+    # The construction agrees with the ledger here, so the run is not flagged.
+    assert result.stats_returns[
+        "Arithmetic Compounding Ratio (simple, tolerance 0.01)"
+    ] == pytest.approx(1.0, abs=1e-6)
+    assert result.stats_returns["Arithmetic Compounding Flagged (simple, tolerance 0.01)"] == 0.0
     assert len(orders) == result.total_orders
     assert orders["status"].tolist() == ["FILLED", "FILLED"]
     assert len(order_fills) == 2
