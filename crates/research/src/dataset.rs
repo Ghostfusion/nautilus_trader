@@ -30,6 +30,8 @@ use std::fmt::Display;
 use nautilus_core::UnixNanos;
 use serde::{Serialize, Serializer};
 
+use crate::label::LabelDefinition;
+
 /// The length in bytes of a [`Digest`].
 pub const DIGEST_LEN: usize = 32;
 
@@ -246,24 +248,37 @@ impl DatasetSplit {
 /// A dataset declaration.
 ///
 /// The declaration carries everything that defines the dataset's identity: its catalog source
-/// intervals, its membership source, the digests of its feature and label definitions, and its
-/// split. It digests canonically, independent of the insertion order of its parts.
+/// intervals, its membership source, the definition that produced its labels, the digests of its
+/// feature and label definitions, and its split. It digests canonically, independent of the
+/// insertion order of its parts.
+///
+/// The label definition is a required argument rather than an optional field, so a dataset cannot
+/// be declared without saying how its labels were produced (`design 4 I13`). This costs every
+/// caller a definition and changes the declaration's digest, because the definition is part of the
+/// dataset's identity: two datasets whose labels were produced differently are different datasets.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DatasetDeclaration {
     membership: MembershipSource,
     split: DatasetSplit,
+    definition: LabelDefinition,
     sources: Vec<SourceInterval>,
     features: Vec<DigestInput>,
     labels: Vec<DigestInput>,
 }
 
 impl DatasetDeclaration {
-    /// Creates a new [`DatasetDeclaration`] with a membership source and a split.
+    /// Creates a new [`DatasetDeclaration`] with a membership source, a split and the label
+    /// definition that produced the dataset's labels.
     #[must_use]
-    pub fn new(membership: MembershipSource, split: DatasetSplit) -> Self {
+    pub fn new(
+        membership: MembershipSource,
+        split: DatasetSplit,
+        definition: LabelDefinition,
+    ) -> Self {
         Self {
             membership,
             split,
+            definition,
             sources: Vec::new(),
             features: Vec::new(),
             labels: Vec::new(),
@@ -280,6 +295,12 @@ impl DatasetDeclaration {
     #[must_use]
     pub fn split(&self) -> &DatasetSplit {
         &self.split
+    }
+
+    /// Returns the label definition that produced the dataset's labels.
+    #[must_use]
+    pub fn definition(&self) -> &LabelDefinition {
+        &self.definition
     }
 
     /// Returns the source intervals in insertion order.
@@ -340,6 +361,7 @@ impl DatasetDeclaration {
         let value = serde_json::json!({
             "membership": self.membership,
             "split": self.split,
+            "definition": self.definition,
             "sources": sources,
             "features": features,
             "labels": labels,

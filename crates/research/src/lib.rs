@@ -76,15 +76,17 @@ pub use dataset::{
 pub use feature::{
     AttributedValue, Expr, ExprSource, Feature, FeatureError, ParseError, Provenance,
 };
-pub use label::{Label, LabelError, LabelKind};
+pub use label::{Label, LabelDefinition, LabelError, LabelKind};
 pub use measurement::{
     AdmittedDecision, CONFIDENCE_BANDS, CVAR_TAIL_FRACTION, CalibrationGroup, CalibrationReport,
     ConfidenceBand, Disposition, DispositionOutcome, EligibleSignal, Exclusions,
-    ExecutionRealizationReport, InformationCoefficient, InformationCoefficientPoint, Metric,
-    MetricComparison, MetricEstimate, PolicyEffectReport, ProducerIdentity,
-    REDUNDANCY_CORRELATION_THRESHOLD, Realization, ReductionEffectReport, RedundancyReport,
-    RiskDecision, ScoreCluster, ScoreCorrelation, ScoreObservation, SignalQualityReport,
-    confidence_calibration, execution_realization, policy_effect, reduction_effect, redundancy,
+    ExecutionRealizationReport, FitModel, InformationCoefficient, InformationCoefficientPoint,
+    LabelProvenance, Metric, MetricComparison, MetricEstimate, ParameterEstimate,
+    ParameterRecovery, ParameterRecoveryReport, PolicyEffectReport, ProducerIdentity,
+    REDUNDANCY_CORRELATION_THRESHOLD, Realization, RecoveryCheck, RecoveryTolerance,
+    RecoveryVerdict, ReductionEffectReport, RedundancyReport, RiskDecision, ScoreCluster,
+    ScoreCorrelation, ScoreObservation, SignalQualityReport, confidence_calibration,
+    execution_realization, parameter_recovery, policy_effect, reduction_effect, redundancy,
     restrict_to_regime, signal_quality,
 };
 pub use membership::{MembershipInterval, MembershipRule, MembershipSeries, MembershipSpell};

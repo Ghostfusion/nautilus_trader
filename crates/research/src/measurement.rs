@@ -44,6 +44,14 @@
 //! measurement on a regime verdict supplied by the caller, with no regime engine here
 //! (`design 6.4`).
 //!
+//! A fitted model is measured for parameter recovery by [`parameter_recovery`] over a [`FitModel`]
+//! seam and a declared [`RecoveryTolerance`] set (`design D4`): it draws R seeded datasets at a
+//! known parameter vector, refits each, and reports per-parameter bias, RMSE, interval coverage
+//! and a verdict of [`RecoveryVerdict::Identified`], [`RecoveryVerdict::WeaklyIdentified`] or
+//! [`RecoveryVerdict::Unidentified`]. The verdict is a required field of every
+//! [`ParameterRecovery`], so a parameter that cannot be recovered is labelled rather than
+//! described with a point estimate alone.
+//!
 //! **Two rules travel with every aggregate.** A score observation that arrived without its
 //! coverage is an absence and is reported as such, never measured as a neutral value
 //! (`design 4 I11`); and a record whose producer identity is unknown is excluded from every
@@ -60,7 +68,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nautilus_core::UnixNanos;
 use nautilus_model::{identifiers::InstrumentId, signal::SignalDirection};
+use serde::{Serialize, Serializer};
 
+use crate::label::LabelDefinition;
 use crate::membership::MembershipSeries;
 use crate::operators::{cross_sectional_rank, rolling_correlation, rolling_std};
 use crate::panel::{Panel, PanelError, PanelRow};
@@ -96,6 +106,18 @@ impl ProducerIdentity {
     #[must_use]
     pub const fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown)
+    }
+}
+
+impl Serialize for ProducerIdentity {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Identified(name) => serializer.serialize_str(&format!("identified:{name}")),
+            Self::Unknown => serializer.serialize_str("unknown"),
+        }
     }
 }
 
@@ -211,6 +233,10 @@ pub struct AdmittedDecision {
     pub scores: BTreeMap<String, ScoreObservation>,
     /// The forward return of the label, absent at the end of the data (`design 6.2`).
     pub forward_return: Option<f64>,
+    /// The definition that produced the label, absent when the label was added without one
+    /// (`design 4 I13`). A record whose definition is absent is counted by
+    /// [`LabelProvenance::undefined`] and is not scored.
+    pub label_definition: Option<LabelDefinition>,
     /// The eligible signal the policy yields, if any (`design 6.1`, experiment B).
     pub eligible_signal: Option<EligibleSignal>,
     /// The realization of an eligible signal, if one exists (`design 6.1`, experiment C).
@@ -223,6 +249,62 @@ pub struct Exclusions {
     /// Admitted records excluded from every aggregate because the producer identity is unknown
     /// (`design 4 I12`).
     pub unknown_producer: usize,
+}
+
+/// The label provenance of a measured stream (`design 4 I13`).
+///
+/// Every record either carries the [`LabelDefinition`] that produced its label or does not. Both
+/// counts are reported as first-class numbers, so an undefined-label share is visible rather than
+/// inferred from a log line. A record whose definition is absent is never scored: a score over
+/// labels of unknown provenance would not be interpretable, so it is refused and the count is
+/// carried into the report instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LabelProvenance {
+    /// The number of records whose label carried a definition.
+    pub defined: usize,
+    /// The number of records whose label was added without a definition.
+    pub undefined: usize,
+    /// The definition shared by the defined records, present when there is exactly one.
+    pub definition: Option<LabelDefinition>,
+}
+
+impl LabelProvenance {
+    /// Returns the share of records whose label carried no definition, absent for an empty stream.
+    #[must_use]
+    pub fn undefined_share(&self) -> Option<f64> {
+        let total = self.defined + self.undefined;
+        if total == 0 {
+            None
+        } else {
+            Some(self.undefined as f64 / total as f64)
+        }
+    }
+
+    /// Returns whether every record carried the definition that produced its label.
+    #[must_use]
+    pub const fn is_fully_defined(&self) -> bool {
+        self.undefined == 0
+    }
+}
+
+/// Partitions the scored records into those whose label carried a definition and counts the rest,
+/// reporting the single shared definition when the defined records agree on one.
+fn label_provenance(defined: &[&AdmittedDecision], undefined: usize) -> LabelProvenance {
+    let definition = defined
+        .first()
+        .and_then(|record| record.label_definition.as_ref())
+        .filter(|first| {
+            defined
+                .iter()
+                .all(|record| record.label_definition.as_ref() == Some(*first))
+        })
+        .cloned();
+
+    LabelProvenance {
+        defined: defined.len(),
+        undefined,
+        definition,
+    }
 }
 
 /// An information coefficient at one date, with its cross-sectional uncertainty (`design 6.2`).
@@ -267,6 +349,8 @@ pub struct SignalQualityReport {
     pub scores: BTreeMap<String, InformationCoefficient>,
     /// The number of point-in-time panel rows the measurement was built over.
     pub rows: usize,
+    /// The provenance of the labels the measurement was built over (`design 4 I13`).
+    pub labels: LabelProvenance,
     /// The records excluded from the aggregate.
     pub exclusions: Exclusions,
 }
@@ -449,6 +533,8 @@ pub struct CalibrationGroup {
 pub struct CalibrationReport {
     /// One group per (rating, horizon) present, each with its own bands.
     pub groups: Vec<CalibrationGroup>,
+    /// The provenance of the labels the calibration was built over (`design 4 I13`).
+    pub labels: LabelProvenance,
     /// The records excluded from the aggregate.
     pub exclusions: Exclusions,
 }
@@ -486,6 +572,150 @@ pub struct RedundancyReport {
     pub independent_hypotheses: usize,
     /// The records excluded from the aggregate.
     pub exclusions: Exclusions,
+}
+
+/// The minimum a model must provide to be measured for parameter recovery (`design D4`).
+///
+/// A fitted model is only worth configuring if its parameters can be recovered from data drawn at
+/// a known parameter vector. This is the seam a caller's own model plugs into: it draws a dataset
+/// from itself at a known `truth` under a `seed`, and refits a dataset to parameter estimates.
+/// Both uses the platform needs are covered by these two methods, and nothing else is required of
+/// a model, so a generator or a calibration can implement it without knowing about this report.
+///
+/// A model MUST return one [`ParameterEstimate`] per parameter of the truth vector it was drawn
+/// at, in the same order. The report indexes the estimates positionally, so a model that returns a
+/// different count violates the contract.
+pub trait FitModel {
+    /// The dataset the model draws and refits.
+    type Dataset;
+
+    /// Draws a dataset from the model at the known parameter vector `truth` under `seed`.
+    ///
+    /// The same `(truth, seed)` MUST produce the same dataset, so a report over a seed is
+    /// reproducible.
+    fn draw(&self, truth: &[f64], seed: u64) -> Self::Dataset;
+
+    /// Refits `dataset`, returning one estimate per parameter of the drawn truth.
+    ///
+    /// An estimate may declare the interval the fit is prepared to stand behind; the report
+    /// measures the fraction of those intervals that covered the truth. A parameter the fit cannot
+    /// bound is returned with no interval rather than a fabricated one.
+    fn fit(&self, dataset: &Self::Dataset) -> Vec<ParameterEstimate>;
+}
+
+/// One fitted parameter: the point estimate and the interval the fit declares for it
+/// (`design D4`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParameterEstimate {
+    /// The fitted point estimate.
+    pub estimate: f64,
+    /// The interval the fit declares for the parameter, absent when the fit declares none.
+    pub interval: Option<(f64, f64)>,
+}
+
+/// The tolerance set a recovery check decides its verdicts against (`design D4`).
+///
+/// Every threshold is a declared convention rather than a hidden constant, so it is printed with
+/// the run and stored in the fixture and a reader can disagree with the number. A parameter is
+/// `identified` when it meets all three identification thresholds, `unidentified` when its RMSE is
+/// beyond [`RecoveryTolerance::unidentified_rmse`], and `weakly_identified` otherwise.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecoveryTolerance {
+    /// The largest absolute bias at which a parameter is called identified.
+    pub max_absolute_bias: f64,
+    /// The largest RMSE at which a parameter is called identified.
+    pub max_rmse: f64,
+    /// The smallest interval coverage at which a parameter is called identified.
+    pub min_coverage: f64,
+    /// The RMSE beyond which a parameter is called unidentified rather than weakly identified.
+    pub unidentified_rmse: f64,
+}
+
+/// The recovery verdict of one parameter (`design D4`).
+///
+/// The vocabulary is closed and the names are stable, so a verdict is a value a caller can match
+/// on rather than a string. There is no verdict that means "not measured": a parameter that could
+/// not be measured is `unidentified`, never omitted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RecoveryVerdict {
+    /// The parameter is recoverable: its bias, RMSE and coverage all meet tolerance.
+    Identified,
+    /// The parameter is only partly recoverable: it misses at least one identification threshold
+    /// but is not far enough outside to be called unidentified.
+    WeaklyIdentified,
+    /// The parameter is not recoverable: its RMSE is beyond the unidentified tolerance, or no
+    /// repetition produced an estimate.
+    Unidentified,
+}
+
+impl RecoveryVerdict {
+    /// Every verdict of the vocabulary, in order.
+    pub const ALL: [Self; 3] = [Self::Identified, Self::WeaklyIdentified, Self::Unidentified];
+
+    /// Returns the stable lowercase name of the verdict.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Identified => "identified",
+            Self::WeaklyIdentified => "weakly_identified",
+            Self::Unidentified => "unidentified",
+        }
+    }
+}
+
+/// The recovery measurement of one parameter (`design D4`).
+///
+/// The truth and the error statistics are reported together with the verdict, and the verdict is a
+/// required field rather than an `Option`, so no reader can take the numbers without the label
+/// that says whether they are recoverable. The struct carries no fitted point estimate of its own:
+/// bias is `mean(estimate) - truth` and RMSE is the root-mean-square of the same errors, so a
+/// point estimate is never handed out on its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParameterRecovery {
+    /// The truth the model was drawn at.
+    pub truth: f64,
+    /// The mean estimate minus the truth over the repetitions, absent when none produced an
+    /// estimate.
+    pub bias: Option<f64>,
+    /// The root-mean-square error over the repetitions, absent when none produced an estimate.
+    pub rmse: Option<f64>,
+    /// The fraction of repetitions whose declared interval covered the truth, absent when there
+    /// were no repetitions. A parameter whose intervals never covered the truth reports `0.0`,
+    /// never an omission.
+    pub coverage: Option<f64>,
+    /// The verdict against the declared tolerance. Always present.
+    pub verdict: RecoveryVerdict,
+}
+
+/// The declared check a recovery measurement is run against (`design D4`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecoveryCheck {
+    /// The known parameter vector the model is drawn at.
+    pub truth: Vec<f64>,
+    /// The number of seeded datasets drawn and refitted.
+    pub repetitions: usize,
+    /// The base seed; the seed of repetition `r` is derived from it deterministically.
+    pub seed: u64,
+    /// The tolerance set the verdicts are decided against.
+    pub tolerance: RecoveryTolerance,
+}
+
+/// The result of a parameter-recovery check (`design D4`).
+///
+/// The report draws `repetitions` seeded datasets from the model at `truth`, refits each and
+/// reports per parameter the bias, RMSE, interval coverage and verdict, together with the
+/// tolerance they were decided against. A model whose parameters are not recoverable is labelled
+/// `unidentified` rather than described with a point estimate alone.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParameterRecoveryReport {
+    /// The number of seeded datasets drawn and refitted.
+    pub repetitions: usize,
+    /// The known parameter vector the model was drawn at.
+    pub truth: Vec<f64>,
+    /// The tolerance the verdicts were decided against, printed with the run.
+    pub tolerance: RecoveryTolerance,
+    /// One measurement per declared parameter, in the truth vector's order.
+    pub parameters: Vec<ParameterRecovery>,
 }
 
 /// Selects the identifiable records an aggregate measures, counting the rest (`design 4 I12`).
@@ -545,6 +775,11 @@ pub fn restrict_to_regime(records: &[AdmittedDecision], regime: &str) -> Vec<Adm
 /// coefficient and reported in [`InformationCoefficient::coverage_absent`], never measured as a
 /// neutral value (`design 4 I11`).
 ///
+/// A record whose label carries no [`LabelDefinition`] is not scored: a coefficient over labels of
+/// unknown provenance would not be interpretable. Such records are excluded from the panel and
+/// their count is reported in [`SignalQualityReport::labels`], so a model trained on undefined
+/// labels is reported as such rather than scored (`design 4 I13`).
+///
 /// # Errors
 ///
 /// Returns a [`PanelError`] if a feature reads past its row timestamp or a row's membership
@@ -554,12 +789,16 @@ pub fn signal_quality(
     records: &[AdmittedDecision],
 ) -> Result<SignalQualityReport, PanelError> {
     let (selected, excluded) = select(records, None);
+    let (defined, undefined): (Vec<&AdmittedDecision>, Vec<&AdmittedDecision>) = selected
+        .into_iter()
+        .partition(|record| record.label_definition.is_some());
+    let labels = label_provenance(&defined, undefined.len());
 
     let mut names: BTreeSet<String> = BTreeSet::new();
     let mut coverage_absent: BTreeMap<String, usize> = BTreeMap::new();
-    let mut rows: Vec<PanelRow> = Vec::with_capacity(selected.len());
+    let mut rows: Vec<PanelRow> = Vec::with_capacity(defined.len());
 
-    for record in &selected {
+    for record in &defined {
         let mut row = PanelRow::new(record.instrument_id, record.ts_event)
             .with_member(membership.is_member_at(record.instrument_id, record.ts_event));
 
@@ -661,6 +900,7 @@ pub fn signal_quality(
     Ok(SignalQualityReport {
         scores,
         rows: panel.len(),
+        labels,
         exclusions: Exclusions {
             unknown_producer: excluded,
         },
@@ -825,12 +1065,20 @@ pub fn reduction_effect(records: &[AdmittedDecision]) -> ReductionEffectReport {
 /// the realised hit rate in each band and its count. There is no pooled hit rate anywhere in the
 /// report. A decision whose confidence falls outside the unit interval is counted as out of range
 /// rather than clamped into a band, and a decision whose label is absent is counted as unlabelled.
+///
+/// A decision whose label carries no [`LabelDefinition`] is not calibrated: a realised hit rate
+/// over labels of unknown provenance would not be interpretable. Such records are excluded from
+/// the groups and their count is reported in [`CalibrationReport::labels`] (`design 4 I13`).
 #[must_use]
 pub fn confidence_calibration(records: &[AdmittedDecision]) -> CalibrationReport {
     let (selected, excluded) = select(records, None);
+    let (defined, undefined): (Vec<&AdmittedDecision>, Vec<&AdmittedDecision>) = selected
+        .into_iter()
+        .partition(|record| record.label_definition.is_some());
+    let labels = label_provenance(&defined, undefined.len());
 
     let mut groups: BTreeMap<(String, usize), CalibrationAccumulator> = BTreeMap::new();
-    for record in &selected {
+    for record in &defined {
         let group = groups
             .entry((record.rating.clone(), record.horizon))
             .or_default();
@@ -872,6 +1120,7 @@ pub fn confidence_calibration(records: &[AdmittedDecision]) -> CalibrationReport
 
     CalibrationReport {
         groups,
+        labels,
         exclusions: Exclusions {
             unknown_producer: excluded,
         },
@@ -962,6 +1211,89 @@ pub fn redundancy(records: &[AdmittedDecision]) -> RedundancyReport {
         exclusions: Exclusions {
             unknown_producer: excluded,
         },
+    }
+}
+
+/// Measures whether a model's own parameters can be recovered (`design D4`).
+///
+/// Draws `check.repetitions` datasets from `model` at `check.truth`, each under a seed derived
+/// from `check.seed`, refits each and reports per parameter the bias, RMSE, the fraction of
+/// declared intervals that covered the truth, and a [`RecoveryVerdict`] against
+/// `check.tolerance`. The measurement is a pure function of the model, the truth, the tolerance
+/// and the seed: it reads no clock and holds no state, so the same seed produces the same report.
+///
+/// A parameter whose verdict is not [`RecoveryVerdict::Identified`] is still reported with its
+/// numbers; the verdict is a required field and is never omitted, so a point estimate cannot be
+/// read from the report without the label that says whether it is recoverable.
+///
+/// # Panics
+///
+/// Panics if a refit returns a number of estimates different from the length of `check.truth`.
+/// That is a violation of the [`FitModel`] contract, not a data condition.
+#[must_use]
+pub fn parameter_recovery<M: FitModel>(
+    model: &M,
+    check: &RecoveryCheck,
+) -> ParameterRecoveryReport {
+    let count = check.truth.len();
+    let mut estimates: Vec<Vec<f64>> = vec![Vec::with_capacity(check.repetitions); count];
+    let mut covered = vec![0usize; count];
+
+    for repetition in 0..check.repetitions {
+        let seed = repetition_seed(check.seed, repetition);
+        let dataset = model.draw(&check.truth, seed);
+        let fitted = model.fit(&dataset);
+        assert_eq!(
+            fitted.len(),
+            count,
+            "the model returned {} estimates for {} declared parameters",
+            fitted.len(),
+            count,
+        );
+
+        for (index, estimate) in fitted.iter().enumerate() {
+            estimates[index].push(estimate.estimate);
+            if let Some((lower, upper)) = estimate.interval
+                && lower <= check.truth[index]
+                && check.truth[index] <= upper
+            {
+                covered[index] += 1;
+            }
+        }
+    }
+
+    let parameters = check
+        .truth
+        .iter()
+        .zip(estimates.iter())
+        .zip(covered.iter())
+        .map(|((truth, values), covered)| {
+            let errors: Vec<f64> = values.iter().map(|value| value - truth).collect();
+            let bias = mean_of(&errors);
+            let rmse = if errors.is_empty() {
+                None
+            } else {
+                Some(
+                    (errors.iter().map(|error| error * error).sum::<f64>() / errors.len() as f64)
+                        .sqrt(),
+                )
+            };
+            let coverage = ratio(*covered, check.repetitions);
+            ParameterRecovery {
+                truth: *truth,
+                bias,
+                rmse,
+                coverage,
+                verdict: recovery_verdict(bias, rmse, coverage, &check.tolerance),
+            }
+        })
+        .collect();
+
+    ParameterRecoveryReport {
+        repetitions: check.repetitions,
+        truth: check.truth.clone(),
+        tolerance: check.tolerance,
+        parameters,
     }
 }
 
@@ -1137,6 +1469,51 @@ fn ratio(numerator: usize, denominator: usize) -> Option<f64> {
     }
 }
 
+/// Returns the verdict of one parameter against a tolerance set (`design D4`).
+///
+/// A parameter with no formable numbers is unidentified rather than weakly identified: nothing was
+/// recovered, so nothing can be trusted. The identification test requires all three thresholds,
+/// and the unidentified test is checked first so a parameter whose RMSE is beyond the unidentified
+/// tolerance can never be labelled identified by a wide interval.
+fn recovery_verdict(
+    bias: Option<f64>,
+    rmse: Option<f64>,
+    coverage: Option<f64>,
+    tolerance: &RecoveryTolerance,
+) -> RecoveryVerdict {
+    let (Some(bias), Some(rmse), Some(coverage)) = (bias, rmse, coverage) else {
+        return RecoveryVerdict::Unidentified;
+    };
+    let unidentified = !rmse.is_finite() || rmse > tolerance.unidentified_rmse;
+    if unidentified {
+        RecoveryVerdict::Unidentified
+    } else if bias.abs() <= tolerance.max_absolute_bias
+        && rmse <= tolerance.max_rmse
+        && coverage >= tolerance.min_coverage
+    {
+        RecoveryVerdict::Identified
+    } else {
+        RecoveryVerdict::WeaklyIdentified
+    }
+}
+
+/// Derives the seed of one repetition from the check's base seed (`design D4`).
+///
+/// The derivation is a SplitMix64 mix, so consecutive repetitions receive well-separated seeds even
+/// when a caller's own generator consumes them linearly. It is arithmetic on the seed alone: no
+/// dependency is added and no clock is read.
+fn repetition_seed(base: u64, repetition: usize) -> u64 {
+    splitmix64(base ^ (repetition as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
+}
+
+/// Returns the SplitMix64 mix of a 64-bit value.
+fn splitmix64(value: u64) -> u64 {
+    let mut mixed = value.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    mixed ^ (mixed >> 31)
+}
+
 /// Returns the representative root of a disjoint-set element, with path halving.
 fn find(parents: &mut [usize], mut index: usize) -> usize {
     while parents[index] != index {
@@ -1177,6 +1554,16 @@ mod tests {
         series
     }
 
+    fn label_definition() -> LabelDefinition {
+        LabelDefinition::new(
+            "forward_return_poll",
+            ProducerIdentity::Identified("research".to_string()),
+            Some(UnixNanos::from(60_000_000_000)),
+            5,
+        )
+        .expect("the test definition is valid")
+    }
+
     fn decision(instrument_id: &str, ts_event: u64, available_at: u64) -> AdmittedDecision {
         AdmittedDecision {
             producer: ProducerIdentity::Identified("research".to_string()),
@@ -1190,6 +1577,7 @@ mod tests {
             disposition: Disposition::Pass,
             scores: BTreeMap::new(),
             forward_return: None,
+            label_definition: Some(label_definition()),
             eligible_signal: None,
             realization: None,
         }
@@ -1691,5 +2079,232 @@ mod tests {
             confidence_calibration(&records)
         );
         assert_eq!(redundancy(&records), redundancy(&records));
+    }
+
+    #[test]
+    fn labels_with_an_unknown_definition_are_counted_rather_than_scored() {
+        let series = membership(&["A.X", "B.X", "C.X", "D.X"]);
+        let mut records = Vec::new();
+        for (index, instrument) in ["A.X", "B.X", "C.X", "D.X"].iter().enumerate() {
+            let mut record = decision(instrument, 100, 100);
+            record.insert_score(scored("alpha", index as f64));
+            record.forward_return = Some(index as f64);
+            record.label_definition = None;
+            records.push(record);
+        }
+
+        let report = signal_quality(&series, &records).unwrap();
+
+        assert_eq!(report.labels.defined, 0);
+        assert_eq!(report.labels.undefined, 4);
+        assert_eq!(report.labels.undefined_share(), Some(1.0));
+        assert_eq!(report.labels.definition, None);
+        assert!(report.scores.is_empty());
+        assert_eq!(report.rows, 0);
+
+        let calibration = confidence_calibration(&records);
+        assert_eq!(calibration.labels.undefined, 4);
+        assert!(calibration.groups.is_empty());
+    }
+
+    /// A deterministic SplitMix64 generator for the fixture models, so a fixture's noise is a
+    /// function of the seed alone.
+    struct FixtureRng(u64);
+
+    impl FixtureRng {
+        fn new(seed: u64) -> Self {
+            Self(seed)
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut mixed = self.0;
+            mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            mixed ^ (mixed >> 31)
+        }
+
+        fn uniform(&mut self) -> f64 {
+            (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    /// The tolerance the fixtures declare. A parameter is identified when its bias is within 0.05,
+    /// its RMSE within 0.05 and its coverage at or above 0.9; it is unidentified when its RMSE is
+    /// beyond 0.25.
+    fn recovery_tolerance() -> RecoveryTolerance {
+        RecoveryTolerance {
+            max_absolute_bias: 0.05,
+            max_rmse: 0.05,
+            min_coverage: 0.9,
+            unidentified_rmse: 0.25,
+        }
+    }
+
+    fn recovery_check(truth: &[f64], repetitions: usize, seed: u64) -> RecoveryCheck {
+        RecoveryCheck {
+            truth: truth.to_vec(),
+            repetitions,
+            seed,
+            tolerance: recovery_tolerance(),
+        }
+    }
+
+    /// Two parameters that enter separate terms, so each is recoverable from its own observation.
+    struct Separable;
+
+    impl FitModel for Separable {
+        type Dataset = [f64; 2];
+
+        fn draw(&self, truth: &[f64], seed: u64) -> [f64; 2] {
+            let mut rng = FixtureRng::new(seed);
+            [
+                truth[0] + 0.02 * (rng.uniform() - 0.5),
+                truth[1] + 0.02 * (rng.uniform() - 0.5),
+            ]
+        }
+
+        fn fit(&self, dataset: &[f64; 2]) -> Vec<ParameterEstimate> {
+            dataset
+                .iter()
+                .map(|value| ParameterEstimate {
+                    estimate: *value,
+                    interval: Some((*value - 0.1, *value + 0.1)),
+                })
+                .collect()
+        }
+    }
+
+    /// Two parameters that enter one term, so only their sum is observable and neither can be
+    /// recovered on its own.
+    struct Coupled;
+
+    impl FitModel for Coupled {
+        type Dataset = f64;
+
+        fn draw(&self, truth: &[f64], seed: u64) -> f64 {
+            let mut rng = FixtureRng::new(seed);
+            truth.iter().sum::<f64>() + 0.02 * (rng.uniform() - 0.5)
+        }
+
+        fn fit(&self, dataset: &f64) -> Vec<ParameterEstimate> {
+            // The sum is recoverable but the split between the two parameters is not: the fit
+            // returns the symmetric split, with an interval far wider than the truth's separation.
+            let half = *dataset / 2.0;
+            vec![
+                ParameterEstimate {
+                    estimate: half,
+                    interval: Some((half - 50.0, half + 50.0)),
+                },
+                ParameterEstimate {
+                    estimate: half,
+                    interval: Some((half - 50.0, half + 50.0)),
+                },
+            ]
+        }
+    }
+
+    /// One parameter whose declared interval sits above the truth, so it never covers it.
+    struct Shifted;
+
+    impl FitModel for Shifted {
+        type Dataset = f64;
+
+        fn draw(&self, truth: &[f64], seed: u64) -> f64 {
+            let mut rng = FixtureRng::new(seed);
+            truth[0] + 0.02 * (rng.uniform() - 0.5)
+        }
+
+        fn fit(&self, dataset: &f64) -> Vec<ParameterEstimate> {
+            vec![ParameterEstimate {
+                estimate: *dataset,
+                interval: Some((*dataset + 0.5, *dataset + 1.5)),
+            }]
+        }
+    }
+
+    #[test]
+    fn separable_parameters_are_identified() {
+        let report = parameter_recovery(&Separable, &recovery_check(&[1.0, 2.0], 64, 0x5EED));
+
+        assert_eq!(report.repetitions, 64);
+        assert_eq!(report.truth, vec![1.0, 2.0]);
+        assert_eq!(report.parameters.len(), 2);
+
+        for parameter in &report.parameters {
+            let bias = parameter.bias.expect("an estimate was produced");
+            let rmse = parameter.rmse.expect("an estimate was produced");
+            assert!(bias.abs() <= recovery_tolerance().max_absolute_bias);
+            assert!(rmse <= recovery_tolerance().max_rmse);
+            assert_eq!(parameter.coverage, Some(1.0));
+            assert_eq!(parameter.verdict, RecoveryVerdict::Identified);
+        }
+    }
+
+    #[test]
+    fn coupled_parameters_are_unidentified_with_intervals_wider_than_their_separation() {
+        let report = parameter_recovery(&Coupled, &recovery_check(&[1.0, 2.0], 64, 0x5EED));
+        let separation = (report.truth[1] - report.truth[0]).abs();
+
+        // The interval the fit declares is far wider than the truth's separation: coverage of 1.0
+        // here says the interval is uninformative, not that the parameter is recoverable.
+        let fitted = Coupled.fit(&3.0);
+        let (lower, upper) = fitted[0]
+            .interval
+            .expect("the fixture declares an interval");
+        assert!(upper - lower > 10.0 * separation);
+
+        for parameter in &report.parameters {
+            let rmse = parameter.rmse.expect("an estimate was produced");
+            assert!(rmse > recovery_tolerance().unidentified_rmse);
+            assert_eq!(parameter.coverage, Some(1.0));
+            assert_eq!(parameter.verdict, RecoveryVerdict::Unidentified);
+        }
+    }
+
+    #[test]
+    fn a_parameter_with_no_covering_interval_reports_zero_coverage() {
+        let report = parameter_recovery(&Shifted, &recovery_check(&[1.0], 16, 0x5EED));
+        let parameter = report.parameters[0];
+
+        assert_eq!(parameter.coverage, Some(0.0));
+        assert_eq!(parameter.verdict, RecoveryVerdict::WeaklyIdentified);
+        assert!(parameter.bias.is_some());
+        assert!(parameter.rmse.is_some());
+    }
+
+    #[test]
+    fn parameter_recovery_is_deterministic_at_a_seed() {
+        let first = parameter_recovery(&Separable, &recovery_check(&[1.0, 2.0], 32, 0x5EED));
+        let second = parameter_recovery(&Separable, &recovery_check(&[1.0, 2.0], 32, 0x5EED));
+        assert_eq!(first, second);
+
+        // The seed reaches the model: a different seed draws different datasets.
+        let other = parameter_recovery(&Separable, &recovery_check(&[1.0, 2.0], 32, 0x5EEE));
+        assert_ne!(first, other);
+    }
+
+    #[test]
+    fn a_parameter_that_was_not_measured_is_labelled_not_omitted() {
+        let report = parameter_recovery(&Separable, &recovery_check(&[1.0, 2.0], 0, 0x5EED));
+
+        assert_eq!(report.parameters.len(), 2);
+        for parameter in &report.parameters {
+            assert_eq!(parameter.bias, None);
+            assert_eq!(parameter.rmse, None);
+            assert_eq!(parameter.coverage, None);
+            assert_eq!(parameter.verdict, RecoveryVerdict::Unidentified);
+        }
+    }
+
+    #[test]
+    fn recovery_verdict_names_are_stable() {
+        assert_eq!(RecoveryVerdict::Identified.name(), "identified");
+        assert_eq!(
+            RecoveryVerdict::WeaklyIdentified.name(),
+            "weakly_identified"
+        );
+        assert_eq!(RecoveryVerdict::Unidentified.name(), "unidentified");
+        assert_eq!(RecoveryVerdict::ALL.len(), 3);
     }
 }

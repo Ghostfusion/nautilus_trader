@@ -32,11 +32,21 @@
 //! fewer remain at the end of the data, [`Label::compute`] returns an explicit absence
 //! ([`None`]) - it never reports a missing future as zero. A degenerate input, such as a
 //! non-positive price, is a typed error rather than a value.
+//!
+//! **Provenance.** A label value is only interpretable with the procedure that produced it.
+//! [`LabelDefinition`] records that procedure by name, the [`ProducerIdentity`] that ran it, the
+//! polling interval it observed (absent when the label was not built by polling) and its horizon,
+//! and refuses at construction rather than defaulting a missing field. A dataset declares its
+//! definition, and a record carries the definition that produced its label so a measurement can
+//! count labels of unknown provenance rather than score them.
 
+use nautilus_core::UnixNanos;
+use serde::Serialize;
 use serde_json::json;
 use thiserror::Error;
 
 use crate::dataset::{Digest, DigestInput, Label as LabelTrait};
+use crate::measurement::ProducerIdentity;
 use crate::operators;
 
 /// The kind of a forward label and its horizon.
@@ -105,6 +115,128 @@ pub enum LabelError {
         /// The index of the offending price.
         index: usize,
     },
+    /// A label definition was declared with an empty procedure name.
+    #[error("a label definition must have a non-empty procedure name")]
+    EmptyProcedure,
+    /// A label definition was declared with a polling interval of zero.
+    #[error(
+        "label definition `{procedure}` must have a polling interval of at least one nanosecond"
+    )]
+    ZeroPollInterval {
+        /// The name of the procedure.
+        procedure: String,
+    },
+    /// A label definition named an unknown producer.
+    #[error("label definition `{procedure}` must name the producer that ran the procedure")]
+    UnidentifiedProducer {
+        /// The name of the procedure.
+        procedure: String,
+    },
+}
+
+/// The definition that produced a label (`design 4 I13`).
+///
+/// A label value is only interpretable with the procedure that produced it, so the definition
+/// records the procedure by name, the [`ProducerIdentity`] that ran it, the polling interval it
+/// observed and its horizon. The interval is an explicit absence ([`None`]) when the label was not
+/// built by polling; it is never defaulted to zero. Every degenerate field is refused at
+/// construction with a [`LabelError`] rather than silently defaulted, matching the way [`Label`]
+/// treats a zero horizon.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct LabelDefinition {
+    procedure: String,
+    producer: ProducerIdentity,
+    poll_interval: Option<UnixNanos>,
+    horizon: usize,
+}
+
+impl LabelDefinition {
+    /// Creates a label definition from a procedure name, its producer, its polling interval and
+    /// its horizon.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabelError::EmptyProcedure`] if the procedure name is empty,
+    /// [`LabelError::ZeroHorizon`] if the horizon is zero, [`LabelError::ZeroPollInterval`] if a
+    /// polling interval is present but zero, and [`LabelError::UnidentifiedProducer`] if the
+    /// producer identity is unknown.
+    pub fn new(
+        procedure: impl Into<String>,
+        producer: ProducerIdentity,
+        poll_interval: Option<UnixNanos>,
+        horizon: usize,
+    ) -> Result<Self, LabelError> {
+        let procedure = procedure.into();
+        if procedure.trim().is_empty() {
+            return Err(LabelError::EmptyProcedure);
+        }
+        if horizon == 0 {
+            return Err(LabelError::ZeroHorizon { name: procedure });
+        }
+        if let Some(interval) = poll_interval
+            && interval.as_u64() == 0
+        {
+            return Err(LabelError::ZeroPollInterval { procedure });
+        }
+        if producer.is_unknown() {
+            return Err(LabelError::UnidentifiedProducer { procedure });
+        }
+        Ok(Self {
+            procedure,
+            producer,
+            poll_interval,
+            horizon,
+        })
+    }
+
+    /// Returns the name of the procedure that produced the label.
+    #[must_use]
+    pub fn procedure(&self) -> &str {
+        &self.procedure
+    }
+
+    /// Returns the producer identity that ran the procedure.
+    #[must_use]
+    pub const fn producer(&self) -> &ProducerIdentity {
+        &self.producer
+    }
+
+    /// Returns the polling interval the procedure observed, absent when the label was not built by
+    /// polling.
+    #[must_use]
+    pub const fn poll_interval(&self) -> Option<UnixNanos> {
+        self.poll_interval
+    }
+
+    /// Returns the horizon of the label.
+    #[must_use]
+    pub const fn horizon(&self) -> usize {
+        self.horizon
+    }
+
+    /// Returns the canonical JSON serialization of the definition.
+    #[must_use]
+    pub fn canonical_json(&self) -> String {
+        json!({
+            "procedure": self.procedure,
+            "producer": self.producer,
+            "poll_interval": self.poll_interval,
+            "horizon": self.horizon,
+        })
+        .to_string()
+    }
+
+    /// Returns the stable digest of the definition's canonical serialization.
+    #[must_use]
+    pub fn digest(&self) -> Digest {
+        Digest::of(self.canonical_json().as_bytes())
+    }
+
+    /// Returns the definition's procedure name and digest as a dataset digest input.
+    #[must_use]
+    pub fn digest_input(&self) -> DigestInput {
+        DigestInput::new(self.procedure.clone(), self.digest())
+    }
 }
 
 /// A declared forward label.
