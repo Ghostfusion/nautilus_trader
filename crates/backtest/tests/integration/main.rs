@@ -20,6 +20,7 @@ mod backtest_node_itch;
 mod backtest_node_workload;
 mod book_imbalance;
 mod canonical_backtest_workloads;
+mod derisking;
 mod ema_cross;
 mod exchange;
 mod fee_model;

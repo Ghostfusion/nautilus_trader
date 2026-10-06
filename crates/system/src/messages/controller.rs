@@ -246,6 +246,8 @@ pub enum ControllerCommand {
     StartStrategy(StartStrategy),
     StopStrategy(StopStrategy),
     ExitMarket(StrategyId),
+    /// Instructs every registered strategy to exit the market.
+    DeriskAll,
     RemoveStrategy(RemoveStrategy),
 }
 

@@ -183,6 +183,11 @@ impl PyController {
         Self::py_market_exit_strategy(slf, strategy_id)
     }
 
+    #[pyo3(name = "derisk_all")]
+    fn py_derisk_all(slf: PyRef<'_, Self>) -> PyResult<Vec<StrategyId>> {
+        Ok(controller_for(&slf)?.derisk_all())
+    }
+
     #[pyo3(name = "remove_strategy")]
     fn py_remove_strategy(slf: PyRef<'_, Self>, strategy_id: StrategyId) -> PyResult<()> {
         controller_for(&slf)?

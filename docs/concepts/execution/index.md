@@ -433,6 +433,30 @@ See the
 [`RiskEngineConfig` API reference](/docs/python-api-latest/config.html#nautilus_trader.risk.RiskEngineConfig)
 for configuration details.
 
+### Coordinated de-risking
+
+A de-risking is a halt, a cancellation and a flattening, and it has to reach more than one strategy
+and more than one venue. One instruction does all three: `Trader::derisk_all` instructs every
+registered strategy to exit the market, and each exit refuses any submission that is neither
+reduce-only nor tagged with that strategy's market exit tag (`MARKET_EXIT_IN_PROGRESS`), cancels
+every order the strategy has open, and closes every position it holds with reduce-only market
+orders, per instrument. The halt therefore follows from the same instruction as the cancellations
+and the flattening, and no strategy can add exposure while the unwind is carried out. The exit
+retries on its own timer while orders or positions remain, so an unwind that cannot complete at one
+price does not stop halfway.
+
+The halt is enforced at the strategies, because that is where local order flow originates, and it
+lasts while the exit is in progress. A deployment that wants the halt to outlast the unwind sets
+`REDUCING` on the risk engine's [trading state](#trading-state), which refuses new exposure
+system-wide; `HALTED` is not the right state for a de-risking, because it denies the reduce-only
+submissions the flattening needs.
+
+A controller carries the same instruction as `ControllerCommand::DeriskAll`, which is what makes it
+reachable while a run or a live session is in progress, and `Controller.derisk_all()` pulls it from
+Python for a controller registered as an actor. A strategy in a backtest pulls it directly when it
+holds the trader handle, which is how `crates/backtest/tests/integration/derisking.rs` covers the
+path across two strategies and two venues.
+
 ## Execution algorithms
 
 An `ExecutionAlgorithm` receives primary orders selected by `exec_algorithm_id` and can split them

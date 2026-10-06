@@ -1405,6 +1405,37 @@ impl Trader {
         Ok(handler)
     }
 
+    /// Instructs every registered strategy to exit the market.
+    ///
+    /// One instruction halts, cancels and flattens across strategies and venues at once: an
+    /// exiting strategy refuses any submission that is neither reduce-only nor tagged with its
+    /// market exit tag, cancels every order it has open, and closes every position it holds with
+    /// reduce-only market orders, per instrument and on its own retry timer. The halt therefore
+    /// follows from the same instruction as the cancellations and the flattening, and no strategy
+    /// can add exposure while the de-risking is carried out.
+    ///
+    /// The halt is enforced at the strategies because that is where local order flow originates. A
+    /// deployment that also wants the risk engine to refuse non-reducing submissions system-wide
+    /// sets its trading state beside this, which is a separate lever rather than a second halt.
+    ///
+    /// Returns the strategies the exit was delivered to. A strategy whose exit cannot be delivered
+    /// is logged and skipped rather than aborting the rest, because a de-risking path that stops
+    /// halfway leaves the book worse off than one that reports what it did.
+    #[must_use]
+    pub fn derisk_all(trader: &Rc<RefCell<Self>>) -> Vec<StrategyId> {
+        let strategy_ids = trader.borrow().strategy_ids();
+        let mut instructed = Vec::with_capacity(strategy_ids.len());
+
+        for strategy_id in strategy_ids {
+            match Self::market_exit_strategy(trader, &strategy_id) {
+                Ok(()) => instructed.push(strategy_id),
+                Err(e) => log::error!("Cannot de-risk {strategy_id}: {e}"),
+            }
+        }
+
+        instructed
+    }
+
     /// Removes the strategy with the given `strategy_id`.
     ///
     /// Will stop the strategy first if it is currently running. Disposes the strategy

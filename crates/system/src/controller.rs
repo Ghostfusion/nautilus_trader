@@ -93,6 +93,11 @@ impl Controller {
             ControllerCommand::StartStrategy(command) => self.start_strategy(&command.strategy_id),
             ControllerCommand::StopStrategy(command) => self.stop_strategy(&command.strategy_id),
             ControllerCommand::ExitMarket(strategy_id) => self.exit_market(&strategy_id),
+            ControllerCommand::DeriskAll => {
+                let instructed = self.derisk_all();
+                log::info!("De-risking instructed for {} strategies", instructed.len());
+                Ok(())
+            }
             ControllerCommand::RemoveStrategy(command) => {
                 self.remove_strategy(&command.strategy_id)
             }
@@ -298,6 +303,16 @@ impl Controller {
     /// Returns an error if the strategy is not registered or its control endpoint is missing.
     pub fn exit_market(&self, strategy_id: &StrategyId) -> anyhow::Result<()> {
         Trader::market_exit_strategy(&self.trader, strategy_id)
+    }
+
+    /// Instructs every registered strategy to exit the market, across strategies and venues.
+    ///
+    /// Returns the strategies the exit was delivered to. This is the same coordinated de-risking
+    /// path [`ControllerCommand::DeriskAll`] carries, for a caller that holds a controller rather
+    /// than a bus.
+    #[must_use]
+    pub fn derisk_all(&self) -> Vec<StrategyId> {
+        Trader::derisk_all(&self.trader)
     }
 
     /// Removes the registered strategy with the given identifier.
