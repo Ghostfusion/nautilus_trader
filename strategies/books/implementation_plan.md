@@ -38,6 +38,7 @@ Every "Today" line names the file and symbol that owns the behaviour, checked ag
 | Deflated Sharpe with trial provenance                                                          | `python/nautilus_trader/optimization/significance.py` (`DeflatedSharpeRatio` is a `PortfolioStatistic`, so a registered run's report carries the corrected row with its trial counts in the name, W1.4)                                                                          |
 | Per-instrument market status enforced in the exchange                                          | `crates/execution/src/matching_engine/mod.rs` (`process_status`, the submit gate, the matching gate, and cancel-on-halt behind a venue flag, W9.2)                                                                                                                               |
 | Tick rules                                                                                     | `price_increment` known and precision enforced; alignment enforced at submission on a venue that declares the rule (`RiskEngineConfig.tick_alignment_venues`), with the tick test stated once as `Instrument::price_is_aligned` and shared with fill normalization (W9.1)        |
+| Price bands and circuit breakers                                                               | `crates/execution/src/matching_engine/config.rs` (`OrderMatchingEngineConfig.price_band_bps`, `CircuitBreakerConfig`); `crates/execution/src/matching_engine/mod.rs` (the submission band check and the breaker's halt window, W9.3)                                             |
 | Read-only execution analytics (shortfall, arrival, VWAP slippage, decision-to-execution delay) | `crates/trading/src/lib.rs` (`analytics`)                                                                                                                                                                                                                                        |
 | Golden-output regression and accounting reconciliation                                         | `crates/backtest/benches/engine/canonical.rs`; `python/tests/regression/`; `crates/backtest/tests/performance_reconciliation.rs`                                                                                                                                                 |
 | Net-of-cost reporting                                                                          | `crates/analysis/src/analyzer.rs` (the default analyzer's cost row); `crates/analysis/src/statistics/` (gross and net return, and the cost and breakeven rates in basis points of turnover); `crates/execution/src/models/fill.rs` (each fill model's declared `FillAssumption`) |
@@ -66,7 +67,7 @@ Every "Today" line names the file and symbol that owns the behaviour, checked ag
 
 | Capability                                   | Note                                                                                                                               |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Auctions, price bands, circuit breakers      | No model or engine primitive; adapter metadata only                                                                                |
+| Auctions                                     | No model or engine primitive; adapter metadata only                                                                                |
 | Feed-identity validation                     | Nothing checks reported volume against open interest or a settlement total                                                         |
 | Cross-venue timestamp reconciliation         | Ordering is insertion order; `VirtualClock` monotonicity is per clock                                                              |
 | Reference distribution from real instruments | The null model is synthetic only; nothing draws a reference distribution from real instruments                                     |
@@ -851,7 +852,9 @@ Halts are enforced per instrument at submission and matching, and a venue can be
 cancel its resting book on a halt as of revision 35 (W9.2), attaching the venue reason
 `MARKET_HALTED` to each cancellation; the global `TradingState` denies or restricts at the risk
 engine, and the backtest engine reads and sets it from Python as of the same revision, while the
-live kernel has no route to its risk engine. Auctions, price bands and circuit breakers are absent.
+live kernel has no route to its risk engine. A venue can also refuse an out-of-band submission and
+halt itself on a violent move as of revision 36 (W9.3), so bands and breaker halt windows exist as
+venue rules rather than adapter metadata; auctions remain absent.
 
 **Work.**
 
@@ -899,8 +902,30 @@ live kernel has no route to its risk engine. Auctions, price bands and circuit b
   halt and the live half of the kill switch stays open; `LiveRiskEngineConfig` gained the matching
   `tick_alignment_venues` field, which closes a W9.1 loose end that broke the extension build; and
   a halt cancels the resting book but does not flatten positions, which is T10's de-risking path.
-- W9.3 Add price-band and circuit-breaker primitives, as a submission rule plus a halt window,
-  since the briefs show bands and halts are not interchangeable.
+- W9.3 (done at revision 36) Price bands and circuit breakers exist as venue rules, and they are
+  kept distinct, which is the corpus's point that a band and a halt are not interchangeable.
+  `OrderMatchingEngineConfig.price_band_bps` is a submission rule: a price or trigger price outside
+  a symmetric band around the venue's reference price is rejected by the matching engine, naming
+  the price, the band and the reference, while trading continues. The reference is the venue's
+  `last_price()` -- the quote midpoint when quoted, else the last traded price, else the touched
+  side -- so the band is measured against venue state rather than one client's view. Without a
+  reference the priced submission is rejected rather than accepted, so a band is fail-closed, and
+  venue construction refuses a band of 10000 basis points or more.
+  `OrderMatchingEngineConfig.circuit_breaker` is the halt window: the breaker watches the same
+  reference and trips when it has moved at least `move_bps` basis points from the value it held at
+  the start of the current window, halting the market for `halt_ns` and reopening on the first
+  matching pass at or after the end, which anchors a fresh window. That differs from the operator
+  halt, which stays closed until reopened, and from the band, which never stops trading; the trip
+  count is readable because the status alone stops showing a trip once the window ends. Both halts
+  go through one `halt_market` path, so cancel-on-halt empties the book either way and each
+  cancellation names its cause, `MARKET_HALTED` or `CIRCUIT_BREAKER`. Both primitives reach Python
+  through `BacktestEngine.add_venue(price_band_bps=..., circuit_breaker=CircuitBreakerConfig(...))`,
+  the breaker as its own type so that an incomplete set of window parameters cannot be expressed.
+  Named gaps: the band is symmetric, so asymmetric limit-up and limit-down percentages are not
+  expressible; the breaker is per instrument, like the rest of the engine; it is advanced on the
+  matching pass, so a move that arrives only as a quote is seen at the next pass; and nothing
+  publishes a market-status event on a trip, so a caller reads the trip count or the status instead
+  of subscribing to it.
 - W9.4 Add a volume-tiered rebate schedule, extending `MakerTakerFeeSchedule` from
   per-instrument rates to per-tier rates.
 
@@ -908,8 +933,9 @@ live kernel has no route to its risk engine. Auctions, price bands and circuit b
 alignment, with the denial naming the price and the tick; a venue that rounded instead is refused
 rather than simulated, because an order's price is fixed at construction. With cancel-on-halt
 enabled, a halt empties the book and each cancellation names the venue reason, and the risk
-engine's state is read back through the Python engine. A tiered rebate changes net cost
-monotonically in the tier input.
+engine's state is read back through the Python engine. A venue that declares a price band rejects a
+submission outside it and still accepts one inside it, and a venue with a circuit breaker halts for
+its window and reopens on its own. A tiered rebate changes net cost monotonically in the tier input.
 
 ### T10 Individually prudent risk limits can worsen collective crashes (12)
 
@@ -1021,3 +1047,4 @@ that is admissible per strategy but not in aggregate.
 | 33       | 2026-10-05 | W5.4 done: `crates/data/src/cross_venue.rs` adds a cross-venue lead-lag read that cannot be taken without a bound. The tool's only evidence parameter is a `CrossVenueOffset`, whose only constructor consumes a `ClockOffsetEstimate` from the shipped `ClockOffsetEstimator` plus the caller's pairing ambiguity, so there is no unestimated path and no unknown-bound state; the peak lag always travels with its correlation, but only a peak outside the ambiguity is readable as a lead-lag, the corpus's 16 ms shift under a 99 ms ambiguity is a pinned test that reports it unresolved with the bound that swallowed it, `resolved_lag_ns` is the only accessor that hands out a point estimate and it refuses an unresolved read, and the 6 ms drift statement travels beside the ambiguity with its own flag. The estimator is Hayashi-Yoshida style over interval returns with the second venue moved onto the local clock first, the pairing window is a ladder whose disagreement is reported as instability rather than averaged, and a window that pairs nothing reports insufficient rather than zero. Six in-module tests pass, the whole data suite is 702 passed, fmt and clippy are clean, and `docs/concepts/networking.md` -- brief 05's named landing for offset ambiguity -- gained the section. No Python binding, by choice, and the stated gap is that nothing applies an offset to an event stream yet, so this is a measurement with its bound rather than reconciliation. |
 | 34       | 2026-10-05 | W9.1 done: tick alignment is enforced at submission as a venue rule, and the tick test is now stated once. `Instrument::price_is_aligned` replaces the matching engine's private `price_matches_tick`, so the fill path and the submission path share one predicate and cannot drift apart; `RiskEngineConfig.tick_alignment_venues` lists the venues whose submissions are checked, in the same venue-scoped shape as `full_position_exit_venues`; and the risk engine's `check_price` denies a precision-legal, non-aligned price before an execution client sees it, with a new typed denial `PRICE_NOT_ALIGNED_TO_TICK: field=PRICE, price=1.23, price_increment=0.05` that lands in the canonical code set, in the generated table in `docs/concepts/execution/index.md` (regenerated through its own ignored generator test rather than by hand) and in the bridge's transcribed `DENIAL_CODES`. The acceptance is pinned on ETHUSD.BYBIT, which carries two price decimals and a 0.05 tick so that 1.23 is precision-legal and not aligned: the model test asserts 1.25 and 1.20 align and 1.23 does not, the risk test submits exactly that price on a venue that declares the rule and asserts the denial, and the default is empty so no existing behaviour changes. One deviation from the item's wording is recorded: the rule denies and does not round, because an order's price is fixed at construction -- no order type exposes a price mutator, the builder is the only path that sets one, and no event can change it -- so a rounding venue would either book a price its submitter never sees or fill outside the submitted limit. |
 | 35 | 2026-10-05 | W9.2 done: a halt can empty the book, and the risk engine's trading state is reachable from Python. `OrderMatchingEngineConfig.cancel_on_halt`, wired to `BacktestEngine.add_venue(cancel_on_halt=...)` and defaulting to false, splits `Halt` from `Close` in `process_status` and cancels every open order through the bulk path expiration already used, renamed `cancel_open_orders` because its applicability widened; the reason is threaded into `OrderCanceled.reason` as `MARKET_HALTED`, a field the simulator had always left `None`, so an emptied book is attributable. `BacktestEngine.set_trading_state` and `.trading_state()` expose the risk engine's state, and `LiveRiskEngineConfig` gained the matching `tick_alignment_venues` field, completing W9.1's field-for-field mirror and fixing an extension-build break W9.1 left behind. Verified: two new halt tests plus six market-status tests pass; the live configuration tests pass; the execution and backtest suites are 2866 tests run with one skipped, and the backtest Python suite is 304 passed; fmt and clippy are clean. |
+| 36 | 2026-10-05 | W9.3 done: price bands and circuit breakers exist as venue rules, kept distinct because a band and a halt are not interchangeable. `OrderMatchingEngineConfig.price_band_bps` is a submission rule that rejects a price or trigger price outside a symmetric band around the venue's reference, naming the price, the band, the reference and the order; the reference is the venue's `last_price()`, a missing reference rejects a priced submission rather than letting it through, and venue construction refuses a band of 10000 basis points or more. `OrderMatchingEngineConfig.circuit_breaker` is the halt window: it trips when the reference moves `move_bps` from the value it held at the start of a `window_ns` window, halts for `halt_ns`, and reopens on the first matching pass at or after the end, anchoring a fresh window, where the operator halt stays closed until reopened and the band never stops trading. Both halts share one `halt_market` path, so cancel-on-halt empties the book either way and each cancellation names its cause, and the trip count is readable because the status alone stops showing a trip once the window ends. Both reach Python through `add_venue(price_band_bps=..., circuit_breaker=CircuitBreakerConfig(...))`. Verified: four new integration tests and one config test pass; the execution and backtest suites are 2871 tests run with one skipped; a throwaway script driven from the real interpreter saw the band accept 995.00 and reject 1200.00 while naming the band around the reference 1002.00, and saw the breaker reject a submission as HALTED inside its window and accept one after it; fmt, clippy, the docs conventions check and the markdown tables are clean. |

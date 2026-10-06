@@ -19,7 +19,10 @@ use nautilus_core::python::to_pyvalue_err;
 use nautilus_model::identifiers::ClientId;
 use pyo3::{PyResult, pymethods};
 
-use crate::{engine::config::ExecutionEngineConfig, order_emulator::config::OrderEmulatorConfig};
+use crate::{
+    engine::config::ExecutionEngineConfig, matching_engine::config::CircuitBreakerConfig,
+    order_emulator::config::OrderEmulatorConfig,
+};
 
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 #[pymethods]
@@ -203,6 +206,47 @@ impl OrderEmulatorConfig {
     #[pyo3(name = "debug")]
     const fn py_debug(&self) -> bool {
         self.debug
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+
+    fn __str__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[pymethods]
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+impl CircuitBreakerConfig {
+    /// Configuration for a matching engine's circuit breaker.
+    #[new]
+    #[pyo3(signature = (move_bps = None, window_ns = None, halt_ns = None))]
+    fn py_new(move_bps: Option<u32>, window_ns: Option<u64>, halt_ns: Option<u64>) -> Self {
+        Self::builder()
+            .maybe_move_bps(move_bps)
+            .maybe_window_ns(window_ns)
+            .maybe_halt_ns(halt_ns)
+            .build()
+    }
+
+    #[getter]
+    #[pyo3(name = "move_bps")]
+    const fn py_move_bps(&self) -> u32 {
+        self.move_bps
+    }
+
+    #[getter]
+    #[pyo3(name = "window_ns")]
+    const fn py_window_ns(&self) -> u64 {
+        self.window_ns
+    }
+
+    #[getter]
+    #[pyo3(name = "halt_ns")]
+    const fn py_halt_ns(&self) -> u64 {
+        self.halt_ns
     }
 
     fn __repr__(&self) -> String {

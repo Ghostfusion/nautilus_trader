@@ -33,6 +33,7 @@ use pyo3::prelude::*;
 #[pymodule]
 pub fn execution(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::engine::config::ExecutionEngineConfig>()?;
+    m.add_class::<crate::matching_engine::config::CircuitBreakerConfig>()?;
     m.add_class::<crate::order_emulator::config::OrderEmulatorConfig>()?;
     m.add_class::<fee::PyFeeModel>()?;
     m.add_class::<crate::models::fee::FixedFeeModel>()?;

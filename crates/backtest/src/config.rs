@@ -29,6 +29,7 @@ use nautilus_core::{UUID4, UnixNanos};
 use nautilus_data::engine::config::DataEngineConfig;
 use nautilus_execution::{
     engine::config::ExecutionEngineConfig,
+    matching_engine::config::CircuitBreakerConfig,
     models::{
         competition::{CompetitorSet, CompetitorSetHandle},
         fee::{FeeModelAny, FeeModelHandle},
@@ -405,6 +406,18 @@ pub struct SimulatedVenueConfig {
     /// to false, which leaves resting orders in place for a reopen.
     #[builder(default = false)]
     pub cancel_on_halt: bool,
+    /// The submission price band as a symmetric distance from the venue's reference price in
+    /// basis points, or zero for no band.
+    ///
+    /// A band only rejects an out-of-band submission, so it is not a halt and not a circuit
+    /// breaker. Must be less than 10000, which venue construction refuses.
+    #[builder(default = 0)]
+    pub price_band_bps: u32,
+    /// The circuit breaker, or `None` for none.
+    ///
+    /// A breaker is a halt window: it halts the venue and reopens it on its own, where the venue
+    /// halt stays closed until an operator reopens it and a price band only rejects an order.
+    pub circuit_breaker: Option<CircuitBreakerConfig>,
     /// The market order price protection distance in ticks, or zero to disable protection.
     #[builder(default = 0)]
     pub price_protection_points: u32,

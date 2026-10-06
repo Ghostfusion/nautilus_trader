@@ -32,6 +32,7 @@ use nautilus_core::{
     python::{to_pyruntime_err, to_pytype_err, to_pyvalue_err},
 };
 use nautilus_execution::{
+    matching_engine::config::CircuitBreakerConfig,
     models::fill::FillModelHandle,
     python::{
         fee::pyobject_to_fee_model_handle, fill::pyobject_to_fill_model_handle,
@@ -178,6 +179,8 @@ impl PyBacktestEngine {
             slippage_model = None,
             market_impact_model = None,
             cancel_on_halt = false,
+            price_band_bps = 0,
+            circuit_breaker = None,
         )
     )]
     #[expect(
@@ -225,6 +228,8 @@ impl PyBacktestEngine {
         slippage_model: Option<Py<PyAny>>,
         market_impact_model: Option<Py<PyAny>>,
         cancel_on_halt: bool,
+        price_band_bps: u32,
+        circuit_breaker: Option<CircuitBreakerConfig>,
     ) -> PyResult<()> {
         let leverages: AHashMap<InstrumentId, Decimal> = leverages
             .map(|m| m.into_iter().collect())
@@ -319,6 +324,8 @@ impl PyBacktestEngine {
             .liquidation_trigger_ratio(liquidation_trigger_ratio.unwrap_or(1.0))
             .liquidation_cancel_open_orders(liquidation_cancel_open_orders)
             .cancel_on_halt(cancel_on_halt)
+            .price_band_bps(price_band_bps)
+            .maybe_circuit_breaker(circuit_breaker)
             .build()
             .map_err(config_error_to_pyvalue_err)?;
 

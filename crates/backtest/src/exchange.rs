@@ -38,7 +38,9 @@ use nautilus_core::{
 use nautilus_execution::{
     matching_core::RestingOrder,
     matching_engine::{
-        OrderMatchingEngine, config::OrderMatchingEngineConfig, inflight::InflightOrders,
+        OrderMatchingEngine,
+        config::{CircuitBreakerConfig, OrderMatchingEngineConfig},
+        inflight::InflightOrders,
     },
     models::{
         competition::CompetitorSetHandle,
@@ -204,6 +206,8 @@ pub struct SimulatedExchange {
     oto_full_trigger: bool,
     defer_option_settlement: bool,
     cancel_on_halt: bool,
+    price_band_bps: u32,
+    circuit_breaker: Option<CircuitBreakerConfig>,
     price_protection_points: u32,
     liquidation_enabled: bool,
     liquidation_trigger_ratio: f64,
@@ -238,6 +242,24 @@ impl SimulatedExchange {
 
         if config.base_currency.is_some() && config.starting_balances.len() > 1 {
             anyhow::bail!("single-currency account has multiple starting currencies")
+        }
+
+        if config.price_band_bps >= 10_000 {
+            anyhow::bail!("price_band_bps must be less than 10000")
+        }
+
+        if let Some(breaker) = config.circuit_breaker.as_ref() {
+            if breaker.move_bps == 0 {
+                anyhow::bail!("circuit_breaker.move_bps must be greater than zero")
+            }
+
+            if breaker.window_ns == 0 {
+                anyhow::bail!("circuit_breaker.window_ns must be greater than zero")
+            }
+
+            if breaker.halt_ns == 0 {
+                anyhow::bail!("circuit_breaker.halt_ns must be greater than zero")
+            }
         }
 
         let default_leverage = config.default_leverage.unwrap_or_else(|| {
@@ -298,6 +320,8 @@ impl SimulatedExchange {
             oto_full_trigger: config.oto_full_trigger,
             defer_option_settlement: config.defer_option_settlement,
             cancel_on_halt: config.cancel_on_halt,
+            price_band_bps: config.price_band_bps,
+            circuit_breaker: config.circuit_breaker,
             price_protection_points: config.price_protection_points,
             liquidation_enabled: config.liquidation_enabled,
             liquidation_trigger_ratio: config.liquidation_trigger_ratio,
@@ -509,6 +533,7 @@ impl SimulatedExchange {
         } else {
             Some(self.price_protection_points)
         };
+        let price_band = (self.price_band_bps > 0).then_some(self.price_band_bps);
 
         let matching_engine_config = OrderMatchingEngineConfig::builder()
             .bar_execution(self.bar_execution)
@@ -526,6 +551,8 @@ impl SimulatedExchange {
             .oto_full_trigger(self.oto_full_trigger)
             .defer_option_settlement(self.defer_option_settlement)
             .cancel_on_halt(self.cancel_on_halt)
+            .maybe_price_band_bps(price_band)
+            .maybe_circuit_breaker(self.circuit_breaker.clone())
             .maybe_price_protection_points(price_protection)
             .build();
         let instrument_id = instrument.id();

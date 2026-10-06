@@ -134,6 +134,12 @@ pub struct OrderMatchingEngine {
     ids_generator: IdsGenerator,
     last_trade_size: Option<Quantity>,
     last_trade_aggressor: Option<AggressorSide>,
+    /// The event time and reference price that anchor the circuit breaker's current window.
+    breaker_anchor: Option<(UnixNanos, Price)>,
+    /// The event time at which the circuit breaker's halt window ends.
+    breaker_halt_until_ns: Option<UnixNanos>,
+    /// How many times the circuit breaker has tripped since the last reset.
+    circuit_breaker_trips: u64,
     trade_consumption: QuantityRaw,
     bid_consumption: IndexMap<PriceRaw, (QuantityRaw, QuantityRaw)>,
     ask_consumption: IndexMap<PriceRaw, (QuantityRaw, QuantityRaw)>,
@@ -237,6 +243,9 @@ impl OrderMatchingEngine {
             ids_generator,
             last_trade_size: None,
             last_trade_aggressor: None,
+            breaker_anchor: None,
+            breaker_halt_until_ns: None,
+            circuit_breaker_trips: 0,
             trade_consumption: 0,
             bid_consumption: IndexMap::new(),
             ask_consumption: IndexMap::new(),
@@ -334,6 +343,9 @@ impl OrderMatchingEngine {
         self.precision_mismatch_streak = 0;
         self.instrument_close = None;
         self.market_status = MarketStatus::Open;
+        self.breaker_anchor = None;
+        self.breaker_halt_until_ns = None;
+        self.circuit_breaker_trips = 0;
         self.pending_resolution = false;
         self.expiration_processed = false;
         self.option_settlement_failed = false;
@@ -2723,20 +2735,31 @@ impl OrderMatchingEngine {
                 self.market_status = MarketStatus::Suspended;
             }
             MarketStatusAction::Halt if self.market_status == MarketStatus::Open => {
-                self.market_status = MarketStatus::Closed;
-
-                if self.config.cancel_on_halt {
-                    self.cancel_open_orders(&[], Some(Ustr::from("MARKET_HALTED")));
-                    log::info!(
-                        "{} halted with cancel-on-halt enabled; open orders canceled",
-                        self.instrument.id()
-                    );
-                }
+                self.halt_market(MarketStatus::Closed, "MARKET_HALTED");
             }
             MarketStatusAction::Close if self.market_status == MarketStatus::Open => {
                 self.market_status = MarketStatus::Closed;
             }
             _ => {}
+        }
+    }
+
+    /// Halts the market with `status` and the venue `reason`.
+    ///
+    /// Every halt in this engine goes through here, so cancel-on-halt is enforced once: the book
+    /// is emptied and the halt's own reason is attached to each cancellation. An operator halt
+    /// arrives through `process_status` and a circuit breaker trip through
+    /// `update_circuit_breaker`.
+    fn halt_market(&mut self, status: MarketStatus, reason: &str) {
+        self.market_status = status;
+
+        if self.config.cancel_on_halt {
+            self.cancel_open_orders(&[], Some(Ustr::from(reason)));
+
+            log::info!(
+                "{} halted with cancel-on-halt enabled; open orders canceled",
+                self.instrument.id()
+            );
         }
     }
 
@@ -3344,6 +3367,46 @@ impl OrderMatchingEngine {
                     )
                     .into(),
                 );
+            }
+
+            // Check a submission price against the venue's price band. A band only rejects an
+            // out-of-band submission, so it is neither the halt nor the circuit breaker, which
+            // stop trading rather than refuse one order.
+            if let Some(band_bps) = self.config.price_band_bps
+                && let Some(price) = order.price().or_else(|| order.trigger_price())
+            {
+                let band_bps = Decimal::from(band_bps);
+                let Some(reference) = self.last_price() else {
+                    break 'validate Some(
+                        format!(
+                            "No reference price to evaluate the price band for order {}",
+                            order.client_order_id(),
+                        )
+                        .into(),
+                    );
+                };
+
+                let reference_dec = reference.as_decimal();
+                let lower =
+                    reference_dec * (Decimal::from(10_000) - band_bps) / Decimal::from(10_000);
+                let upper =
+                    reference_dec * (Decimal::from(10_000) + band_bps) / Decimal::from(10_000);
+                let price_dec = price.as_decimal();
+
+                if price_dec < lower || price_dec > upper {
+                    break 'validate Some(
+                        format!(
+                            "Order price {} is outside the {} basis point price band {}-{} around reference {} for order {}",
+                            price,
+                            band_bps,
+                            lower,
+                            upper,
+                            reference,
+                            order.client_order_id(),
+                        )
+                        .into(),
+                    );
+                }
             }
 
             if order.is_reduce_only() && !self.config.use_reduce_only {
@@ -4201,6 +4264,74 @@ impl OrderMatchingEngine {
         self.iterate_with_mode(timestamp_ns, aggressor_side, OrderMatchMode::All);
     }
 
+    /// Returns how many times the circuit breaker has tripped since the last reset.
+    #[must_use]
+    pub const fn circuit_breaker_trips(&self) -> u64 {
+        self.circuit_breaker_trips
+    }
+
+    /// Advances the circuit breaker for a matching pass at `timestamp_ns`.
+    ///
+    /// The breaker watches the venue reference price that the price band is also measured
+    /// against. It trips when that price has moved by at least the configured number of basis
+    /// points from its value at the start of the current window, and the trip halts the market for
+    /// the configured halt duration. The halt ends on the first pass at or after its end, which
+    /// reopens the market and anchors a fresh window, so a breaker halt is a window rather than
+    /// the open-ended halt an operator sends through `process_status`.
+    fn update_circuit_breaker(&mut self, timestamp_ns: UnixNanos) {
+        let Some(config) = self.config.circuit_breaker.clone() else {
+            return;
+        };
+        let Some(price) = self.last_price() else {
+            return;
+        };
+
+        if let Some(halt_until_ns) = self.breaker_halt_until_ns {
+            if timestamp_ns < halt_until_ns {
+                return;
+            }
+
+            self.breaker_halt_until_ns = None;
+            self.market_status = MarketStatus::Open;
+            self.breaker_anchor = Some((timestamp_ns, price));
+
+            log::info!(
+                "{} circuit breaker halt window ended, market reopened",
+                self.instrument.id()
+            );
+            return;
+        }
+
+        let window_end_ns = self
+            .breaker_anchor
+            .map(|(start_ns, _)| start_ns.as_u64().saturating_add(config.window_ns));
+
+        if window_end_ns.is_none_or(|end_ns| timestamp_ns.as_u64() >= end_ns) {
+            self.breaker_anchor = Some((timestamp_ns, price));
+            return;
+        }
+
+        let anchor = self.breaker_anchor.map_or(price, |(_, anchor)| anchor);
+        let move_bps = (price.as_decimal() - anchor.as_decimal()).abs() * Decimal::from(10_000)
+            / anchor.as_decimal();
+
+        if move_bps < Decimal::from(config.move_bps) {
+            return;
+        }
+
+        self.circuit_breaker_trips += 1;
+        self.breaker_halt_until_ns = Some(UnixNanos::from(
+            timestamp_ns.as_u64().saturating_add(config.halt_ns),
+        ));
+        self.halt_market(MarketStatus::Halted, "CIRCUIT_BREAKER");
+
+        log::warn!(
+            "{} circuit breaker tripped: reference moved {move_bps} basis points from the window anchor {anchor}, halting for {} ns",
+            self.instrument.id(),
+            config.halt_ns,
+        );
+    }
+
     fn iterate_with_mode(
         &mut self,
         timestamp_ns: UnixNanos,
@@ -4208,6 +4339,7 @@ impl OrderMatchingEngine {
         match_mode: OrderMatchMode,
     ) {
         // TODO implement correct clock fixed time setting self.clock.set_time(ts_now);
+        self.update_circuit_breaker(timestamp_ns);
         self.purge_closed_cached_filled_qty();
         self.purge_applied_order_updates();
         self.purge_applied_fills();

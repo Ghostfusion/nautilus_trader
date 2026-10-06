@@ -533,6 +533,8 @@ class BacktestEngine:
         slippage_model: typing.Any | None = None,
         market_impact_model: typing.Any | None = None,
         cancel_on_halt: bool = False,
+        price_band_bps: int = 0,
+        circuit_breaker: execution.CircuitBreakerConfig | None = None,
     ) -> None: ...
     def change_fill_model(self, venue: model.Venue, fill_model: typing.Any) -> None: ...
     def add_data(

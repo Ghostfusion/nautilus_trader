@@ -69,7 +69,58 @@ pub struct OrderMatchingEngineConfig {
     /// attributable in the resulting events. Defaults to false.
     #[builder(default)]
     pub cancel_on_halt: bool,
+    /// The submission price band as a symmetric distance from the venue's reference price in
+    /// basis points, or `None` for no band.
+    ///
+    /// A submission carrying a price or trigger price outside the band is rejected by the venue,
+    /// naming the price, the band and the reference it was measured against. A band only rejects:
+    /// trading continues, which is what distinguishes it from a circuit breaker and from the venue
+    /// halt. Without a reference price the band cannot be evaluated, so a priced submission is
+    /// rejected; a band is fail-closed rather than silently absent. Must be less than 10000, which
+    /// the venue configuration enforces. Defaults to none.
+    pub price_band_bps: Option<u32>,
+    /// The circuit breaker, or `None` for none.
+    ///
+    /// A breaker is a halt window: it stops trading and then reopens on its own, where the venue
+    /// halt stops trading until an operator reopens, and a price band only rejects an out-of-band
+    /// submission. See [`CircuitBreakerConfig`]. Defaults to none.
+    pub circuit_breaker: Option<CircuitBreakerConfig>,
     pub price_protection_points: Option<u32>,
+}
+
+/// Configuration for a matching engine's circuit breaker.
+///
+/// The breaker watches the venue's reference price, which is the same reference the price band is
+/// measured against. It trips when that price moves by at least `move_bps` basis points from its
+/// value at the start of the current window, where a window lasts `window_ns` from the event that
+/// anchored it. A tripped breaker halts the market for `halt_ns` and reopens on the first matching
+/// pass at or after the end of that halt, which anchors a fresh window.
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.execution", from_py_object)
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.execution")
+)]
+#[derive(Debug, Clone, Deserialize, Serialize, bon::Builder)]
+#[serde(default, deny_unknown_fields)]
+pub struct CircuitBreakerConfig {
+    /// The move from the window's anchor price that trips the breaker, in basis points.
+    #[builder(default = 200)]
+    pub move_bps: u32,
+    /// The duration of a window in nanoseconds.
+    #[builder(default = 60_000_000_000)]
+    pub window_ns: u64,
+    /// The duration of the halt after a trip, in nanoseconds.
+    #[builder(default = 60_000_000_000)]
+    pub halt_ns: u64,
+}
+
+impl Default for CircuitBreakerConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
 }
 
 impl Default for OrderMatchingEngineConfig {
@@ -103,6 +154,16 @@ mod tests {
         assert!(!config.oto_full_trigger);
         assert!(!config.defer_option_settlement);
         assert!(!config.cancel_on_halt);
+        assert!(config.price_band_bps.is_none());
+        assert!(config.circuit_breaker.is_none());
         assert_eq!(config.price_protection_points, None);
+    }
+
+    #[test]
+    fn test_circuit_breaker_config_defaults() {
+        let config = CircuitBreakerConfig::default();
+        assert_eq!(config.move_bps, 200);
+        assert_eq!(config.window_ns, 60_000_000_000);
+        assert_eq!(config.halt_ns, 60_000_000_000);
     }
 }

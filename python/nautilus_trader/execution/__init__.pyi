@@ -11,6 +11,7 @@ __all__ = [
     "AdverseSelectionFillModel",
     "BestPriceFillModel",
     "CappedOptionFeeModel",
+    "CircuitBreakerConfig",
     "CompetitionAwareFillModel",
     "DefaultFillModel",
     "ExecutionEngineConfig",
@@ -90,6 +91,18 @@ class CappedOptionFeeModel(FeeModel):
         instrument: typing.Any,
         underlying_px: model.Price | None = None,
     ) -> model.Money: ...
+
+@typing.final
+class CircuitBreakerConfig:
+    def __init__(
+        self, move_bps: int | None = None, window_ns: int | None = None, halt_ns: int | None = None
+    ) -> None: ...
+    @property
+    def move_bps(self) -> int: ...
+    @property
+    def window_ns(self) -> int: ...
+    @property
+    def halt_ns(self) -> int: ...
 
 @typing.final
 class CompetitionAwareFillModel:

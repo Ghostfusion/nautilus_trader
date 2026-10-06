@@ -32,7 +32,10 @@ use nautilus_common::{
 };
 use nautilus_core::{UUID4, UnixNanos};
 use nautilus_execution::{
-    matching_engine::{OrderMatchingEngine, config::OrderMatchingEngineConfig},
+    matching_engine::{
+        OrderMatchingEngine,
+        config::{CircuitBreakerConfig, OrderMatchingEngineConfig},
+    },
     models::{
         fee::{CappedOptionFeeModel, FeeModelAny, FixedFeeModel, MakerTakerFeeModel},
         fill::{BestPriceFillModel, DefaultFillModel, FillModel, FillModelAny, FillModelHandle},
@@ -984,6 +987,262 @@ fn test_halt_without_cancel_on_halt_keeps_the_book(
             .all(|event| !matches!(event, OrderEventAny::Canceled(_))),
         "a halt without cancel-on-halt enabled must not cancel resting orders, was {messages:?}",
     );
+}
+
+#[rstest]
+fn test_price_band_rejects_out_of_band_and_accepts_in_band(
+    order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    account_id: AccountId,
+    instrument_eth_usdt: InstrumentAny,
+) {
+    let config = OrderMatchingEngineConfig {
+        price_band_bps: Some(100),
+        ..OrderMatchingEngineConfig::default()
+    };
+    let mut engine =
+        get_order_matching_engine_l2(instrument_eth_usdt.clone(), None, None, None, Some(config));
+
+    let reference_trade = TradeTick::new(
+        instrument_eth_usdt.id(),
+        Price::from("1500.00"),
+        Quantity::from("1.000"),
+        AggressorSide::NoAggressor,
+        TradeId::new("reference"),
+        UnixNanos::from(1),
+        UnixNanos::from(1),
+    );
+    engine.process_trade_tick(&reference_trade);
+    assert_eq!(engine.last_price(), Some(Price::from("1500.00")));
+
+    // 1600.00 is about 6.7% above the 1500.00 reference, outside the 100 basis point band.
+    let out_of_band_id = ClientOrderId::from("O-19700101-000000-001-001-1");
+    let mut out_of_band = OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument_eth_usdt.id())
+        .side(OrderSide::Buy)
+        .price(Price::from("1600.00"))
+        .quantity(Quantity::from("1.000"))
+        .client_order_id(out_of_band_id)
+        .submit(true)
+        .build();
+    engine.process_order(&mut out_of_band, account_id);
+
+    let messages = get_order_event_handler_messages(&order_event_handler);
+    assert_eq!(messages.len(), 1);
+    let rejected = match messages.first().unwrap() {
+        OrderEventAny::Rejected(rejected) => rejected,
+        event => panic!("Expected OrderRejected event, was {event:?}"),
+    };
+    assert!(
+        rejected.reason.contains("price band"),
+        "{}",
+        rejected.reason
+    );
+    assert!(!engine.order_exists(out_of_band_id));
+
+    clear_order_event_handler_messages(&order_event_handler);
+
+    // 1505.00 is inside the band, so the venue accepts it.
+    let in_band_id = ClientOrderId::from("O-19700101-000000-001-001-2");
+    let mut in_band = OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument_eth_usdt.id())
+        .side(OrderSide::Buy)
+        .price(Price::from("1495.00"))
+        .quantity(Quantity::from("1.000"))
+        .client_order_id(in_band_id)
+        .submit(true)
+        .build();
+    engine.process_order(&mut in_band, account_id);
+
+    let messages = get_order_event_handler_messages(&order_event_handler);
+    assert!(
+        matches!(messages.first(), Some(OrderEventAny::Accepted(_))),
+        "expected the in-band order to be accepted, was {messages:?}",
+    );
+    assert!(engine.order_exists(in_band_id));
+    assert_eq!(engine.market_status, MarketStatus::Open);
+}
+
+#[rstest]
+fn test_price_band_without_a_reference_rejects_a_priced_submission(
+    order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    account_id: AccountId,
+    instrument_eth_usdt: InstrumentAny,
+) {
+    let config = OrderMatchingEngineConfig {
+        price_band_bps: Some(100),
+        ..OrderMatchingEngineConfig::default()
+    };
+    let mut engine =
+        get_order_matching_engine_l2(instrument_eth_usdt.clone(), None, None, None, Some(config));
+
+    let client_order_id = ClientOrderId::from("O-19700101-000000-001-001-1");
+    let mut order = OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument_eth_usdt.id())
+        .side(OrderSide::Buy)
+        .price(Price::from("1495.00"))
+        .quantity(Quantity::from("1.000"))
+        .client_order_id(client_order_id)
+        .submit(true)
+        .build();
+    engine.process_order(&mut order, account_id);
+
+    let messages = get_order_event_handler_messages(&order_event_handler);
+    assert_eq!(messages.len(), 1);
+    let rejected = match messages.first().unwrap() {
+        OrderEventAny::Rejected(rejected) => rejected,
+        event => panic!("Expected OrderRejected event, was {event:?}"),
+    };
+    assert!(
+        rejected.reason.contains("No reference price"),
+        "{}",
+        rejected.reason
+    );
+    assert!(!engine.order_exists(client_order_id));
+}
+
+#[rstest]
+fn test_circuit_breaker_trips_halts_and_resumes(
+    order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    account_id: AccountId,
+    instrument_eth_usdt: InstrumentAny,
+) {
+    let config = OrderMatchingEngineConfig {
+        circuit_breaker: Some(CircuitBreakerConfig {
+            move_bps: 100,
+            window_ns: 60_000_000_000,
+            halt_ns: 30_000_000_000,
+        }),
+        ..OrderMatchingEngineConfig::default()
+    };
+    let mut engine =
+        get_order_matching_engine_l2(instrument_eth_usdt.clone(), None, None, None, Some(config));
+
+    let anchor_trade = TradeTick::new(
+        instrument_eth_usdt.id(),
+        Price::from("1500.00"),
+        Quantity::from("1.000"),
+        AggressorSide::NoAggressor,
+        TradeId::new("anchor"),
+        UnixNanos::from(1),
+        UnixNanos::from(1),
+    );
+    engine.process_trade_tick(&anchor_trade);
+    engine.iterate(UnixNanos::from(1), AggressorSide::NoAggressor);
+    assert_eq!(engine.market_status, MarketStatus::Open);
+    assert_eq!(engine.circuit_breaker_trips(), 0);
+
+    // The reference moves 2% within the window, which is beyond the 100 basis point threshold.
+    let moved_trade = TradeTick::new(
+        instrument_eth_usdt.id(),
+        Price::from("1530.00"),
+        Quantity::from("1.000"),
+        AggressorSide::NoAggressor,
+        TradeId::new("moved"),
+        UnixNanos::from(2),
+        UnixNanos::from(2),
+    );
+    engine.process_trade_tick(&moved_trade);
+    engine.iterate(UnixNanos::from(2), AggressorSide::NoAggressor);
+
+    assert_eq!(engine.market_status, MarketStatus::Halted);
+    assert_eq!(engine.circuit_breaker_trips(), 1);
+
+    let rejected_client_order_id = ClientOrderId::from("O-19700101-000000-001-001-1");
+    let mut rejected_order = OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument_eth_usdt.id())
+        .side(OrderSide::Buy)
+        .price(Price::from("1530.00"))
+        .quantity(Quantity::from("1.000"))
+        .client_order_id(rejected_client_order_id)
+        .submit(true)
+        .build();
+    engine.process_order(&mut rejected_order, account_id);
+
+    let messages = get_order_event_handler_messages(&order_event_handler);
+    assert!(matches!(messages.first(), Some(OrderEventAny::Rejected(_))));
+    assert!(!engine.order_exists(rejected_client_order_id));
+
+    // The halt window ends 30 seconds after the trip, and the market reopens on the next pass.
+    engine.iterate(
+        UnixNanos::from(2 + 30_000_000_000),
+        AggressorSide::NoAggressor,
+    );
+
+    assert_eq!(engine.market_status, MarketStatus::Open);
+    assert_eq!(engine.circuit_breaker_trips(), 1);
+}
+
+#[rstest]
+fn test_circuit_breaker_halt_cancels_the_book_when_configured(
+    order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,
+    account_id: AccountId,
+    instrument_eth_usdt: InstrumentAny,
+) {
+    let config = OrderMatchingEngineConfig {
+        cancel_on_halt: true,
+        circuit_breaker: Some(CircuitBreakerConfig {
+            move_bps: 100,
+            window_ns: 60_000_000_000,
+            halt_ns: 30_000_000_000,
+        }),
+        ..OrderMatchingEngineConfig::default()
+    };
+    let mut engine =
+        get_order_matching_engine_l2(instrument_eth_usdt.clone(), None, None, None, Some(config));
+
+    let resting_bid_id = ClientOrderId::from("O-19700101-000000-001-001-1");
+    let mut resting_bid = OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument_eth_usdt.id())
+        .side(OrderSide::Buy)
+        .price(Price::from("1499.00"))
+        .quantity(Quantity::from("1.000"))
+        .client_order_id(resting_bid_id)
+        .submit(true)
+        .build();
+    engine.process_order(&mut resting_bid, account_id);
+    clear_order_event_handler_messages(&order_event_handler);
+    assert!(engine.order_exists(resting_bid_id));
+
+    let anchor_trade = TradeTick::new(
+        instrument_eth_usdt.id(),
+        Price::from("1500.00"),
+        Quantity::from("1.000"),
+        AggressorSide::NoAggressor,
+        TradeId::new("anchor"),
+        UnixNanos::from(1),
+        UnixNanos::from(1),
+    );
+    engine.process_trade_tick(&anchor_trade);
+    engine.iterate(UnixNanos::from(1), AggressorSide::NoAggressor);
+    assert!(engine.order_exists(resting_bid_id));
+
+    let moved_trade = TradeTick::new(
+        instrument_eth_usdt.id(),
+        Price::from("1530.00"),
+        Quantity::from("1.000"),
+        AggressorSide::NoAggressor,
+        TradeId::new("moved"),
+        UnixNanos::from(2),
+        UnixNanos::from(2),
+    );
+    engine.process_trade_tick(&moved_trade);
+    engine.iterate(UnixNanos::from(2), AggressorSide::NoAggressor);
+
+    assert_eq!(engine.market_status, MarketStatus::Halted);
+    assert!(!engine.order_exists(resting_bid_id));
+
+    let messages = get_order_event_handler_messages(&order_event_handler);
+    let canceled = messages
+        .iter()
+        .find_map(|event| match event {
+            OrderEventAny::Canceled(canceled) => Some(canceled),
+            _ => None,
+        })
+        .expect(
+            "a circuit breaker trip should cancel the resting order when cancel-on-halt is set",
+        );
+    assert_eq!(canceled.client_order_id, resting_bid_id);
+    assert_eq!(canceled.reason, Some(Ustr::from("CIRCUIT_BREAKER")));
 }
 
 #[rstest]

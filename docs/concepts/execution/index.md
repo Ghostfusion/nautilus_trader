@@ -297,6 +297,30 @@ venue that rounded would either book a price its submitter never sees or fill ou
 limit. A caller trading on such a venue rounds the price at construction, where the price is still
 its own decision.
 
+### Price bands and circuit breakers
+
+A venue can refuse an out-of-band submission and halt itself on a violent move, and the two are not
+the same thing. `OrderMatchingEngineConfig.price_band_bps`, wired to
+`BacktestEngine.add_venue(price_band_bps=...)`, sets a symmetric band around the venue's reference
+price, which is the quote midpoint when the venue is quoted and the last traded price otherwise. A
+submission carrying a price or trigger price outside the band is rejected, naming the price, the
+band and the reference it was measured against. A band only rejects, so trading continues. Without
+a reference price a priced submission is rejected rather than silently let through, because a band
+that cannot be evaluated is not a band. The band must be less than 10000 basis points, which venue
+construction refuses.
+
+`OrderMatchingEngineConfig.circuit_breaker`, wired to
+`BacktestEngine.add_venue(circuit_breaker=CircuitBreakerConfig(...))`, is a halt window instead. The
+breaker watches the same reference and trips when it has moved at least `move_bps` basis points
+from its value at the start of the current window, where a window lasts `window_ns`. A trip halts
+the market for `halt_ns`, and the halt ends on the first matching pass at or after its end, which
+reopens the market and anchors a fresh window. That is what makes a breaker different from the
+venue halt, which stays closed until an operator reopens it through `process_status`; cancel-on-halt
+empties the book under either, and each cancellation names which halt caused it
+(`MARKET_HALTED` or `CIRCUIT_BREAKER`). The trip count is readable through
+`OrderMatchingEngine::circuit_breaker_trips`, because the market status alone no longer shows a trip
+once the window has ended.
+
 ### Whole-position conditional exits
 
 Some execution clients support conditional exits whose venue determines the closing quantity from
