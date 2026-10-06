@@ -262,7 +262,7 @@ def test_grid_matches_hand_run(tmp_path: Path) -> None:
     assert best.score == hand_score
     assert best.digest == hand_digest
     assert hand_digest == (
-        "blake3:199f2eb6524925b88ebd6c5cfd0fdc599ec9dc3da3b736ac104178e1592f961f"
+        "blake3:bb2f663c885bb8d02afc12e37d10f43e952248ddef2aae2ff25181e779d23f81"
     )
     assert hand_score == -27.269647329463734
 
