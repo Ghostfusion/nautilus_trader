@@ -36,6 +36,7 @@ from nautilus_trader.optimization.run import ValidationScheme
 from nautilus_trader.optimization.runner import CanonicalRun
 from nautilus_trader.optimization.runner import FailedExperiment
 from nautilus_trader.optimization.runner import RunOutcome
+from nautilus_trader.optimization.search import TrialSpecification
 from nautilus_trader.optimization.space import Experiment
 from nautilus_trader.optimization.space import digest_of
 
@@ -313,6 +314,9 @@ class ExperimentStore:
             "canonical_digest": run.canonical_digest,
             "score": _encode_metric(result.score),
             "constraints_satisfied": result.constraints_satisfied,
+            "specification": (
+                None if result.specification is None else result.specification.to_dict()
+            ),
             "metric_values": {
                 name: _encode_metric(value) for name, value in run.metric_values.items()
             },
@@ -330,10 +334,16 @@ class ExperimentStore:
             {name: _decode_metric(value) for name, value in payload["metric_values"].items()},
             self.canonical_bytes(canonical_digest),
         )
+        specification = payload.get("specification")
         return ExperimentResult(
             run,
             _decode_metric(payload["score"]),
             bool(payload["constraints_satisfied"]),
+            (
+                None
+                if specification is None
+                else TrialSpecification.from_dict(cast("Mapping[str, JsonValue]", specification))
+            ),
         )
 
     def _load_result(self, canonical_digest: str) -> ExperimentResult:

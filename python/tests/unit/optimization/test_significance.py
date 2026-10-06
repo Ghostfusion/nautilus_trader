@@ -44,6 +44,7 @@ from nautilus_trader.optimization import SignificanceResult
 from nautilus_trader.optimization import StatisticalContract
 from nautilus_trader.optimization import StudyIdentity
 from nautilus_trader.optimization import TrialDependence
+from nautilus_trader.optimization import TrialSpecification
 from nautilus_trader.optimization import UniverseIdentity
 from nautilus_trader.optimization import deflated_sharpe_ratio
 from nautilus_trader.optimization import per_period_sharpe
@@ -189,6 +190,19 @@ def _sample(**overrides: object) -> SharpeSample:
     fields.update(overrides)
 
     return SharpeSample(**fields)  # type: ignore[arg-type]
+
+
+def _specification() -> TrialSpecification:
+    """
+    Return a declared trial specification.
+    """
+    return TrialSpecification(
+        data_window=(1_000, 2_000),
+        universe_rule="top_500_by_capitalisation",
+        weighting="value",
+        adjustment_model="four_factor",
+        exclusions=("financials",),
+    )
 
 
 def test_the_contract_declares_every_element_of_the_statistical_contract() -> None:
@@ -764,6 +778,39 @@ def test_the_deflated_sharpe_statistic_states_the_trial_counts_it_used() -> None
     assert independent.inputs == (MetricInput.RETURNS,)
     assert independent.units is MetricUnits.RATIO
     assert independent.direction is MetricDirection.MAXIMIZE
+
+
+def test_the_sample_records_the_specification_it_was_found_under() -> None:
+    """
+    Test the row's declared parameters carry the specification, not only a trial count.
+    """
+    specification = _specification()
+    sample = _sample(specification=specification)
+
+    assert sample.to_dict()["specification"] == specification.to_dict()
+    assert sample.to_dict()["effective_trials"] is None
+
+
+def test_the_deflated_sharpe_statistic_names_the_specification_it_was_found_under() -> None:
+    """
+    Test the row names its provenance rather than leaving the reader to guess the search.
+    """
+    specification = _specification()
+    statistic = DeflatedSharpeRatio(_statistic_trials(), specification=specification)
+
+    assert statistic.specification == specification
+    assert statistic.name == "Deflated Sharpe Ratio (12 trials, value, window 1000-2000)"
+
+    # A statistic without a declared specification keeps the row it had before.
+    assert DeflatedSharpeRatio(_statistic_trials()).name == "Deflated Sharpe Ratio (12 trials)"
+
+
+def test_a_sample_refuses_a_specification_of_the_wrong_type() -> None:
+    """
+    Test the declaration is validated when the sample is built.
+    """
+    with pytest.raises(TypeError, match="specification must be a TrialSpecification"):
+        _sample(specification="value")
 
 
 def test_the_deflated_sharpe_statistic_refuses_an_incomplete_declaration() -> None:

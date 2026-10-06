@@ -21,6 +21,12 @@ runner executes one. A strategy never runs a backtest and never sees a result.
 A random search draws a fixed subset of the space and an evolutionary search breeds from the
 evaluations a driver records. Both are deterministic under their seed: the same seed, space and
 evaluation record always yield the same sequence of candidates.
+
+A search varies more than the parameters it enumerates: the data window, the universe rule, the
+weighting, the adjustment model and the exclusions are the specification a trial was found under,
+and a finding cannot be read against a multiple-testing bound without them. `TrialSpecification`
+records that specification per trial, so it travels with the trial's result rather than being
+reconstructed by a reader afterwards.
 """
 
 from __future__ import annotations
@@ -31,19 +37,191 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import TYPE_CHECKING
 from typing import Protocol
+from typing import cast
 from typing import runtime_checkable
+
+from nautilus_trader.optimization.space import digest_of
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from collections.abc import Mapping
     from collections.abc import Sequence
 
     from nautilus_trader.optimization.space import Experiment
+    from nautilus_trader.optimization.space import JsonValue
     from nautilus_trader.optimization.space import ParameterSpace
 
 
 # A crossover takes each gene from the first parent or the second with equal probability.
 _CROSSOVER_SPLIT = 0.5
+
+# The declared default adjustment model. Raw returns are a real case, so an unstated model is named
+# `unadjusted` rather than left blank, which would be indistinguishable from an unadjusted one.
+DEFAULT_ADJUSTMENT_MODEL = "unadjusted"
+
+# A data window is a half-open `(start, end)` pair of Unix nanoseconds, and a `None` bound means the
+# data's own start or end, the same convention the runner's window uses.
+_WINDOW_BOUNDS = 2
+
+
+@dataclass(frozen=True)
+class TrialSpecification:
+    """
+    The declared specification a trial was found under.
+
+    A cross-sectional or factor finding is only interpretable against the specification it was
+    found under, so the specification travels with the trial's result rather than being
+    reconstructed by a reader afterwards. The data window, the universe rule and the weighting
+    must be supplied by the caller: a default would invent a specification the search did not run,
+    and a trial whose weighting is unstated has no specification to read a bound against. The
+    adjustment model and the exclusions are optional, each with a stated default that means
+    exactly what it says: `unadjusted` for raw returns, and the empty tuple meaning nothing was
+    excluded.
+
+    Parameters
+    ----------
+    data_window : tuple[int | None, int | None]
+        The half-open data window the trial read, in Unix nanoseconds. A `None` bound means the
+        data's own start or end, the same convention the run window uses.
+    universe_rule : str
+        The membership rule that selected the instruments, named rather than digested, so a rule
+        evaluated later still names what selected the universe.
+    weighting : str
+        How the cross-sectional estimate was weighted, such as `equal` or `value`.
+    adjustment_model : str, default `DEFAULT_ADJUSTMENT_MODEL`
+        The factor or risk adjustment the estimate was formed against. Raw returns are a real
+        case, so the default is stated as `unadjusted` rather than left blank.
+    exclusions : tuple[str, ...], default ()
+        The declared exclusions, each the name of a rule that removed an observation. The empty
+        tuple states that nothing was excluded.
+
+    Raises
+    ------
+    TypeError
+        If a declaration has the wrong type.
+    ValueError
+        If a required name is empty or the window is malformed.
+
+    """
+
+    data_window: tuple[int | None, int | None]
+    universe_rule: str
+    weighting: str
+    adjustment_model: str = DEFAULT_ADJUSTMENT_MODEL
+    exclusions: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """
+        Validate the declared specification.
+        """
+        self._validate_window()
+        self._validate_names()
+        self._validate_exclusions()
+
+    def _validate_window(self) -> None:
+        """
+        Validate the data window, which must be a half-open, increasing pair.
+        """
+        if not isinstance(self.data_window, tuple) or len(self.data_window) != _WINDOW_BOUNDS:
+            raise TypeError("data_window must be a (start, end) tuple")
+        start, end = self.data_window
+        for bound in (start, end):
+            if bound is not None and not isinstance(bound, int):
+                raise TypeError(f"a window bound must be an int or None, was {bound!r}")
+        if start is not None and end is not None and start >= end:
+            raise ValueError(
+                f"data_window must be non-empty and increasing, was {self.data_window}"
+            )
+
+    def _validate_names(self) -> None:
+        """
+        Validate the names that must be stated rather than defaulted.
+        """
+        for name in ("universe_rule", "weighting", "adjustment_model"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise TypeError(f"{name} must be a str, was {type(value).__name__}")
+            if not value:
+                raise ValueError(f"{name} must not be empty")
+
+    def _validate_exclusions(self) -> None:
+        """
+        Validate the declared exclusions, each a non-empty rule name.
+        """
+        if not isinstance(self.exclusions, tuple):
+            raise TypeError("exclusions must be a tuple of rule names")
+        for exclusion in self.exclusions:
+            if not isinstance(exclusion, str):
+                raise TypeError(f"an exclusion must be a str, was {type(exclusion).__name__}")
+            if not exclusion:
+                raise ValueError("an exclusion name must not be empty")
+
+    @property
+    def label(self) -> str:
+        """
+        A short, deterministic name stating the weighting and the window.
+        """
+        start, end = self.data_window
+        return f"{self.weighting}, window {start}-{end}"
+
+    def to_dict(self) -> dict[str, JsonValue]:
+        """
+        Return the specification as a canonical mapping.
+
+        Returns
+        -------
+        dict[str, JsonValue]
+
+        """
+        start, end = self.data_window
+        return {
+            "data_window": {"start": start, "end": end},
+            "universe_rule": self.universe_rule,
+            "weighting": self.weighting,
+            "adjustment_model": self.adjustment_model,
+            "exclusions": list(self.exclusions),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, JsonValue]) -> TrialSpecification:
+        """
+        Return the specification decoded from a canonical mapping.
+
+        Parameters
+        ----------
+        payload : Mapping[str, JsonValue]
+            A mapping produced by `to_dict`.
+
+        Returns
+        -------
+        TrialSpecification
+
+        """
+        window = cast("Mapping[str, JsonValue]", payload["data_window"])
+        exclusions = cast("Sequence[JsonValue]", payload["exclusions"])
+        return cls(
+            data_window=(
+                cast("int | None", window["start"]),
+                cast("int | None", window["end"]),
+            ),
+            universe_rule=cast("str", payload["universe_rule"]),
+            weighting=cast("str", payload["weighting"]),
+            adjustment_model=cast("str", payload["adjustment_model"]),
+            exclusions=tuple(cast("str", exclusion) for exclusion in exclusions),
+        )
+
+    @property
+    def digest(self) -> str:
+        """
+        Return the digest of the declared specification.
+
+        Returns
+        -------
+        str
+
+        """
+        return digest_of(cast("Mapping[str, JsonValue]", self.to_dict()))
 
 
 class EvaluationLike(Protocol):

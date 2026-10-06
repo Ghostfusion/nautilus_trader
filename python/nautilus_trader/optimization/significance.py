@@ -45,8 +45,10 @@ Three boundaries are enforced rather than documented:
 
 A run's report carries the correction too: `DeflatedSharpeRatio` is a portfolio statistic that takes
 the trial declaration and computes the corrected value from the returns a backtest feeds it, so the
-value is printed beside the run's own statistics with the trial counts stated in the row's name.
-Nothing in a single run carries the search that produced it, so the declaration stays explicit.
+value is printed beside the run's own statistics with the trial counts and, when declared, the
+specification stated in the row's name. A single run still does not carry the search that produced
+it, so the declaration stays explicit: the caller declares the trial counts and the specification
+its trials were run under.
 
 The value is reported, never a gate: this module has no decision authority, and nothing here is
 consulted by a strategy, an order or a risk check. The correction is deliberately outside the
@@ -75,6 +77,7 @@ from nautilus_trader.optimization.identity import TrialIdentity
 from nautilus_trader.optimization.identity import TrialProvenance
 from nautilus_trader.optimization.identity import trial_identity
 from nautilus_trader.optimization.runner import FailedExperiment
+from nautilus_trader.optimization.search import TrialSpecification
 from nautilus_trader.optimization.space import digest_of
 
 
@@ -629,6 +632,10 @@ class SharpeSample:
         declares independence.
     frequency : SharpeFrequency, default PER_PERIOD
         The period the Sharpe values are expressed over. The annualised case is refused.
+    specification : TrialSpecification | None, default None
+        The specification the trials were run under, carried from the search so the row names its
+        provenance rather than leaving the reader to guess which search produced it, or None when
+        the caller recorded none.
 
     Raises
     ------
@@ -648,6 +655,7 @@ class SharpeSample:
     dependence: TrialDependence
     effective_trials: int | None = None
     frequency: SharpeFrequency = SharpeFrequency.PER_PERIOD
+    specification: TrialSpecification | None = None
 
     def __post_init__(self) -> None:
         """
@@ -655,6 +663,7 @@ class SharpeSample:
         """
         self._validate_values()
         self._validate_dependence()
+        self._validate_specification()
 
     def _validate_values(self) -> None:
         """
@@ -711,6 +720,15 @@ class SharpeSample:
                 f"{len(self.trial_sharpes)}",
             )
 
+    def _validate_specification(self) -> None:
+        """
+        Validate the recorded specification, which the row carries as its provenance.
+        """
+        if self.specification is not None and not isinstance(
+            self.specification, TrialSpecification
+        ):
+            raise TypeError("specification must be a TrialSpecification or None")
+
     @property
     def nominal_trials(self) -> int:
         """
@@ -746,6 +764,7 @@ class SharpeSample:
             "frequency": self.frequency.value,
             "dependence": self.dependence.value,
             "effective_trials": self.effective_trials,
+            "specification": (None if self.specification is None else self.specification.to_dict()),
         }
 
 
@@ -1114,9 +1133,9 @@ class DeflatedSharpeRatio(PortfolioStatistic):
     A single run carries its returns but not the search that selected it, so the trial set is
     declared here while the sample's other fields come from the returns the analyzer feeds. Once
     registered on a portfolio or an analyzer, the corrected value is reported beside the run's own
-    statistics, and the row's name states the trial counts the correction used, because a count is
-    provenance rather than a performance metric and the metric units the analysis surface declares
-    are financial.
+    statistics, and the row's name states the trial counts the correction used and, when declared,
+    the specification the trials were run under, because both are provenance rather than a
+    performance metric and the metric units the analysis surface declares are financial.
 
     The contract's declared minimum counts are enforced: a run whose horizon or trial set falls
     below them is reported as unavailable rather than computed under unstated bounds.
@@ -1134,6 +1153,10 @@ class DeflatedSharpeRatio(PortfolioStatistic):
         declares independence.
     contract : StatisticalContract | None, default None
         The contract to compute under, or None for the declared default.
+    specification : TrialSpecification | None, default None
+        The specification the trials were run under, carried so the row names its provenance, or
+        None when the caller records none. A row without it states only the trial counts, as
+        before.
 
     Raises
     ------
@@ -1151,13 +1174,14 @@ class DeflatedSharpeRatio(PortfolioStatistic):
         dependence: TrialDependence = TrialDependence.INDEPENDENT,
         effective_trials: int | None = None,
         contract: StatisticalContract | None = None,
+        specification: TrialSpecification | None = None,
     ) -> None:
         """
         Initialize the statistic with the trial declaration it corrects for.
         """
         # A probe sample validates the declaration through the sample's own rules - the dependence
-        # declaration, the effective count and the trial Sharpes - and carries the trial counts.
-        # Every calculation replaces the fields the return series supplies.
+        # declaration, the effective count, the specification and the trial Sharpes - and carries
+        # the trial counts. Every calculation replaces the fields the return series supplies.
         self._declaration = SharpeSample(
             sharpe=0.0,
             trial_sharpes=tuple(trial_sharpes),
@@ -1166,13 +1190,21 @@ class DeflatedSharpeRatio(PortfolioStatistic):
             kurtosis=3.0,
             dependence=dependence,
             effective_trials=effective_trials,
+            specification=specification,
         )
         self._contract = contract
 
     @property
+    def specification(self) -> TrialSpecification | None:
+        """
+        Return the specification the trials were run under, or None when none was declared.
+        """
+        return self._declaration.specification
+
+    @property
     def name(self) -> str:
         """
-        Return the name for the statistic, stating the trial counts it used.
+        Return the name for the statistic, stating the trial counts and any specification.
 
         Returns
         -------
@@ -1181,10 +1213,13 @@ class DeflatedSharpeRatio(PortfolioStatistic):
         """
         nominal = self._declaration.nominal_trials
         counted = self._declaration.counted_trials
-
-        if counted == nominal:
-            return f"Deflated Sharpe Ratio ({nominal} trials)"
-        return f"Deflated Sharpe Ratio ({nominal} trials, {counted} effective)"
+        parts = [f"{nominal} trials"]
+        if counted != nominal:
+            parts.append(f"{counted} effective")
+        specification = self._declaration.specification
+        if specification is not None:
+            parts.append(specification.label)
+        return f"Deflated Sharpe Ratio ({', '.join(parts)})"
 
     @property
     def metric_id(self) -> str:

@@ -620,6 +620,7 @@ def _result_record(result: ExperimentResult) -> dict[str, object]:
         "canonical_digest": result.run.canonical_digest,
         "score": _encode_number(result.score),
         "constraints_satisfied": result.constraints_satisfied,
+        "specification": (None if result.specification is None else result.specification.to_dict()),
         "metric_values": {
             name: _encode_number(value) for name, value in result.run.metric_values.items()
         },

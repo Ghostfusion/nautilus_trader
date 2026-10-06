@@ -98,6 +98,7 @@ from nautilus_trader.optimization.search import EvolutionarySearch as Evolutiona
 from nautilus_trader.optimization.search import GridSearch as GridSearch
 from nautilus_trader.optimization.search import RandomSearch as RandomSearch
 from nautilus_trader.optimization.search import SearchStrategy as SearchStrategy
+from nautilus_trader.optimization.search import TrialSpecification as TrialSpecification
 from nautilus_trader.optimization.significance import DeflatedSharpeRatio as DeflatedSharpeRatio
 from nautilus_trader.optimization.significance import DivisorConvention as DivisorConvention
 from nautilus_trader.optimization.significance import ReturnCompounding as ReturnCompounding
@@ -201,6 +202,7 @@ __all__ = [
     "TrialDependence",
     "TrialIdentity",
     "TrialProvenance",
+    "TrialSpecification",
     "TriggerFill",
     "TriggerPrecedence",
     "UniverseIdentity",

@@ -47,6 +47,7 @@ from nautilus_trader.optimization.search import GridSearch
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from collections.abc import Sequence
 
     from nautilus_trader.analysis import Constraint
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     from nautilus_trader.optimization.runner import BacktestRunner
     from nautilus_trader.optimization.runner import RunOutcome
     from nautilus_trader.optimization.search import SearchStrategy
+    from nautilus_trader.optimization.search import TrialSpecification
     from nautilus_trader.optimization.space import Experiment
     from nautilus_trader.optimization.space import ParameterSpace
 
@@ -93,6 +95,11 @@ class Optimizer:
         The memory-driven concurrency limit.
     search : SearchStrategy, default GridSearch()
         The search strategy that enumerates experiments.
+    specification : Callable[[Experiment], TrialSpecification] | None, default None
+        Reads the specification a trial ran under from its experiment, or None when the caller
+        records none. It is read where the result is formed, so the specification travels with the
+        trial's result rather than being reconstructed by a report afterwards. A factory that
+        cannot read a specification for an experiment raises rather than returning a default.
 
     """
 
@@ -101,6 +108,7 @@ class Optimizer:
     constraints: tuple[Constraint, ...] = ()
     concurrency: ConcurrencyPolicy = field(default_factory=ConcurrencyPolicy)
     search: SearchStrategy = field(default_factory=GridSearch)
+    specification: Callable[[Experiment], TrialSpecification] | None = None
 
     def required_metrics(self) -> frozenset[str]:
         """
@@ -302,8 +310,8 @@ class Optimizer:
 
         return Evaluation(outcome, score, feasible)
 
-    @staticmethod
     def _report_from_evaluations(
+        self,
         evaluations: Sequence[Evaluation],
         *,
         space_size: int | None = None,
@@ -313,7 +321,11 @@ class Optimizer:
     ) -> SearchReport:
         """
         Rank the memorized evaluations into a search report.
+
+        Each survivor's specification is read from its experiment here, where the trial's result is
+        formed, and carried on the result, so the report never reconstructs it from the space.
         """
+        specification_of = self.specification
         results: list[ExperimentResult] = []
         failures: list[FailedExperiment] = []
         for evaluation in evaluations:
@@ -321,8 +333,16 @@ class Optimizer:
             if isinstance(outcome, FailedExperiment):
                 failures.append(outcome)
             else:
+                specification = (
+                    None if specification_of is None else specification_of(outcome.experiment)
+                )
                 results.append(
-                    ExperimentResult(outcome, evaluation.score, evaluation.feasible),
+                    ExperimentResult(
+                        outcome,
+                        evaluation.score,
+                        evaluation.feasible,
+                        specification,
+                    ),
                 )
 
         return SearchReport(

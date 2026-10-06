@@ -42,6 +42,7 @@ from nautilus_trader.optimization.search import EvolutionaryOperators
 from nautilus_trader.optimization.search import EvolutionarySearch
 from nautilus_trader.optimization.search import GridSearch
 from nautilus_trader.optimization.search import RandomSearch
+from nautilus_trader.optimization.search import TrialSpecification
 from nautilus_trader.optimization.space import Parameter
 from nautilus_trader.optimization.space import ParameterSpace
 
@@ -467,3 +468,174 @@ def test_run_description_digest_changes_with_the_seed() -> None:
     second = RunDescription.of(space, scheme, search=RandomSearch(seed=2, budget=4))
 
     assert first.digest != second.digest
+
+
+class SpecificationRunner:
+    """
+    Execute an experiment without reading its parameters, so the specification can be the point.
+
+    The score and the gate are constant, so the ranking is deterministic and the test is only
+    about the specification each trial records.
+    """
+
+    def __init__(self, start: int | None = None, end: int | None = None) -> None:
+        """
+        Initialize the runner with an optional run window.
+        """
+        self.start = start
+        self.end = end
+
+    def windowed(self, start: int | None, end: int | None) -> SpecificationRunner:
+        """
+        Return a copy restricted to the given window.
+        """
+        return SpecificationRunner(start, end)
+
+    def run(self, experiment: Experiment, _metrics: Iterable[str] | None = None) -> RunOutcome:
+        """
+        Return a canonical run with constant values.
+        """
+        values = {SCORE: 1.0, GATE: 0.0}
+        canonical = experiment.canonical.encode("utf-8")
+        return CanonicalRun(experiment, experiment.digest, values, canonical)
+
+
+def _specification_space() -> ParameterSpace:
+    """
+    Build the three-weighting by two-window space the specification spread is read over.
+    """
+    return ParameterSpace(
+        base={"mode": "test"},
+        parameters=(
+            Parameter("weighting", ("equal", "value", "rank")),
+            Parameter("window", (1_000, 2_000)),
+        ),
+    )
+
+
+def _specification_of(experiment: Experiment) -> TrialSpecification:
+    """
+    Read the specification a trial ran under from its experiment.
+    """
+    window = int(experiment.parameters["window"])
+    return TrialSpecification(
+        data_window=(window, window + 500),
+        universe_rule="top_500_by_capitalisation",
+        weighting=str(experiment.parameters["weighting"]),
+        adjustment_model="four_factor",
+        exclusions=("financials",),
+    )
+
+
+def _specification_optimizer() -> Optimizer:
+    """
+    Build an optimizer that records each trial's specification from its experiment.
+    """
+    return Optimizer(
+        SpecificationRunner(),
+        _objective(),
+        concurrency=ConcurrencyPolicy.sequential(),
+        specification=_specification_of,
+    )
+
+
+def test_a_search_over_three_weightings_and_two_windows_reports_a_spread_of_six() -> None:
+    """
+    Test the observed spread: a distinct specification is a distinct canonical mapping.
+
+    The space sweeps three weightings and two windows, so its six trials are six distinct
+    specifications and the report's spread is six.
+    """
+    report = _specification_optimizer().optimize(_specification_space())
+
+    assert report.evaluated == 6
+    assert report.specification_spread() == 6
+
+
+def test_a_trials_specification_is_recoverable_from_the_report() -> None:
+    """
+    Test the caller reads a trial's specification back out of the report, not from memory.
+    """
+    report = _specification_optimizer().optimize(_specification_space())
+    selected = next(
+        result
+        for result in report.results
+        if result.experiment.parameters["weighting"] == "value"
+        and result.experiment.parameters["window"] == 2_000
+    )
+
+    assert selected.specification == TrialSpecification(
+        data_window=(2_000, 2_500),
+        universe_rule="top_500_by_capitalisation",
+        weighting="value",
+        adjustment_model="four_factor",
+        exclusions=("financials",),
+    )
+
+
+def test_a_report_without_specifications_has_an_unknown_spread() -> None:
+    """
+    Test a report whose trials recorded no specification returns None, not zero.
+
+    Zero would assert that every trial shared one specification; an absent record establishes no
+    such thing, so the spread is unknown.
+    """
+    report = _optimizer(FakeRunner()).optimize(_space())
+
+    assert all(result.specification is None for result in report.results)
+    assert report.specification_spread() is None
+
+
+def test_two_specifications_are_distinct_exactly_when_their_mappings_differ() -> None:
+    """
+    Test the digest names the canonical mapping, so equal mappings share a digest.
+    """
+    equal = TrialSpecification(
+        data_window=(1_000, 2_000),
+        universe_rule="top_500_by_capitalisation",
+        weighting="equal",
+    )
+    same = TrialSpecification(
+        data_window=(1_000, 2_000),
+        universe_rule="top_500_by_capitalisation",
+        weighting="equal",
+    )
+    value = TrialSpecification(
+        data_window=(1_000, 2_000),
+        universe_rule="top_500_by_capitalisation",
+        weighting="value",
+    )
+
+    assert equal.digest == same.digest
+    assert equal.digest != value.digest
+    assert TrialSpecification.from_dict(equal.to_dict()) == equal
+
+
+def test_trial_specification_refuses_an_incomplete_declaration() -> None:
+    """
+    Test a specification the caller cannot state in full is refused rather than defaulted.
+    """
+    with pytest.raises(ValueError, match="universe_rule must not be empty"):
+        TrialSpecification(data_window=(1_000, 2_000), universe_rule="", weighting="equal")
+
+    with pytest.raises(TypeError, match="weighting must be a str"):
+        TrialSpecification(  # type: ignore[arg-type]
+            data_window=(1_000, 2_000),
+            universe_rule="top_500_by_capitalisation",
+            weighting=7,
+        )
+
+    with pytest.raises(ValueError, match="non-empty and increasing"):
+        TrialSpecification(
+            data_window=(2_000, 1_000),
+            universe_rule="top_500_by_capitalisation",
+            weighting="equal",
+        )
+
+    with pytest.raises(ValueError, match="exclusion name must not be empty"):
+        TrialSpecification(
+            data_window=(1_000, 2_000),
+            universe_rule="top_500_by_capitalisation",
+            weighting="equal",
+            exclusions=("",),
+        )

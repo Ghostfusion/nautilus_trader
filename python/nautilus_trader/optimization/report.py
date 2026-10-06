@@ -15,10 +15,12 @@
 """
 Result aggregation for a sweep: scores, feasible ranking, and failures.
 
-An `ExperimentResult` pairs a canonical run with the objective score and the constraint outcome.
-A `SearchReport` collects the survivors and the failures. Ranking is deterministic: by descending
-score, with ties broken by canonical digest and then by experiment digest, because the objective
-itself does not order equal scores.
+An `ExperimentResult` pairs a canonical run with the objective score and the constraint outcome,
+and carries the specification the trial ran under. A `SearchReport` collects the survivors and the
+failures. Ranking is deterministic: by descending score, with ties broken by canonical digest and
+then by experiment digest, because the objective itself does not order equal scores. The report
+states its specification spread, so a bound can be read against what the search actually varied
+rather than assumed.
 """
 
 from __future__ import annotations
@@ -26,6 +28,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from nautilus_trader.optimization.search import TrialSpecification
 
 
 if TYPE_CHECKING:
@@ -50,12 +54,26 @@ class ExperimentResult:
         The objective score, which the search maximises.
     constraints_satisfied : bool
         Whether every constraint holds for the run's metric values.
+    specification : TrialSpecification | None, default None
+        The specification the trial was run under, captured when the trial ran, or None when the
+        caller recorded none. A trial whose specification is unknown has no specification to read
+        a bound against, so it is recorded as absent rather than defaulted.
 
     """
 
     run: CanonicalRun
     score: float
     constraints_satisfied: bool
+    specification: TrialSpecification | None = None
+
+    def __post_init__(self) -> None:
+        """
+        Validate the recorded specification.
+        """
+        if self.specification is not None and not isinstance(
+            self.specification, TrialSpecification
+        ):
+            raise TypeError("specification must be a TrialSpecification or None")
 
     @property
     def experiment(self) -> Experiment:
@@ -165,6 +183,30 @@ class SearchReport:
         if self.space_size is None or self.space_size <= 0:
             return None
         return self.evaluated / self.space_size
+
+    def specification_spread(self) -> int | None:
+        """
+        Return the number of distinct specifications the survivors were found under.
+
+        Two specifications are distinct exactly when their canonical mappings differ, which is the
+        same identity their digest names, so a search over three weightings and two windows records
+        six. Only the specs the survivors actually recorded count: a trial that recorded none is
+        not a specification and does not contribute one.
+
+        Returns
+        -------
+        int | None
+            The number of distinct specifications recorded by the survivors, or None when no
+            survivor recorded one. None rather than zero, because zero would assert that every
+            trial shared one specification, which is not established by an absent record.
+
+        """
+        recorded = {
+            result.specification.digest
+            for result in self.results
+            if result.specification is not None
+        }
+        return len(recorded) if recorded else None
 
     def best(self) -> ExperimentResult | None:
         """
