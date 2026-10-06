@@ -195,7 +195,7 @@ fn label_definition_refuses_degenerate_fields() {
         })
     );
     assert_eq!(
-        LabelDefinition::new("poll", identified.clone(), Some(UnixNanos::from(0)), 1),
+        LabelDefinition::new("poll", identified, Some(UnixNanos::from(0)), 1),
         Err(LabelError::ZeroPollInterval {
             procedure: "poll".to_string()
         })
