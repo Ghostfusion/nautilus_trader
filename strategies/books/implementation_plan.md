@@ -842,24 +842,53 @@ the risk engine (`check_price`) and the matching engine, but alignment is not: a
 precision-legal and not a tick multiple passes at submission.
 `Instrument::try_normalize_price` and the matching engine's `price_matches_tick` do perform that
 check and are called only for instrument-update compatibility and fill normalization, where an
-incompatible fill is skipped. Halts are enforced per instrument at submission and matching, and
-the global `TradingState` denies or restricts at the risk engine, but a halt does not cancel
-resting orders and `RiskEngine::set_trading_state` has no Python setter. Auctions, price bands and
-circuit breakers are absent.
+incompatible fill is skipped. A venue that declares tick alignment refuses a precision-legal,
+non-aligned submission as of revision 34 (W9.1), naming the price and the tick in the denial, and
+the alignment test is now one shared method rather than a copy in each engine.
+Halts are enforced per instrument at submission and matching, and the global `TradingState` denies
+or restricts at the risk engine, but a halt does not cancel resting orders and
+`RiskEngine::set_trading_state` has no Python setter. Auctions, price bands and circuit breakers are
+absent.
 
 **Work.**
 
-- W9.1 Enforce tick alignment at submission as a venue-configurable rule, reusing the existing
-  alignment logic, instead of only at fill normalization.
+- W9.1 (done at revision 34) Tick alignment is enforced at submission as a venue rule, and the test
+  behind it is now shared instead of copied. `Instrument::price_is_aligned` states the tick test
+  once -- a price is aligned when its raw value is a whole multiple of the instrument's increment --
+  and the matching engine's private `price_matches_tick` was deleted in favour of it, so the fill
+  path and the submission path cannot drift apart. `RiskEngineConfig.tick_alignment_venues` lists
+  the venues whose submissions are checked, in the same venue-scoped shape as
+  `full_position_exit_venues`, and the check sits inside the risk engine's `check_price` beside the
+  precision and positivity checks, so a price that is precision-legal and not a tick multiple is
+  denied before it reaches an execution client, with a new typed denial:
+  `PRICE_NOT_ALIGNED_TO_TICK: field=PRICE, price=1.23, price_increment=0.05`, which lands in the
+  canonical code set and therefore in the generated table in `docs/concepts/execution/index.md`
+  (regenerated through its own ignored generator test, not by hand) and in the bridge's transcribed
+  `DENIAL_CODES`. The default is empty, so no existing behaviour changes, and the acceptance is
+  pinned on the case that motivates it: `ETHUSD.BYBIT` carries two price decimals and a 0.05 tick, so
+  1.23 is precision-legal and not aligned -- the risk test submits exactly that price on a venue that
+  declares the rule and asserts the denial's message, while the model test asserts that the same
+  instrument reports 1.25 and 1.20 as aligned, 1.23 as not, and `try_normalize_price(1.23)` as an
+  error, which pins the new predicate to the logic that already existed.
+  One deviation from the item's wording is deliberate and recorded. The rule denies; it does not
+  round. An order's price is fixed when the order is built -- no order type exposes a price mutator,
+  the builder is the only path that sets one, and no event can change it -- so a venue that rounded
+  would either book a price its submitter never sees or fill outside the submitted limit, both
+  dishonest in a simulator. A caller trading on such a venue rounds at construction, where the price
+  is still its own decision, and the acceptance now says what the code does. Named gaps: the rule is
+  a local submission check rather than a venue-side one, so a live adapter's own alignment behaviour
+  is unchanged; and `tick_alignment_venues` covers the order's own price and trigger price, not the
+  price of a book delta, which keeps its existing precision check.
 - W9.2 Add a cancel-on-halt option, and expose `set_trading_state` to Python.
 - W9.3 Add price-band and circuit-breaker primitives, as a submission rule plus a halt window,
   since the briefs show bands and halts are not interchangeable.
 - W9.4 Add a volume-tiered rebate schedule, extending `MakerTakerFeeSchedule` from
   per-instrument rates to per-tier rates.
 
-**Acceptance.** A precision-legal, non-aligned price is denied or rounded according to the venue
-rule, with a named denial. With cancel-on-halt enabled, a halt empties the book. A tiered rebate
-changes net cost monotonically in the tier input.
+**Acceptance.** A precision-legal, non-aligned price is denied by a venue that declares tick
+alignment, with the denial naming the price and the tick; a venue that rounded instead is refused
+rather than simulated, because an order's price is fixed at construction. With cancel-on-halt
+enabled, a halt empties the book. A tiered rebate changes net cost monotonically in the tier input.
 
 ### T10 Individually prudent risk limits can worsen collective crashes (12)
 
@@ -969,3 +998,4 @@ that is admissible per strategy but not in aggregate.
 | 31       | 2026-10-05 | W5.2 done: a Python latency model is a protocol rather than a built-in extraction. `crates/execution/src/python/latency.rs` exposes `LatencyModel` as a subclassable base class whose four leg methods return nanoseconds and default to zero, so a user overrides only the legs they care about, and `pyobject_to_latency_model_handle` accepts any object carrying all four methods after trying the built-in bindings, wrapping it in an adapter that reads the Rust trait. The trait itself was not changed: it stays infallible, so the adapter's error convention is pinned and documented -- a raised exception, a missing method or a non-integer return panics naming the call, `Python LatencyModel.get_insert_latency failed: ...` -- because substituting a value for a latency that cannot be read would silently mis-time every arrival in the run, which is the same refusal the market-impact adapter documents. Only `BacktestEngine.add_venue` moved to the handle converter; the declarative `BacktestVenueConfig` and the sandbox config stay built-ins-only, the asymmetry the fill model already has, and `latency_model_any_to_pyobject` is untouched so the getter still round-trips built-ins. Registration plus stub regeneration put `LatencyModel` in `nautilus_trader.execution` as `FillModel` is there, and the debug extension was rebuilt before any Python test ran. Tests: four in the binding module (an inline Python type's four legs reach the trait, a model missing a leg is refused by type name, a built-in still converts, and a raising model panics carrying the call, the exception type and its message) and one behavioural Python test that injects a subclass through `add_venue`: with a zero-latency model the limit fills, with an hour of insert latency it arrives after the three-minute bar window and fills zero times. That test also surfaced a real property of the harness: the backtest shutdown path settles inflight commands against the final market, so the first draft's marketable limit filled anyway, and the committed order rests below the walked-up market so arrival time decides. One stated limit: `get_base_latency` is exposed on the protocol but the exchange reads only the three order legs, exactly as it does for `StaticLatencyModel`, which folds base into the legs at construction. Verified: `cargo fmt` clean for both crates; `cargo nextest run -p nautilus-execution` 2406 passed and the four new binding tests pass under the `python` feature; `cargo nextest run -p nautilus-backtest -E 'not test(canonical_backtest_workload_matrix)'` 458 passed, 1 skipped with that digest failure pre-existing; clippy clean for both crates including the `python` feature; `cargo check -p nautilus-pyo3 --features extension-module` passed; the Python test passes against the rebuilt extension and `from nautilus_trader.execution import LatencyModel` resolves and subclasses.                                                                                                                                                                                                                  |
 | 32       | 2026-10-05 | W5.3 done: `decision_to_execution_delay_s` is the seventeenth execution metric, the elapsed time from the declared decision instant to the **first** fill, so a live run reads how long the market took to answer the agent and not only how far the price moved while it waited. It is declared as seconds, lower-is-better and measured from the decision reference timestamp, and carried on `ExecutionMetrics` beside the decision-price slippage it prices. Two absences stay distinct rather than collapsed: no declared decision instant reports `NotAvailable(NoTimestamp)` and a declared decision with nothing filled reports `NotAvailable(NoObservations)`, while a fill recorded before the decision instant yields a real `0.0` instead of a negative delay. The constant is registered explicitly in `crates/trading/src/python/mod.rs` because that binding is an `m.add` list rather than something derived from the Rust constants, which the first smoke run caught when the import failed, and the metric is therefore proven through the interpreter as well as in Rust: 9 analytics tests and 5 Python tests pass, with a decision at 1.85s and fills at 2.4s and 2.6s reading 0.55 s where measuring to the last fill would read 0.75. The lecture that owns the metric table gained the row, and its claim that the analytics surface is unreachable from Python -- stale since revision 7 (W1.1) -- is corrected together with the recorded test run its two new tests changed from seven to nine. |
 | 33       | 2026-10-05 | W5.4 done: `crates/data/src/cross_venue.rs` adds a cross-venue lead-lag read that cannot be taken without a bound. The tool's only evidence parameter is a `CrossVenueOffset`, whose only constructor consumes a `ClockOffsetEstimate` from the shipped `ClockOffsetEstimator` plus the caller's pairing ambiguity, so there is no unestimated path and no unknown-bound state; the peak lag always travels with its correlation, but only a peak outside the ambiguity is readable as a lead-lag, the corpus's 16 ms shift under a 99 ms ambiguity is a pinned test that reports it unresolved with the bound that swallowed it, `resolved_lag_ns` is the only accessor that hands out a point estimate and it refuses an unresolved read, and the 6 ms drift statement travels beside the ambiguity with its own flag. The estimator is Hayashi-Yoshida style over interval returns with the second venue moved onto the local clock first, the pairing window is a ladder whose disagreement is reported as instability rather than averaged, and a window that pairs nothing reports insufficient rather than zero. Six in-module tests pass, the whole data suite is 702 passed, fmt and clippy are clean, and `docs/concepts/networking.md` -- brief 05's named landing for offset ambiguity -- gained the section. No Python binding, by choice, and the stated gap is that nothing applies an offset to an event stream yet, so this is a measurement with its bound rather than reconciliation. |
+| 34       | 2026-10-05 | W9.1 done: tick alignment is enforced at submission as a venue rule, and the tick test is now stated once. `Instrument::price_is_aligned` replaces the matching engine's private `price_matches_tick`, so the fill path and the submission path share one predicate and cannot drift apart; `RiskEngineConfig.tick_alignment_venues` lists the venues whose submissions are checked, in the same venue-scoped shape as `full_position_exit_venues`; and the risk engine's `check_price` denies a precision-legal, non-aligned price before an execution client sees it, with a new typed denial `PRICE_NOT_ALIGNED_TO_TICK: field=PRICE, price=1.23, price_increment=0.05` that lands in the canonical code set, in the generated table in `docs/concepts/execution/index.md` (regenerated through its own ignored generator test rather than by hand) and in the bridge's transcribed `DENIAL_CODES`. The acceptance is pinned on ETHUSD.BYBIT, which carries two price decimals and a 0.05 tick so that 1.23 is precision-legal and not aligned: the model test asserts 1.25 and 1.20 align and 1.23 does not, the risk test submits exactly that price on a venue that declares the rule and asserts the denial, and the default is empty so no existing behaviour changes. One deviation from the item's wording is recorded: the rule denies and does not round, because an order's price is fixed at construction -- no order type exposes a price mutator, the builder is the only path that sets one, and no event can change it -- so a rounding venue would either book a price its submitter never sees or fill outside the submitted limit. |

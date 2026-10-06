@@ -84,6 +84,19 @@ pub enum OrderDeniedReason {
         max_precision: u8,
     },
 
+    /// The price is not a whole multiple of the instrument's price increment.
+    #[error(
+        "PRICE_NOT_ALIGNED_TO_TICK: field={field}, price={price}, price_increment={price_increment}"
+    )]
+    PriceNotAlignedToTick {
+        /// The price field being validated.
+        field: OrderPriceField,
+        /// The submitted price.
+        price: Price,
+        /// The instrument's price increment (tick).
+        price_increment: Price,
+    },
+
     /// The price is not positive for an instrument that disallows negative prices.
     #[error("PRICE_NOT_POSITIVE: field={field}, price={price}")]
     PriceNotPositive {
@@ -499,6 +512,9 @@ impl OrderDeniedCode {
     pub fn description(&self) -> &'static str {
         match self {
             Self::PricePrecisionExceedsMaximum => "The price precision exceeds the instrument maximum.",
+            Self::PriceNotAlignedToTick => {
+                "The price is not a whole multiple of the instrument's price increment."
+            }
             Self::PriceNotPositive => "The price is not positive.",
             Self::QuantityPrecisionExceedsMaximum => "The quantity precision exceeds the instrument maximum.",
             Self::QuantityConversionFailed => "The order quantity could not be converted for risk checks.",
@@ -605,6 +621,15 @@ mod tests {
             }
             .to_string(),
             "PRICE_PRECISION_EXCEEDS_MAXIMUM: field=PRICE, price=1.234, precision=3, max_precision=2"
+        );
+        assert_eq!(
+            OrderDeniedReason::PriceNotAlignedToTick {
+                field: OrderPriceField::Price,
+                price: Price::from("1.234"),
+                price_increment: Price::from("0.005"),
+            }
+            .to_string(),
+            "PRICE_NOT_ALIGNED_TO_TICK: field=PRICE, price=1.234, price_increment=0.005"
         );
         assert_eq!(
             OrderDeniedReason::PriceNotPositive {
@@ -874,6 +899,11 @@ mod tests {
                 price: Price::from("1.00"),
                 price_precision: 2,
                 max_precision: 1,
+            },
+            OrderDeniedReason::PriceNotAlignedToTick {
+                field: OrderPriceField::Price,
+                price: Price::from("1.23"),
+                price_increment: Price::from("0.05"),
             },
             OrderDeniedReason::PriceNotPositive {
                 field: OrderPriceField::TriggerPrice,

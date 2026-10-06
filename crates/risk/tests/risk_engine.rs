@@ -219,6 +219,7 @@ fn test_deny_order_exceeding_max_notional(
         max_notional_per_order: AHashMap::new(),
         count_caps: Vec::new(),
         full_position_exit_venues: AHashSet::new(),
+        tick_alignment_venues: AHashSet::new(),
     };
 
     let mut risk_engine = get_risk_engine(
@@ -372,6 +373,7 @@ fn config_fixture(
         max_notional_per_order,
         count_caps: Vec::new(),
         full_position_exit_venues: AHashSet::new(),
+        tick_alignment_venues: AHashSet::new(),
     }
 }
 
@@ -503,6 +505,7 @@ fn get_risk_engine(
         max_notional_per_order: AHashMap::new(),
         count_caps: Vec::new(),
         full_position_exit_venues: AHashSet::new(),
+        tick_alignment_venues: AHashSet::new(),
     });
     let clock = clock.unwrap_or(Rc::new(RefCell::new(VirtualClock::new())));
     let portfolio = Portfolio::new(
@@ -525,6 +528,7 @@ fn get_risk_engine_for_full_position_exit(
         max_notional_per_order: AHashMap::new(),
         count_caps: Vec::new(),
         full_position_exit_venues: [venue].into_iter().collect(),
+        tick_alignment_venues: AHashSet::new(),
     };
     get_risk_engine(cache, Some(config), None, false)
 }
@@ -11289,6 +11293,7 @@ fn test_set_trading_state_publishes_trading_state_changed_event() {
         max_notional_per_order: AHashMap::new(),
         count_caps: Vec::new(),
         full_position_exit_venues: [Venue::from("BINANCE")].into_iter().collect(),
+        tick_alignment_venues: AHashSet::new(),
     };
 
     let mut risk_engine = get_risk_engine(None, Some(config), None, false);
@@ -11357,6 +11362,7 @@ fn test_reset_restores_trading_state_and_config_notionals() {
         max_notional_per_order: config_notionals,
         count_caps: Vec::new(),
         full_position_exit_venues: AHashSet::new(),
+        tick_alignment_venues: AHashSet::new(),
     };
 
     let mut risk_engine = get_risk_engine(None, Some(config), None, false);
@@ -14625,6 +14631,7 @@ fn cap_engine(
         max_notional_per_order: AHashMap::new(),
         count_caps: caps,
         full_position_exit_venues: AHashSet::new(),
+        tick_alignment_venues: AHashSet::new(),
     };
 
     let engine = get_risk_engine(

@@ -74,6 +74,15 @@ pub struct RiskEngineConfig {
     /// Validated exits skip bounds that apply only to their placeholder quantity and notional.
     #[builder(default)]
     pub full_position_exit_venues: AHashSet<Venue>,
+    /// Venues that refuse a submission whose price is not a whole multiple of the instrument's
+    /// price increment.
+    ///
+    /// A venue that aligns a price instead of refusing it cannot be expressed here. An order's
+    /// price is fixed when it is built and no event can change it, so a venue that rounded would
+    /// either book a price its submitter never sees or fill outside the submitted limit. A caller
+    /// trading on such a venue rounds the price at construction, where the order is built.
+    #[builder(default)]
+    pub tick_alignment_venues: AHashSet<Venue>,
     /// Whether to emit additional debug logs.
     #[builder(default)]
     pub debug: bool,

@@ -1730,18 +1730,13 @@ impl OrderMatchingEngine {
 
     fn price_matches_current_instrument(&self, price: Price) -> bool {
         Self::price_matches_precision(price, self.instrument.price_precision())
-            && Self::price_matches_tick(price, self.instrument.price_increment())
+            && self.instrument.price_is_aligned(price)
     }
 
     fn price_matches_precision(price: Price, precision: u8) -> bool {
         let precision_diff = FIXED_PRECISION.saturating_sub(precision);
         let scale = PriceRaw::pow(10, u32::from(precision_diff));
         price.raw() % scale == 0
-    }
-
-    fn price_matches_tick(price: Price, increment: Price) -> bool {
-        let increment_raw = increment.raw().abs();
-        increment_raw == 0 || price.raw() % increment_raw == 0
     }
 
     fn quantity_matches_precision(quantity: Quantity, precision: u8) -> bool {

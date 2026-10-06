@@ -337,6 +337,16 @@ pub trait Instrument: 'static + Send {
     fn price_precision(&self) -> u8;
     fn size_precision(&self) -> u8;
     fn price_increment(&self) -> Price;
+
+    /// Returns whether `price` is a whole multiple of the instrument's price increment.
+    ///
+    /// This is the tick test the matching engine applies to a fill and the risk engine applies to a
+    /// submission, so a price that is precision-legal and not a multiple of the tick is caught in
+    /// one place. An instrument with a zero increment accepts any value.
+    fn price_is_aligned(&self, price: Price) -> bool {
+        let increment = self.price_increment().raw().abs();
+        increment == 0 || price.raw() % increment == 0
+    }
     fn size_increment(&self) -> Quantity;
 
     fn multiplier(&self) -> Quantity;
@@ -1091,6 +1101,22 @@ mod tests {
             CorrectnessError::PredicateViolation { ref message }
                 if message.contains("not aligned to price increment")
         ));
+    }
+
+    #[rstest]
+    fn price_is_aligned_tests_the_increment_and_not_the_precision(ethusd_bybit: CryptoPerpetual) {
+        // ETHUSD.BYBIT carries two price decimals and a 0.05 tick, so 1.23 is precision-legal
+        // while not being a whole multiple of the tick.
+        assert_eq!(ethusd_bybit.price_precision(), 2);
+        assert_eq!(ethusd_bybit.price_increment(), Price::from("0.05"));
+        assert!(ethusd_bybit.price_is_aligned(Price::from("1.25")));
+        assert!(ethusd_bybit.price_is_aligned(Price::from("1.20")));
+        assert!(!ethusd_bybit.price_is_aligned(Price::from("1.23")));
+        assert!(
+            ethusd_bybit
+                .try_normalize_price(Price::from("1.23"))
+                .is_err()
+        );
     }
 
     #[rstest]

@@ -283,6 +283,20 @@ RiskEngineConfig(
 count_caps = ["SUBMIT/INSTRUMENT/2000/60000000000"]
 ```
 
+### Tick alignment
+
+An instrument's tick is its `price_increment`, and a price can be precision-legal without being a
+multiple of it. `RiskEngineConfig.tick_alignment_venues` lists the venues whose submissions are
+checked: a non-aligned price is denied with `PRICE_NOT_ALIGNED_TO_TICK`, naming the field, the price
+and the tick, before the order reaches an execution client. It defaults to empty, so no existing
+behaviour changes.
+
+Only a denial is configurable. A venue that aligns a price instead of refusing it cannot be
+simulated here: an order's price is fixed when the order is built and no event can change it, so a
+venue that rounded would either book a price its submitter never sees or fill outside the submitted
+limit. A caller trading on such a venue rounds the price at construction, where the price is still
+its own decision.
+
 ### Whole-position conditional exits
 
 Some execution clients support conditional exits whose venue determines the closing quantity from
@@ -482,6 +496,7 @@ cross or immediately match. Other venue rejections leave it `false`.
 | Code                                             | Description                                                                           |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------- |
 | `PRICE_PRECISION_EXCEEDS_MAXIMUM`                | The price precision exceeds the instrument maximum.                                   |
+| `PRICE_NOT_ALIGNED_TO_TICK`                      | The price is not a whole multiple of the instrument's price increment.                |
 | `PRICE_NOT_POSITIVE`                             | The price is not positive.                                                            |
 | `QUANTITY_PRECISION_EXCEEDS_MAXIMUM`             | The quantity precision exceeds the instrument maximum.                                |
 | `QUANTITY_CONVERSION_FAILED`                     | The order quantity could not be converted for risk checks.                            |

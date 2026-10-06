@@ -16,8 +16,11 @@
 use nautilus_common::{clock::VirtualClock, msgbus::stubs::get_typed_into_message_saving_handler};
 use nautilus_core::UnixNanos;
 use nautilus_model::{
-    accounts::CashAccount, identifiers::ClientOrderId, instruments::stubs::audusd_sim,
-    orders::OrderTestBuilder, types::money::MONEY_RAW_MAX,
+    accounts::CashAccount,
+    identifiers::ClientOrderId,
+    instruments::stubs::{audusd_sim, ethusd_bybit},
+    orders::OrderTestBuilder,
+    types::money::MONEY_RAW_MAX,
 };
 use rstest::{fixture, rstest};
 use rust_decimal_macros::dec;
@@ -198,6 +201,59 @@ fn test_cash_sell_accumulation_rejects_overflow(engine: RiskEngine) {
     );
 }
 
+#[rstest]
+fn test_submit_denies_a_price_that_is_not_a_tick_multiple() {
+    // ETHUSD.BYBIT carries two price decimals and a 0.05 tick, so 1.23 is precision-legal and
+    // not a multiple of the tick.
+    let instrument = InstrumentAny::CryptoPerpetual(ethusd_bybit());
+
+    let mut config = RiskEngineConfig::default();
+    config.tick_alignment_venues.insert(instrument.venue());
+
+    let cache = Rc::new(RefCell::new(Cache::default()));
+    let clock = Rc::new(RefCell::new(VirtualClock::new()));
+    let portfolio = Portfolio::new(
+        Rc::clone(&clock) as Rc<RefCell<dyn Clock>>,
+        Rc::clone(&cache),
+        None,
+    );
+    let engine = RiskEngine::new(config, portfolio, clock, cache);
+
+    let order = OrderTestBuilder::new(OrderType::Limit)
+        .instrument_id(instrument.id())
+        .client_order_id(ClientOrderId::from("O-ALIGN"))
+        .side(OrderSide::Buy)
+        .quantity(Quantity::from("100"))
+        .price(Price::from("1.23"))
+        .build();
+
+    let (handler, saved) = get_typed_into_message_saving_handler::<OrderEventAny>(None);
+    msgbus::register_order_event_endpoint(MessagingSwitchboard::exec_engine_process(), handler);
+
+    // The price check is the submission sub-check, exercised here the way the other risk tests
+    // exercise their own sub-checks.
+    let accepted = engine.check_order_price(&instrument, &order);
+
+    let events = saved.get_messages();
+    assert!(!accepted);
+    assert_eq!(events.len(), 1);
+
+    let OrderEventAny::Denied(event) = &events[0] else {
+        panic!("Expected OrderDenied")
+    };
+
+    assert_eq!(
+        event.reason,
+        Ustr::from(
+            &OrderDeniedReason::PriceNotAlignedToTick {
+                field: OrderPriceField::Price,
+                price: Price::from("1.23"),
+                price_increment: Price::from("0.05"),
+            }
+            .to_string()
+        )
+    );
+}
 #[rstest]
 fn test_submit_orders_reject_invalid_notional_limit(mut engine: RiskEngine) {
     let instrument = InstrumentAny::CurrencyPair(audusd_sim());

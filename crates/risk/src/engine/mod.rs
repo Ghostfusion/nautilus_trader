@@ -1234,14 +1234,14 @@ impl RiskEngine {
         };
 
         // Check Price
-        let mut reason = Self::check_price(&instrument, command.price, OrderPriceField::Price);
+        let mut reason = self.check_price(&instrument, command.price, OrderPriceField::Price);
         if let Some(reason) = reason {
             self.reject_modify_order(&order, &reason.to_string());
             return false;
         }
 
         // Check Trigger
-        reason = Self::check_price(
+        reason = self.check_price(
             &instrument,
             command.trigger_price,
             OrderPriceField::TriggerPrice,
@@ -1378,7 +1378,7 @@ impl RiskEngine {
 
     fn check_order_price(&self, instrument: &InstrumentAny, order: &OrderAny) -> bool {
         if order.price().is_some() {
-            let reason = Self::check_price(instrument, order.price(), OrderPriceField::Price);
+            let reason = self.check_price(instrument, order.price(), OrderPriceField::Price);
             if let Some(reason) = reason {
                 self.deny_order(order, &reason.to_string());
                 return false; // Denied
@@ -1386,7 +1386,7 @@ impl RiskEngine {
         }
 
         if order.trigger_price().is_some() {
-            let reason = Self::check_price(
+            let reason = self.check_price(
                 instrument,
                 order.trigger_price(),
                 OrderPriceField::TriggerPrice,
@@ -1887,6 +1887,7 @@ impl RiskEngine {
     }
 
     fn check_price(
+        &self,
         instrument: &InstrumentAny,
         price: Option<Price>,
         field: OrderPriceField,
@@ -1899,6 +1900,21 @@ impl RiskEngine {
                 price: price_val,
                 price_precision: price_val.precision,
                 max_precision: instrument.price_precision(),
+            });
+        }
+
+        // A precision-legal price that is not a tick multiple is refused by a venue that declares
+        // tick alignment, with the tick named in the denial.
+        if self
+            .config
+            .tick_alignment_venues
+            .contains(&instrument.venue())
+            && !instrument.price_is_aligned(price_val)
+        {
+            return Some(OrderDeniedReason::PriceNotAlignedToTick {
+                field,
+                price: price_val,
+                price_increment: instrument.price_increment(),
             });
         }
 
