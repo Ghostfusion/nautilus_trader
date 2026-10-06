@@ -445,6 +445,12 @@ impl ExecutionMetrics {
         self.decision_price_slippage_bps
     }
 
+    /// Delay from the declared decision timestamp to the first fill, in seconds.
+    #[getter]
+    fn decision_to_execution_delay_s(&self) -> Metric {
+        self.decision_to_execution_delay_s
+    }
+
     /// VWAP slippage against the benchmark interval, in basis points.
     #[getter]
     fn vwap_slippage_bps(&self) -> Metric {

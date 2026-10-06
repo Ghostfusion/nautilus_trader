@@ -27,6 +27,7 @@ from nautilus_trader.model import Price
 from nautilus_trader.model import Quantity
 from nautilus_trader.model import QuoteTick
 from nautilus_trader.trading import METRIC_ARRIVAL_SLIPPAGE_BPS
+from nautilus_trader.trading import METRIC_DECISION_TO_EXECUTION_DELAY_S
 from nautilus_trader.trading import METRIC_IMPLEMENTATION_SHORTFALL_BPS
 from nautilus_trader.trading import METRIC_VWAP_SLIPPAGE_BPS
 from nautilus_trader.trading import BenchmarkInterval
@@ -127,6 +128,38 @@ def test_pinned_slippage_metrics_match_hand_computed_values() -> None:
     assert metrics.arrival_slippage_bps.declaration.metric_id == METRIC_ARRIVAL_SLIPPAGE_BPS
     assert metrics.vwap_slippage_bps.declaration.metric_id == METRIC_VWAP_SLIPPAGE_BPS
     assert metrics.adverse_selection.declaration.horizon_ns == HORIZON_NS
+
+
+def test_decision_to_execution_delay_measures_to_the_first_fill() -> None:
+    """
+    Test the decision-to-execution delay is a first-class metric measured to the first fill.
+    """
+    metrics = _pinned_observer().metrics()
+
+    # First fill at 2.4s against the decision at 1.85s: 0.55 seconds, not the last fill's 0.75.
+    delay = metrics.decision_to_execution_delay_s
+    assert delay.value == pytest.approx(0.55, abs=1e-9)
+    assert delay.declaration.metric_id == METRIC_DECISION_TO_EXECUTION_DELAY_S
+    assert delay.declaration.units == MetricUnits.SECONDS
+
+    # A fill with no declared decision has no instant to measure from.
+    terms = ExecutionTerms(
+        instrument_id=INSTRUMENT_ID,
+        order_side=OrderSide.BUY,
+        quantity=Quantity.from_int(10),
+        limit_price=None,
+        horizon_ns=None,
+    )
+    no_decision = ExecutionObserver(terms)
+    no_decision.observe_fill(
+        ClientOrderId("F1"),
+        2_000_000_000,
+        Quantity.from_int(10),
+        Price.from_str("100.00"),
+    )
+    undefined = no_decision.metrics().decision_to_execution_delay_s
+    assert undefined.value is None
+    assert undefined.reason == UnavailableReason.NO_TIMESTAMP
 
 
 def test_undefined_metric_reports_none_with_its_reason() -> None:

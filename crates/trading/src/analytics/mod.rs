@@ -42,10 +42,11 @@ pub mod reference;
 pub use metrics::{
     ExecutionMetrics, METRIC_ADVERSE_SELECTION, METRIC_ARRIVAL_SLIPPAGE_BPS, METRIC_CANCEL_RATIO,
     METRIC_CHILD_CHURN, METRIC_CHILD_COUNT, METRIC_COMPLETION_TIME_S,
-    METRIC_DECISION_PRICE_SLIPPAGE_BPS, METRIC_FILL_RATIO, METRIC_IMPLEMENTATION_SHORTFALL_BPS,
-    METRIC_MEAN_CHILD_LIFETIME_S, METRIC_MIDPOINT_SLIPPAGE_BPS, METRIC_PARTIAL_FILL_RATIO,
-    METRIC_PRICE_IMPROVEMENT, METRIC_SPREAD_CAPTURE, METRIC_TWAP_SLIPPAGE_BPS,
-    METRIC_VWAP_SLIPPAGE_BPS, Metric, MetricValue, UnavailableReason,
+    METRIC_DECISION_PRICE_SLIPPAGE_BPS, METRIC_DECISION_TO_EXECUTION_DELAY_S, METRIC_FILL_RATIO,
+    METRIC_IMPLEMENTATION_SHORTFALL_BPS, METRIC_MEAN_CHILD_LIFETIME_S,
+    METRIC_MIDPOINT_SLIPPAGE_BPS, METRIC_PARTIAL_FILL_RATIO, METRIC_PRICE_IMPROVEMENT,
+    METRIC_SPREAD_CAPTURE, METRIC_TWAP_SLIPPAGE_BPS, METRIC_VWAP_SLIPPAGE_BPS, Metric, MetricValue,
+    UnavailableReason,
 };
 pub use observation::{
     BenchmarkInterval, ChildObservation, ExecutionAnalyticsCollector, ExecutionObserver,
@@ -66,8 +67,9 @@ mod tests {
     };
 
     use super::{
-        BenchmarkInterval, ExecutionObserver, ExecutionTerms, MetricValue, QuoteObservation,
-        ReferenceTimestamp, TradeObservation, UnavailableReason,
+        BenchmarkInterval, DenominatorSource, ExecutionObserver, ExecutionTerms,
+        METRIC_DECISION_TO_EXECUTION_DELAY_S, MetricDirection, MetricUnits, MetricValue,
+        QuoteObservation, ReferenceTimestamp, TradeObservation, UnavailableReason,
     };
 
     const HORIZON: DurationNanos = DurationNanos::from_millis(60);
@@ -205,6 +207,10 @@ mod tests {
         //   ((101.00 - 100.00) / 100.00) * 10_000 = 100 bps.
         assert_close(metrics.decision_price_slippage_bps.value().unwrap(), 100.0);
 
+        // decision-to-execution delay measures to the *first* fill: 2.4s - 1.85s = 0.55 seconds,
+        // not the last fill (2.6s, which would be 0.75).
+        assert_close(metrics.decision_to_execution_delay_s.value().unwrap(), 0.55);
+
         // interval VWAP = (100.00 * 1 + 102.00 * 1) / 2 = 101.00:
         //   ((102.01 - 101.00) / 101.00) * 10_000 = 100 bps.
         assert_close(metrics.vwap_slippage_bps.value().unwrap(), 100.0);
@@ -244,6 +250,82 @@ mod tests {
         assert_eq!(
             metrics.partial_fill_ratio.value,
             MetricValue::NotAvailable(UnavailableReason::NoObservations)
+        );
+    }
+
+    #[test]
+    fn decision_to_execution_delay_declares_what_it_measures() {
+        let metric = pinned_observer().metrics().decision_to_execution_delay_s;
+
+        assert_eq!(
+            metric.declaration.metric_id,
+            METRIC_DECISION_TO_EXECUTION_DELAY_S
+        );
+        assert_eq!(metric.declaration.units, MetricUnits::Seconds);
+        assert_eq!(metric.declaration.direction, MetricDirection::LowerIsBetter);
+        assert_eq!(
+            metric.declaration.reference_timestamp,
+            Some(ReferenceTimestamp::Decision)
+        );
+        assert_eq!(
+            metric.declaration.denominator,
+            DenominatorSource::NotApplicable
+        );
+    }
+
+    #[test]
+    fn decision_to_execution_delay_reports_the_missing_side() {
+        let terms = ExecutionTerms {
+            instrument_id: instrument_id(),
+            order_side: OrderSide::Buy,
+            quantity: Quantity::from(10u64),
+            limit_price: None,
+            horizon: None,
+        };
+
+        // A fill with no declared decision has no instant to measure the delay from.
+        let mut executed_without_decision = ExecutionObserver::new(terms.clone());
+        executed_without_decision.observe_fill(
+            ClientOrderId::from("F1"),
+            UnixNanos::from(2_000_000_000u64),
+            Quantity::from(10u64),
+            Price::new(100.00, 2),
+        );
+        assert_eq!(
+            executed_without_decision
+                .metrics()
+                .decision_to_execution_delay_s
+                .value,
+            MetricValue::NotAvailable(UnavailableReason::NoTimestamp)
+        );
+
+        // A declared decision with nothing executed yet has no delay to report.
+        let mut decision_without_fill = ExecutionObserver::new(terms.clone());
+        decision_without_fill
+            .set_decision(UnixNanos::from(1_900_000_000u64), Price::new(100.00, 2));
+        assert_eq!(
+            decision_without_fill
+                .metrics()
+                .decision_to_execution_delay_s
+                .value,
+            MetricValue::NotAvailable(UnavailableReason::NoObservations)
+        );
+
+        // A fill recorded before the decision cannot make the delay negative; it is a real zero.
+        let mut fill_before_decision = ExecutionObserver::new(terms);
+        fill_before_decision.set_decision(UnixNanos::from(2_100_000_000u64), Price::new(100.00, 2));
+        fill_before_decision.observe_fill(
+            ClientOrderId::from("F1"),
+            UnixNanos::from(2_000_000_000u64),
+            Quantity::from(10u64),
+            Price::new(100.00, 2),
+        );
+        assert_eq!(
+            fill_before_decision
+                .metrics()
+                .decision_to_execution_delay_s
+                .value(),
+            Some(0.0)
         );
     }
 

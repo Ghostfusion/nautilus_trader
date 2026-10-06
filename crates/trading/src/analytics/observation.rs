@@ -393,8 +393,10 @@ impl ExecutionObserver {
             limit_price: self.terms.limit_price.map(|price| price.as_f64()),
             horizon: self.terms.horizon,
             decision_price: self.decision.map(|point| point.price.as_f64()),
+            decision_ts: self.decision.map(|point| point.timestamp),
             arrival_price: self.arrival.map(|point| point.price.as_f64()),
             parent_submitted: self.parent_submitted,
+            first_fill: self.first_fill(),
             last_terminal: self.last_terminal(),
             fill_avg_px: self.fill_avg_px(),
             filled_qty,
@@ -516,6 +518,11 @@ impl ExecutionObserver {
     /// Returns the midpoint of the last quote at or before `timestamp`.
     fn quote_mid_at(&self, timestamp: UnixNanos) -> Option<f64> {
         self.quote_at(timestamp).map(QuoteObservation::mid)
+    }
+
+    /// Returns the timestamp of the first observed fill.
+    fn first_fill(&self) -> Option<UnixNanos> {
+        self.fills.iter().map(|fill| fill.timestamp).min()
     }
 
     /// Returns the timestamp of the last observed fill or cancellation.

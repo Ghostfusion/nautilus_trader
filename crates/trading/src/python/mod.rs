@@ -90,6 +90,10 @@ pub fn trading(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         crate::analytics::METRIC_DECISION_PRICE_SLIPPAGE_BPS,
     )?;
     m.add(
+        stringify!(METRIC_DECISION_TO_EXECUTION_DELAY_S),
+        crate::analytics::METRIC_DECISION_TO_EXECUTION_DELAY_S,
+    )?;
+    m.add(
         stringify!(METRIC_VWAP_SLIPPAGE_BPS),
         crate::analytics::METRIC_VWAP_SLIPPAGE_BPS,
     )?;

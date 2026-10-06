@@ -41,6 +41,8 @@ pub const METRIC_IMPLEMENTATION_SHORTFALL_BPS: &str = "implementation_shortfall_
 pub const METRIC_ARRIVAL_SLIPPAGE_BPS: &str = "arrival_slippage_bps";
 /// Metric identifier for the decision price delay slippage.
 pub const METRIC_DECISION_PRICE_SLIPPAGE_BPS: &str = "decision_price_slippage_bps";
+/// Metric identifier for the delay from the decision to the first fill.
+pub const METRIC_DECISION_TO_EXECUTION_DELAY_S: &str = "decision_to_execution_delay_s";
 /// Metric identifier for the benchmark interval VWAP slippage.
 pub const METRIC_VWAP_SLIPPAGE_BPS: &str = "vwap_slippage_bps";
 /// Metric identifier for the benchmark interval TWAP slippage.
@@ -193,6 +195,8 @@ pub struct ExecutionMetrics {
     pub arrival_slippage_bps: Metric,
     /// Decision price slippage (the delay component), in basis points.
     pub decision_price_slippage_bps: Metric,
+    /// Delay from the declared decision timestamp to the first fill, in seconds.
+    pub decision_to_execution_delay_s: Metric,
     /// VWAP slippage against the benchmark interval, in basis points.
     pub vwap_slippage_bps: Metric,
     /// TWAP slippage against the benchmark interval, in basis points.
@@ -238,10 +242,14 @@ pub(crate) struct MetricInputs {
     pub horizon: Option<DurationNanos>,
     /// The declared decision price as `f64`.
     pub decision_price: Option<f64>,
+    /// The instant the decision was declared, when the caller declared one.
+    pub decision_ts: Option<UnixNanos>,
     /// The declared arrival price as `f64`.
     pub arrival_price: Option<f64>,
     /// The parent order's submission timestamp.
     pub parent_submitted: Option<UnixNanos>,
+    /// The timestamp of the first fill, when one was observed.
+    pub first_fill: Option<UnixNanos>,
     /// The last observed terminal timestamp (final fill or cancellation).
     pub last_terminal: Option<UnixNanos>,
     /// The quantity-weighted average fill price as `f64`.
@@ -349,6 +357,26 @@ impl ExecutionMetrics {
                     .and_then(|arrival| cost_bps(side, arrival, decision))
             }),
             unavailable_reason(input.decision_price.is_none() || input.arrival_price.is_none()),
+        );
+
+        let decision_to_execution_delay_s = metric(
+            MetricDeclaration::new(
+                METRIC_DECISION_TO_EXECUTION_DELAY_S,
+                MetricUnits::Seconds,
+                MetricDirection::LowerIsBetter,
+            )
+            .with_denominator(DenominatorSource::NotApplicable)
+            .with_reference_timestamp(ReferenceTimestamp::Decision),
+            input.decision_ts.and_then(|decision| {
+                input
+                    .first_fill
+                    .map(|fill| fill.saturating_duration_since(decision).as_secs_f64())
+            }),
+            if input.decision_ts.is_none() {
+                UnavailableReason::NoTimestamp
+            } else {
+                UnavailableReason::NoObservations
+            },
         );
 
         let vwap_slippage_bps = metric(
@@ -550,6 +578,7 @@ impl ExecutionMetrics {
             implementation_shortfall_bps,
             arrival_slippage_bps,
             decision_price_slippage_bps,
+            decision_to_execution_delay_s,
             vwap_slippage_bps,
             twap_slippage_bps,
             midpoint_slippage_bps,

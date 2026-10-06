@@ -19,6 +19,7 @@ __all__ = [
     "METRIC_CHILD_COUNT",
     "METRIC_COMPLETION_TIME_S",
     "METRIC_DECISION_PRICE_SLIPPAGE_BPS",
+    "METRIC_DECISION_TO_EXECUTION_DELAY_S",
     "METRIC_FILL_RATIO",
     "METRIC_IMPLEMENTATION_SHORTFALL_BPS",
     "METRIC_MEAN_CHILD_LIFETIME_S",
@@ -77,6 +78,7 @@ __all__ = [
 METRIC_IMPLEMENTATION_SHORTFALL_BPS: str
 METRIC_ARRIVAL_SLIPPAGE_BPS: str
 METRIC_DECISION_PRICE_SLIPPAGE_BPS: str
+METRIC_DECISION_TO_EXECUTION_DELAY_S: str
 METRIC_VWAP_SLIPPAGE_BPS: str
 METRIC_TWAP_SLIPPAGE_BPS: str
 METRIC_MIDPOINT_SLIPPAGE_BPS: str
@@ -296,6 +298,8 @@ class ExecutionMetrics:
     def arrival_slippage_bps(self) -> Metric: ...
     @property
     def decision_price_slippage_bps(self) -> Metric: ...
+    @property
+    def decision_to_execution_delay_s(self) -> Metric: ...
     @property
     def vwap_slippage_bps(self) -> Metric: ...
     @property
