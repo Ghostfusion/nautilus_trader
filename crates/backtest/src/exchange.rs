@@ -44,7 +44,7 @@ use nautilus_execution::{
     },
     models::{
         competition::CompetitorSetHandle,
-        fee::FeeModelHandle,
+        fee::{FeeModel, FeeModelHandle},
         fill::{FillModelHandle, FillModelSelection},
         latency::{LatencyModel, LatencyModelHandle},
         market_impact::MarketImpactModelHandle,
@@ -1833,6 +1833,11 @@ impl SimulatedExchange {
         for matching_engine in self.matching_engines.values_mut() {
             matching_engine.reset();
         }
+
+        // The fee model is shared by every matching engine for this venue, so the volume that
+        // resolves its tiers is cleared once here, and a restarted run starts at the bottom of
+        // the ladder rather than where the previous run ended.
+        self.fee_model.reset_volume();
 
         self.pending_funding_rates.clear();
         self.funding_settlements.clear();

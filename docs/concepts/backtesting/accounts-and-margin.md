@@ -83,6 +83,43 @@ venue = BacktestVenueConfig(
 )
 ```
 
+## Fee tiers
+
+A venue that publishes a rebate ladder by traded volume can be simulated with `MakerTakerFeeModel`'s
+`volume_tiers`, which extends the same schedule that carries per-instrument overrides to per-tier
+rates:
+
+```python
+from decimal import Decimal
+
+from nautilus_trader.execution import MakerTakerFeeModel
+from nautilus_trader.model import InstrumentId
+from nautilus_trader.model import Quantity
+
+fee_model = MakerTakerFeeModel(
+    maker_rate=Decimal("0.002"),
+    taker_rate=Decimal("0.003"),
+    volume_tiers={
+        InstrumentId.from_str("BTCUSDT.BINANCE"): [
+            (Quantity.from_str("100000"), Decimal("0.001"), Decimal("0.002")),
+            (Quantity.from_str("1000000"), Decimal("-0.0001"), Decimal("0.0008")),
+        ],
+    },
+)
+```
+
+Tiers are per instrument and strictly ascending by the volume at which they begin, and each entry is
+a `(min_volume, maker_rate, taker_rate)` triple. The model adds every charged fill to a
+per-instrument running volume and prices the fill in the highest tier whose boundary that volume has
+reached, so the boundary is inclusive for the fill that crosses it and the maker side may be negative
+where the venue pays a rebate. A volume below the first tier, or an instrument without tiers, falls
+back to the exact instrument override and then the default, so a ladder that starts above zero never
+leaves a trade unpriced. A later run resets the counter, so a restart begins at the bottom of the
+ladder rather than at the tier the previous run reached.
+
+The tier is measured in the instrument's quantity units rather than in notional, and the counter
+covers what this model has charged in the current run rather than a venue's rolling window.
+
 ## Margin models
 
 Margin accounts use `LeveragedMarginModel` by default. Pass `StandardMarginModel` when the

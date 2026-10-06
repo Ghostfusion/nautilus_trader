@@ -13,11 +13,18 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-use std::{fmt::Debug, rc::Rc};
+use std::{
+    fmt::Debug,
+    rc::Rc,
+    sync::{Mutex, MutexGuard, PoisonError},
+};
 
+use ahash::AHashMap;
 use nautilus_model::{
     enums::LiquiditySide,
-    fees::{MakerTakerFeeRates, MakerTakerFeeSchedule, calculate_maker_taker_commission},
+    fees::{
+        MakerTakerFeeRates, MakerTakerFeeSchedule, VolumeTier, calculate_maker_taker_commission,
+    },
     identifiers::{GENERIC_SPREAD_ID_SEPARATOR, InstrumentId},
     instruments::{Instrument, InstrumentAny},
     orders::{Order, OrderAny},
@@ -58,6 +65,12 @@ pub trait FeeModel {
     ) -> anyhow::Result<Money> {
         self.get_commission(order, fill_quantity, fill_px, instrument)
     }
+
+    /// Resets any cumulative volume the model holds for volume-tier resolution.
+    ///
+    /// Provided so a run that restarts does not begin in a tier it reached in a previous run. The
+    /// default is a no-op, which is correct for every model whose rates do not depend on volume.
+    fn reset_volume(&self) {}
 }
 
 /// Shared runtime handle for a fee model.
@@ -111,6 +124,10 @@ impl FeeModel for FeeModelHandle {
     ) -> anyhow::Result<Money> {
         self.0
             .get_commission_with_context(order, fill_quantity, fill_px, instrument, underlying_px)
+    }
+
+    fn reset_volume(&self) {
+        self.0.reset_volume();
     }
 }
 
@@ -171,6 +188,20 @@ impl FeeModel for FeeModelAny {
             Self::TieredNotionalOption(model) => model.get_commission_with_context(order, fill_quantity, fill_px, instrument, underlying_px),
             #[cfg(feature = "python")]
             Self::Python(model) => model.get_commission_with_context(order, fill_quantity, fill_px, instrument, underlying_px),
+        }
+    }
+
+    #[rustfmt::skip]
+    fn reset_volume(&self) {
+        match self {
+            Self::Fixed(model) => model.reset_volume(),
+            Self::MakerTaker(model) => model.reset_volume(),
+            Self::PerContract(model) => model.reset_volume(),
+            Self::ProbabilityPrice(model) => model.reset_volume(),
+            Self::CappedOption(model) => model.reset_volume(),
+            Self::TieredNotionalOption(model) => model.reset_volume(),
+            #[cfg(feature = "python")]
+            Self::Python(model) => model.reset_volume(),
         }
     }
 }
@@ -319,7 +350,7 @@ fn spread_leg_ratio_parts(ratio: &str, symbol: &str) -> Option<i64> {
     ratio.parse::<i64>().ok().filter(|ratio| *ratio > 0)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[cfg_attr(
     feature = "python",
     pyo3_stub_gen::derive::gen_stub_pyclass(module = "nautilus_trader.execution")
@@ -334,17 +365,33 @@ fn spread_leg_ratio_parts(ratio: &str, symbol: &str) -> Option<i64> {
 )]
 pub struct MakerTakerFeeModel {
     schedule: MakerTakerFeeSchedule,
+    /// Cumulative charged volume per instrument, used to resolve a volume tier.
+    ///
+    /// A mutex rather than a `RefCell` because this model is a Python class, and a clone carries
+    /// the volume it has reached so a copied model prices at the same tier.
+    charged_volume: Mutex<AHashMap<InstrumentId, Quantity>>,
+}
+
+impl Clone for MakerTakerFeeModel {
+    fn clone(&self) -> Self {
+        Self {
+            schedule: self.schedule.clone(),
+            charged_volume: Mutex::new(self.volumes().clone()),
+        }
+    }
 }
 
 impl MakerTakerFeeModel {
     /// Creates a new [`MakerTakerFeeModel`] with explicit default rates.
     ///
     /// Negative maker rates represent rebates where the venue supports them.
-    /// Use [`Self::set_override`] for exact per-instrument rates.
+    /// Use [`Self::set_override`] for exact per-instrument rates and
+    /// [`Self::set_volume_tiers`] for per-instrument volume ladders.
     #[must_use]
     pub fn new(maker_rate: Decimal, taker_rate: Decimal) -> Self {
         Self {
             schedule: MakerTakerFeeSchedule::new(maker_rate, taker_rate),
+            charged_volume: Mutex::new(AHashMap::new()),
         }
     }
 
@@ -353,12 +400,40 @@ impl MakerTakerFeeModel {
     pub fn zero() -> Self {
         Self {
             schedule: MakerTakerFeeSchedule::zero(),
+            charged_volume: Mutex::new(AHashMap::new()),
         }
     }
 
     /// Adds or replaces an exact instrument override.
     pub fn set_override(&mut self, instrument_id: InstrumentId, rates: MakerTakerFeeRates) {
         self.schedule.set_override(instrument_id, rates);
+    }
+
+    /// Sets the volume tiers for an instrument, replacing any existing ladder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ladder is empty, begins at a zero volume, or is not strictly
+    /// ascending by `min_volume`.
+    pub fn set_volume_tiers(
+        &mut self,
+        instrument_id: InstrumentId,
+        tiers: Vec<VolumeTier>,
+    ) -> anyhow::Result<()> {
+        self.schedule.set_volume_tiers(instrument_id, tiers)
+    }
+
+    /// Returns the volume this model has charged for an instrument since its last reset.
+    #[must_use]
+    pub fn charged_volume(&self, instrument_id: InstrumentId) -> Option<Quantity> {
+        self.volumes().get(&instrument_id).copied()
+    }
+
+    /// Returns the charged-volume map, recovering it if a previous holder panicked.
+    fn volumes(&self) -> MutexGuard<'_, AHashMap<InstrumentId, Quantity>> {
+        self.charged_volume
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Returns the owned fee schedule.
@@ -383,8 +458,32 @@ impl FeeModel for MakerTakerFeeModel {
             anyhow::bail!("Liquidity side not set");
         }
 
-        let rate = self.schedule.rate_for(instrument.id(), liquidity_side)?;
+        // The fill counts toward the volume that selects the tier, so the tier boundary is
+        // inclusive for the fill that reaches it.
+        let instrument_id = instrument.id();
+        let volume = {
+            let mut charged_volume = self.volumes();
+            let existing = charged_volume
+                .get(&instrument_id)
+                .copied()
+                // The counter starts at the fill's precision, so later additions never mix raw
+                // scales.
+                .unwrap_or_else(|| Quantity::zero(fill_quantity.precision));
+            let volume = existing
+                .checked_add(fill_quantity)
+                .ok_or_else(|| anyhow::anyhow!("Charged volume overflow for {instrument_id}"))?;
+            charged_volume.insert(instrument_id, volume);
+            volume
+        };
+
+        let rate = self
+            .schedule
+            .rate_for_volume(instrument_id, volume, liquidity_side)?;
         calculate_maker_taker_commission(instrument, fill_quantity, fill_px, rate, Some(false))
+    }
+
+    fn reset_volume(&self) {
+        self.volumes().clear();
     }
 }
 
@@ -809,6 +908,75 @@ mod tests {
             .get_commission(&fill, Quantity::from(100_000), Price::from("1.0"), &aud_usd)
             .unwrap();
         assert_eq!(commission.as_decimal(), expected_commission);
+    }
+
+    #[rstest]
+    fn test_maker_taker_fee_model_volume_tier_reduces_cost_monotonically() {
+        use nautilus_model::fees::VolumeTier;
+
+        let instrument = InstrumentAny::CurrencyPair(audusd_sim());
+        let mut fee_model = MakerTakerFeeModel::new(dec!(0.002), dec!(0.003));
+        fee_model
+            .set_volume_tiers(
+                instrument.id(),
+                vec![
+                    VolumeTier::new(Quantity::from(10_000), dec!(0.002), dec!(0.002)),
+                    VolumeTier::new(Quantity::from(50_000), dec!(0.002), dec!(0.001)),
+                    VolumeTier::new(Quantity::from(100_000), dec!(0.002), dec!(0.0005)),
+                ],
+            )
+            .unwrap();
+
+        let order = OrderTestBuilder::new(OrderType::Market)
+            .instrument_id(instrument.id())
+            .side(OrderSide::Buy)
+            .quantity(Quantity::from(10_000))
+            .build();
+        let fill = TestOrderStubs::make_filled_order(&order, &instrument, LiquiditySide::Taker);
+
+        // Twelve fills of 10_000 walk the ladder: the taker rate steps down at 50_000 and
+        // 100_000, so the cost of one identical fill never rises as the volume crosses it.
+        let mut per_fill_costs = Vec::new();
+
+        for _ in 0..12 {
+            let commission = fee_model
+                .get_commission(
+                    &fill,
+                    Quantity::from(10_000),
+                    Price::from("1.0"),
+                    &instrument,
+                )
+                .unwrap();
+            per_fill_costs.push(commission.as_decimal());
+        }
+
+        assert_eq!(
+            fee_model.charged_volume(instrument.id()),
+            Some(Quantity::from(120_000)),
+        );
+        assert!(
+            per_fill_costs.windows(2).all(|pair| pair[1] <= pair[0]),
+            "{per_fill_costs:?}",
+        );
+        assert!(
+            per_fill_costs[0] > *per_fill_costs.last().unwrap(),
+            "{per_fill_costs:?}",
+        );
+
+        // A reset puts the model back at the bottom of the ladder rather than at the tier the
+        // previous run reached.
+        fee_model.reset_volume();
+        assert_eq!(fee_model.charged_volume(instrument.id()), None);
+
+        let commission = fee_model
+            .get_commission(
+                &fill,
+                Quantity::from(10_000),
+                Price::from("1.0"),
+                &instrument,
+            )
+            .unwrap();
+        assert_eq!(commission.as_decimal(), per_fill_costs[0]);
     }
 
     #[rstest]

@@ -76,15 +76,42 @@ impl MakerTakerFeeRates {
 
 /// Account-owned maker/taker fee schedule with exact instrument overrides.
 ///
-/// Resolution is deterministic: an exact [`InstrumentId`] override wins, otherwise
-/// the default applies. Absent configuration is represented by the absence of a
-/// schedule (`None` at the owner), which is distinct from an explicit zero rate.
+/// Resolution is deterministic: for a given cumulative volume the highest volume tier at or below
+/// it wins, then an exact [`InstrumentId`] override, then the default. Absent configuration is
+/// represented by the absence of a schedule (`None` at the owner), which is distinct from an
+/// explicit zero rate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MakerTakerFeeSchedule {
     /// The default rates applied when no override matches.
     pub default: MakerTakerFeeRates,
     /// Exact per-instrument rate overrides.
     pub overrides: AHashMap<InstrumentId, MakerTakerFeeRates>,
+    /// Per-instrument volume tiers, strictly ascending by `min_volume`.
+    #[serde(default)]
+    pub volume_tiers: AHashMap<InstrumentId, Vec<VolumeTier>>,
+}
+
+/// A volume tier: the maker/taker rates that apply from a cumulative volume upward.
+///
+/// Tiers are per instrument and resolved against a cumulative volume, so a schedule can express
+/// the rebate ladders venues publish instead of one flat rate per instrument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VolumeTier {
+    /// The cumulative volume at which the tier's rates begin, inclusive.
+    pub min_volume: Quantity,
+    /// The rates that apply at or above `min_volume`.
+    pub rates: MakerTakerFeeRates,
+}
+
+impl VolumeTier {
+    /// Creates a new [`VolumeTier`].
+    #[must_use]
+    pub const fn new(min_volume: Quantity, maker: Decimal, taker: Decimal) -> Self {
+        Self {
+            min_volume,
+            rates: MakerTakerFeeRates::new(maker, taker),
+        }
+    }
 }
 
 impl MakerTakerFeeSchedule {
@@ -94,6 +121,7 @@ impl MakerTakerFeeSchedule {
         Self {
             default: MakerTakerFeeRates::new(maker, taker),
             overrides: AHashMap::new(),
+            volume_tiers: AHashMap::new(),
         }
     }
 
@@ -103,12 +131,90 @@ impl MakerTakerFeeSchedule {
         Self {
             default: MakerTakerFeeRates::zero(),
             overrides: AHashMap::new(),
+            volume_tiers: AHashMap::new(),
         }
     }
 
     /// Adds or replaces an exact instrument override.
     pub fn set_override(&mut self, instrument_id: InstrumentId, rates: MakerTakerFeeRates) {
         self.overrides.insert(instrument_id, rates);
+    }
+
+    /// Sets the volume tiers for an instrument.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `tiers` is empty, if any tier begins at a zero volume, or if the tiers
+    /// are not strictly ascending by `min_volume`. Resolution picks the highest tier at or below
+    /// the volume, so an unordered list would resolve by position rather than by volume.
+    pub fn set_volume_tiers(
+        &mut self,
+        instrument_id: InstrumentId,
+        tiers: Vec<VolumeTier>,
+    ) -> anyhow::Result<()> {
+        if tiers.is_empty() {
+            anyhow::bail!("Volume tiers must not be empty");
+        }
+
+        let mut previous: Option<Quantity> = None;
+
+        for tier in &tiers {
+            if tier.min_volume.is_zero() {
+                anyhow::bail!("Volume tier min_volume must be greater than zero");
+            }
+
+            if previous.is_some_and(|previous| tier.min_volume <= previous) {
+                anyhow::bail!("Volume tiers must be strictly ascending by min_volume");
+            }
+
+            previous = Some(tier.min_volume);
+        }
+
+        self.volume_tiers.insert(instrument_id, tiers);
+        Ok(())
+    }
+
+    /// Returns the volume tiers configured for an instrument, if any.
+    #[must_use]
+    pub fn volume_tiers_for(&self, instrument_id: InstrumentId) -> Option<&[VolumeTier]> {
+        self.volume_tiers.get(&instrument_id).map(Vec::as_slice)
+    }
+
+    /// Returns the resolved rates for the given instrument and cumulative volume.
+    ///
+    /// The highest tier whose `min_volume` is at or below `volume` wins. An instrument without
+    /// tiers, or a volume below the first tier, resolves through the exact instrument override and
+    /// then the default, so a ladder that starts above zero never leaves a trade unpriced.
+    #[must_use]
+    pub fn rates_for_volume(
+        &self,
+        instrument_id: InstrumentId,
+        volume: Quantity,
+    ) -> MakerTakerFeeRates {
+        if let Some(tier) = self
+            .volume_tiers
+            .get(&instrument_id)
+            .and_then(|tiers| tiers.iter().rev().find(|tier| volume >= tier.min_volume))
+        {
+            return tier.rates;
+        }
+
+        self.rates_for(instrument_id)
+    }
+
+    /// Returns the resolved rate for the given instrument, cumulative volume and liquidity side.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `liquidity_side` is [`LiquiditySide::NoLiquiditySide`].
+    pub fn rate_for_volume(
+        &self,
+        instrument_id: InstrumentId,
+        volume: Quantity,
+        liquidity_side: LiquiditySide,
+    ) -> anyhow::Result<Decimal> {
+        self.rates_for_volume(instrument_id, volume)
+            .rate_for(liquidity_side)
     }
 
     /// Returns the resolved rates for the given instrument.
@@ -241,5 +347,102 @@ mod tests {
             notional.as_decimal() * dec!(0.0002)
         );
         assert_eq!(commission.currency, notional.currency);
+    }
+
+    #[rstest]
+    fn test_volume_tiers_resolve_the_highest_tier_at_or_below_the_volume() {
+        use crate::{identifiers::InstrumentId, types::Quantity};
+
+        let instrument_id = InstrumentId::from("AUD/USD.SIM");
+        let mut schedule = MakerTakerFeeSchedule::new(dec!(0.005), dec!(0.006));
+        schedule
+            .set_volume_tiers(
+                instrument_id,
+                vec![
+                    VolumeTier::new(Quantity::from(1_000), dec!(0.001), dec!(0.002)),
+                    VolumeTier::new(Quantity::from(10_000), dec!(0.0005), dec!(0.001)),
+                    VolumeTier::new(Quantity::from(100_000), dec!(-0.0001), dec!(0.0005)),
+                ],
+            )
+            .unwrap();
+
+        // Below the first tier the default still prices the trade.
+        assert_eq!(
+            schedule.rates_for_volume(instrument_id, Quantity::from(999)),
+            MakerTakerFeeRates::new(dec!(0.005), dec!(0.006)),
+        );
+        // The tier boundary is inclusive.
+        assert_eq!(
+            schedule.rates_for_volume(instrument_id, Quantity::from(1_000)),
+            MakerTakerFeeRates::new(dec!(0.001), dec!(0.002)),
+        );
+        assert_eq!(
+            schedule
+                .rates_for_volume(instrument_id, Quantity::from(99_999))
+                .taker,
+            dec!(0.001),
+        );
+        // The top tier carries a maker rebate.
+        assert_eq!(
+            schedule.rates_for_volume(instrument_id, Quantity::from(100_000)),
+            MakerTakerFeeRates::new(dec!(-0.0001), dec!(0.0005)),
+        );
+        assert_eq!(
+            schedule
+                .rate_for_volume(instrument_id, Quantity::from(100_000), LiquiditySide::Maker)
+                .unwrap(),
+            dec!(-0.0001),
+        );
+        assert!(
+            schedule
+                .rate_for_volume(
+                    instrument_id,
+                    Quantity::from(0),
+                    LiquiditySide::NoLiquiditySide
+                )
+                .is_err()
+        );
+    }
+
+    #[rstest]
+    fn test_volume_tiers_must_be_ascending_and_non_zero() {
+        use crate::{identifiers::InstrumentId, types::Quantity};
+
+        let instrument_id = InstrumentId::from("AUD/USD.SIM");
+        let mut schedule = MakerTakerFeeSchedule::zero();
+
+        assert!(schedule.set_volume_tiers(instrument_id, vec![]).is_err());
+        assert!(
+            schedule
+                .set_volume_tiers(
+                    instrument_id,
+                    vec![VolumeTier::new(Quantity::zero(0), dec!(0.001), dec!(0.002))],
+                )
+                .is_err()
+        );
+        assert!(
+            schedule
+                .set_volume_tiers(
+                    instrument_id,
+                    vec![
+                        VolumeTier::new(Quantity::from(100), dec!(0.001), dec!(0.002)),
+                        VolumeTier::new(Quantity::from(100), dec!(0.0005), dec!(0.001)),
+                    ],
+                )
+                .is_err()
+        );
+        assert!(
+            schedule
+                .set_volume_tiers(
+                    instrument_id,
+                    vec![
+                        VolumeTier::new(Quantity::from(200), dec!(0.001), dec!(0.002)),
+                        VolumeTier::new(Quantity::from(100), dec!(0.0005), dec!(0.001)),
+                    ],
+                )
+                .is_err()
+        );
+        // A refused ladder is not stored.
+        assert!(schedule.volume_tiers_for(instrument_id).is_none());
     }
 }

@@ -18,10 +18,10 @@
 use std::collections::HashMap;
 
 use nautilus_core::python::{
-    clone_py_object, to_pynotimplemented_err, to_pyruntime_err, to_pytype_err,
+    clone_py_object, to_pynotimplemented_err, to_pyruntime_err, to_pytype_err, to_pyvalue_err,
 };
 use nautilus_model::{
-    fees::MakerTakerFeeRates,
+    fees::{MakerTakerFeeRates, VolumeTier},
     identifiers::InstrumentId,
     instruments::InstrumentAny,
     orders::OrderAny,
@@ -323,12 +323,13 @@ impl MakerTakerFeeModel {
     /// Use `Self.set_override` for exact per-instrument rates.
     #[new]
     #[gen_stub(override_return_type(type_repr = "typing.Self", imports = ("typing",)))]
-    #[pyo3(signature = (maker_rate, taker_rate, overrides=None))]
+    #[pyo3(signature = (maker_rate, taker_rate, overrides=None, volume_tiers=None))]
     fn py_new(
         maker_rate: Decimal,
         taker_rate: Decimal,
         overrides: Option<HashMap<InstrumentId, (Decimal, Decimal)>>,
-    ) -> PyClassInitializer<MakerTakerFeeModel> {
+        volume_tiers: Option<HashMap<InstrumentId, Vec<(Quantity, Decimal, Decimal)>>>,
+    ) -> PyResult<PyClassInitializer<MakerTakerFeeModel>> {
         let mut model = MakerTakerFeeModel::new(maker_rate, taker_rate);
 
         if let Some(overrides) = overrides {
@@ -337,7 +338,19 @@ impl MakerTakerFeeModel {
             }
         }
 
-        PyClassInitializer::from(PyFeeModel).add_subclass(model)
+        if let Some(volume_tiers) = volume_tiers {
+            for (instrument_id, tiers) in volume_tiers {
+                let tiers = tiers
+                    .into_iter()
+                    .map(|(min_volume, maker, taker)| VolumeTier::new(min_volume, maker, taker))
+                    .collect();
+                model
+                    .set_volume_tiers(instrument_id, tiers)
+                    .map_err(to_pyvalue_err)?;
+            }
+        }
+
+        Ok(PyClassInitializer::from(PyFeeModel).add_subclass(model))
     }
 
     fn __repr__(&self) -> String {

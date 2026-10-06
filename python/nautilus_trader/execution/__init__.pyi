@@ -283,6 +283,11 @@ class MakerTakerFeeModel(FeeModel):
         taker_rate: decimal.Decimal,
         overrides: typing.Mapping[model.InstrumentId, tuple[decimal.Decimal, decimal.Decimal]]
         | None = None,
+        volume_tiers: typing.Mapping[
+            model.InstrumentId,
+            typing.Sequence[tuple[model.Quantity, decimal.Decimal, decimal.Decimal]],
+        ]
+        | None = None,
     ) -> typing.Self: ...
     def get_commission(
         self,
