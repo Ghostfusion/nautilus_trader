@@ -1,0 +1,131 @@
+# Glossary: every term in plain words
+
+Date: 2026-10-07. Revision 1.
+
+This page defines every trading, statistical and honesty term used in this collection, in words
+aimed at someone who has never traded and does not read code. Entries sit in one flat alphabetical
+list and each definition is a single sentence. A tutorial repeats the few terms that matter most on
+that particular page in its own last section; everything else is here. For how the tutorials
+themselves are laid out, see [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.md).
+
+## Terms
+
+- **algorithmic trading**: Buying and selling by written rules a computer follows, instead of a person deciding each trade.
+- **alpha**: The part of a strategy's return not explained by simply owning the market, treated as the value the strategy adds.
+- **annualised return**: A return converted to an average rate per year, so that periods of different lengths can be compared.
+- **arbitrage**: Buying and selling the same thing in two places at once to profit from a price gap, without a view on the future.
+- **ask**: The price at which someone is currently willing to sell, which is the price a buyer pays.
+- **asset**: Anything with value that can be owned, such as cash, a share, a bond or a piece of property.
+- **backtest**: A test that applies a strategy's rules to past prices to see what would have happened.
+- **basis point**: One hundredth of one percent, written 0.01 percent, used for small rates and costs.
+- **bear market**: A long stretch in which prices fall, usually described as a fall of about twenty percent from a recent high.
+- **benchmark**: A simple, well-known holding used as a yardstick, such as an index, to judge whether a strategy added anything.
+- **beta**: A number for how strongly one price moves when the market moves; a beta of one moves about as much as the market.
+- **bid**: The price at which someone is currently willing to buy, which is the price a seller receives.
+- **bond**: A loan to a government or a company that promises to pay interest and then repay the money on a set date.
+- **book**: The list of all the standing buy and sell orders for one thing, sorted by price, also called the order book.
+- **breakout**: A strategy that buys when a price rises above a level it has not exceeded for a while, betting the move continues.
+- **broker**: The firm that passes your orders to an exchange and holds your account.
+- **bull market**: A long stretch in which prices rise.
+- **buy-and-hold**: Owning something and doing nothing further, used as a baseline to compare a busy strategy against.
+- **capacity**: The largest amount of money a strategy can hold before its own trading starts to move prices and eat its edge.
+- **carry**: The income earned for holding a position, such as interest or the gap between two prices.
+- **commission**: The fee a broker charges for each trade.
+- **commodity**: A basic physical good traded in bulk, such as oil, wheat or gold.
+- **compounding**: Earning a return on earlier returns as well as on the original money, so that growth speeds up over time.
+- **confidence**: How sure a statistical result is said to be, usually the chance that an estimate sits close to the truth.
+- **contract**: A binding agreement to exchange something on agreed terms, often at a future date; many derivatives are contracts.
+- **contrarian**: A strategy that bets against the recent crowd, buying what has just fallen or selling what has just risen.
+- **correlation**: A number between minus one and one describing how much two things move together.
+- **cost**: Anything that reduces a trade's result, such as commission, the spread, or the effect of your own order on the price.
+- **crowding**: The state in which many traders run the same trade, so the opportunity is thin and can vanish when they all leave.
+- **crypto**: A digital asset such as Bitcoin that exists only as records on a computer network.
+- **data snooping**: Searching the same data repeatedly until something looks good by luck, then reporting only the lucky result.
+- **derivative**: A contract whose value depends on something else, such as a share, an index or a commodity.
+- **distribution**: The pattern describing how often each possible value occurs, such as the shape of daily returns.
+- **dividend**: A cash payment a company makes to its shareholders out of profit.
+- **drawdown**: The fall from a peak in value to a later low, measured as a percentage of the peak.
+- **edge**: A small, persistent advantage that makes a strategy worth running after costs.
+- **efficient market**: The idea that prices already reflect available information, so beating the market is hard.
+- **equity**: Either ownership in a company, meaning shares, or the value of an account after debts are subtracted.
+- **ETF**: An exchange-traded fund, a single listed thing that holds a basket of other assets and trades like a share.
+- **exchange**: The organised marketplace where buyers and sellers meet and where prices are recorded.
+- **expected value**: The average result you would get if the same situation were repeated many times.
+- **exposure**: How much of your money is actually at risk in a particular market or direction.
+- **factor**: A shared characteristic used to sort assets into groups, such as size, value or recent momentum.
+- **factor investing**: Building a portfolio around such characteristics instead of around single companies.
+- **fill**: The moment an order is completed and you own or have sold the thing, usually at the price then available.
+- **fund**: A pooled pot of money that many people pay into and that a manager invests on their behalf.
+- **future**: A standard contract to buy or sell something at a fixed price on a fixed future date.
+- **gross return**: The return before costs and fees are subtracted.
+- **hedge**: A second position taken to reduce the risk of the first.
+- **holding period**: The length of time a position is kept open.
+- **index**: A published list of assets whose combined price is tracked as a single number, such as a stock-market index.
+- **indicator**: A number calculated from past prices, such as a moving average, used as an input to a rule.
+- **inflation**: The rate at which prices in general rise, which reduces what money can buy.
+- **information ratio**: A return above the benchmark divided by how unsteadily that extra return arrived; higher means steadier.
+- **interest rate**: The price of borrowing money, usually quoted as a percentage per year.
+- **leverage**: Using borrowed money so that a given price move produces a larger gain or loss.
+- **limit order**: An instruction to buy or sell only at a stated price or better, which may never be filled.
+- **liquidity**: How easily something can be bought or sold quickly without moving its price much.
+- **long**: Owning something, so that you gain when its price rises.
+- **look-ahead bias**: Using information in a test that was not available then, making a strategy look better than it could be.
+- **margin**: Money a broker requires you to set aside as a deposit when you borrow or use leverage.
+- **market capitalisation**: The total value of a company's shares, found by multiplying the share price by the number of shares.
+- **market order**: An instruction to buy or sell immediately at whatever price is available.
+- **maximum drawdown**: The largest peak-to-low fall a strategy suffered over a chosen period.
+- **mean**: The ordinary average, found by adding the values and dividing by how many there are.
+- **mean reversion**: The idea that a price which has moved far from its usual level tends to come back.
+- **median**: The middle value when a list is sorted, so half the values sit above it and half below.
+- **momentum**: The idea that what has recently risen tends to keep rising for a while, and the strategies that trade on it.
+- **moving average**: The average of the last few prices, recalculated as time moves on, used to smooth a bumpy series.
+- **net return**: The return after all costs and fees have been subtracted.
+- **option**: A contract giving the right, but not the obligation, to buy or sell something at a set price before a set date.
+- **out-of-sample**: Data kept aside and not used while building a rule, then used once to test it honestly.
+- **overfitting**: Fitting rules so closely to past data that they capture noise and fail on new data.
+- **p-value**: The chance of seeing a result that strong if there were no real effect; a small value counts as evidence.
+- **pairs trading**: Trading two similar assets against each other, buying the laggard and selling the one that has run ahead.
+- **paper trading**: Practising with pretend money while recording real prices.
+- **percentile**: The value below which a given share of the data falls, such as the ninetieth percentile.
+- **perpetual future**: A future-like contract with no expiry date, common in crypto markets.
+- **portfolio**: The whole collection of things you own at once.
+- **position**: What you currently hold in one thing, including how much and in which direction.
+- **rebalance**: Adjusting a portfolio back to its intended weights by buying and selling.
+- **regime**: A period in which the market behaves in a particular way, such as calm or turbulent, that may then change.
+- **regression**: A statistical method that estimates how one quantity relates to others.
+- **relative value**: Judging one asset against another rather than on its own, and trading the gap between them.
+- **replication**: Testing whether someone else, on different data, gets the same result.
+- **return**: The change in the value of what you own over a period, usually shown as a percentage.
+- **reversal**: A move in the opposite direction to the recent one, and strategies that bet on such a move.
+- **risk**: The chance that the outcome is worse than expected, usually measured by how much the value swings around.
+- **risk-adjusted return**: A return judged against the risk taken to get it, so a steady gain scores better than a wild one.
+- **rotation**: Moving money from one group of assets to another by a rule, such as following the strongest group.
+- **seasonality**: A pattern that tends to appear at the same time of year, month or day.
+- **sector**: A group of companies in the same line of business, such as energy or health care.
+- **share**: A unit of ownership in a company.
+- **Sharpe ratio**: A risk-adjusted measure equal to the return above the risk-free rate divided by the volatility of the return.
+- **short**: Selling something you do not own, so that you gain when its price falls.
+- **short sale**: The act of selling borrowed shares and buying them back later, profiting if the price falls.
+- **signal**: The specific instruction a rule produces, such as buy or hold, before it is turned into an order.
+- **slippage**: The difference between the price you expected and the price you actually got.
+- **spot**: Buying or selling an asset for immediate delivery, as opposed to a future.
+- **spread**: The gap between the best buy price and the best sell price, which a trader crosses on each round trip.
+- **standard deviation**: A measure of how far values typically sit from their average.
+- **statistical arbitrage**: Trading many small, statistically estimated price gaps at once, usually with a computer.
+- **stop order**: An instruction that becomes a market order once a chosen price is reached, often used to limit a loss.
+- **support and resistance**: Price levels where a market has repeatedly stopped falling or stopped rising.
+- **survivorship bias**: Judging past results using only the companies or funds that still exist, which flatters the result.
+- **t-statistic**: An estimate divided by its own uncertainty; larger values mean it is far from zero relative to its noise.
+- **technical analysis**: Reading patterns and levels from past prices and trading volumes rather than from company finances.
+- **ticker**: The short code that identifies a traded thing, such as a few letters for a share.
+- **time horizon**: The length of time over which you expect to hold something or judge a result.
+- **transaction cost**: Everything paid to trade, including commission, the spread and taxes.
+- **trend following**: Buying what is rising and selling what is falling, on the idea that trends persist.
+- **turnover**: How often a portfolio's holdings are replaced, which drives how much is paid in costs.
+- **universe**: The full set of things a rule is allowed to choose from.
+- **value**: Buying assets that look cheap relative to their earnings or assets, on the idea that the price will catch up.
+- **volatility**: How much a price or return moves around, usually quoted as a yearly percentage.
+- **volume**: The number of units traded in a period, used as a sign of how much interest there is.
+- **walk-forward**: Testing a rule repeatedly by fitting it on an early slice of data and checking it on the next slice.
+- **weight**: The share of a portfolio given to one holding, usually written as a percentage.
+- **z-score**: How many standard deviations a value sits from its average, where zero means exactly average.
