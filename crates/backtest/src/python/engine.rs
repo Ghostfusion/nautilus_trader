@@ -1969,6 +1969,9 @@ mod model_tests {
                     None,
                     None,
                     None,
+                    false,
+                    0,
+                    None,
                 )
                 .unwrap();
 

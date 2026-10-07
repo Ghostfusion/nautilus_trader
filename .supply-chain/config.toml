@@ -103,6 +103,9 @@ audit-as-crates-io = false
 [policy.nautilus-live]
 audit-as-crates-io = false
 
+[policy.nautilus-macros]
+audit-as-crates-io = false
+
 [policy.nautilus-model]
 audit-as-crates-io = false
 
@@ -1237,10 +1240,6 @@ criteria = "safe-to-deploy"
 version = "0.3.33"
 criteria = "safe-to-deploy"
 
-[[exemptions.futures-core]]
-version = "0.3.33"
-criteria = "safe-to-deploy"
-
 [[exemptions.futures-executor]]
 version = "0.3.33"
 criteria = "safe-to-deploy"
@@ -1847,10 +1846,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.pkcs8]]
 version = "0.10.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.pkg-config]]
-version = "0.3.33"
 criteria = "safe-to-deploy"
 
 [[exemptions.portable-atomic]]
@@ -2571,10 +2566,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing-attributes]]
 version = "0.1.31"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-core]]
-version = "0.1.36"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-subscriber]]

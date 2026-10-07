@@ -719,12 +719,22 @@ resting `LIMIT` orders only.
 
 #### GTD expiry
 
-Set `GTD` expiry at least three minutes after submission. The adapter denies shorter expiries before
-signing, using whole Unix seconds, and accepts the exact three-minute boundary. The venue reports expiry
-as an `OrderCanceled` event, not `OrderExpired`. Polymarket applies a one-minute security threshold
-before the supplied expiration timestamp, so the minimum effective lifetime is approximately two
-minutes. To request an effective lifetime of N seconds, supply `now + 60 + N`, subject to the
-three-minute minimum. See [GTD orders](https://docs.polymarket.com/trading/place-orders#limit-orders).
+Set `GTD` expiry at least three minutes after submission. The adapter denies a shorter expiry
+before signing. It uses whole Unix seconds and accepts the exact three-minute boundary.
+
+Polymarket reports both a user cancel and a GTD expiry as `CANCELED`. It expires the order one
+minute before the supplied expiration, so the minimum effective lifetime is about two minutes. To
+request an effective lifetime of N seconds, supply `now + 60 + N`, still subject to the
+three-minute minimum.
+
+On the user channel, a `CANCELED` event at or after that one-minute mark becomes `OrderExpired`.
+An earlier cancel stays `OrderCanceled`. A REST-recovered cancel also stays `OrderCanceled`. The
+open-order payload has an expiration, but no cancel time.
+
+Leave `manage_gtd_expiry` false. The strategy timer fires at the stated expiration and submits a
+cancel. It does not emit `OrderExpired`. A user-channel expiry already clears that timer. If the
+expiry message was missed, the late cancel does not close the order. Reconciliation still has to.
+See [GTD orders](https://docs.polymarket.com/trading/place-orders#limit-orders).
 
 ### Minimum order size
 
@@ -1014,11 +1024,16 @@ not for that market-order type.
 
 ##### Base-sized limit BUY orders
 
-`quantity` is the nominal share quantity at the limit price. With `FAK` or `FOK`, Polymarket spends the
-resulting pUSD maker budget, so price improvement can return more shares; the adapter updates the order
-quantity to the actual fill. The adapter denies the order before signing when `quantity * price` is not
-an exact cent amount. It does not round and recompute the nominal share quantity because that would
-change the signed price/amount ratio.
+`quantity` is the nominal share quantity at the limit price. With `FAK` or `FOK`, Polymarket spends
+a pUSD maker budget, so price improvement can return more shares.
+
+When `quantity * price` is not an exact cent amount, the adapter truncates that budget to two
+decimal places. It signs the share quantity derived from that budget, rounded up to the market
+amount precision, so the signed ratio does not exceed the limit price. It updates the local order
+to that signed quantity before posting. This applies to single and batch submissions.
+
+A later fill can still raise the quantity to the actual matched size. A budget that truncates to
+zero is denied before signing.
 
 ##### Collateral-sized limit BUY orders
 
@@ -1043,9 +1058,9 @@ Resting orders allow more flexible precision based on market tick size.
 
 #### Tick validation
 
-- The adapter validates tick size before signing. It also denies base-sized limit `FAK` or `FOK`
-  BUYs whose maker amount has more than two decimal places. This applies to single and batch
-  submissions.
+- The adapter validates tick size before signing. A base-sized limit `FAK` or `FOK` BUY whose cent
+  budget truncates to zero is denied before signing. See
+  [Base-sized limit BUY orders](#base-sized-limit-buy-orders).
 - The adapter requires instrument tick sizes to be exactly representable at four decimals. It
   rejects instrument definitions and tick-size events that do not meet this requirement; a rejected
   event leaves the current tick active.
@@ -1275,20 +1290,23 @@ rate is fixed at zero and is not configurable.
 Instrument `fee_schedule` metadata stores decimal parameters as strings; readers also accept legacy
 numeric metadata.
 
-The live fee curve retains the reference SDK's floating-point power calculation. Fee inputs remain
-decimals until that step; negative rates or exponents and arithmetic overflow return errors.
+The live fee curve uses exact decimal arithmetic, so the exponent must be a whole number. Negative
+rates, fractional or negative exponents, and arithmetic overflow return errors.
 
-`FillReport.commission` is denominated in pUSD and rounds the platform fee to five decimal places.
+`FillReport.commission` is denominated in pUSD and floors the platform fee to five decimal places,
+matching the venue charge. The venue charges a BUY taker fee in pUSD on top of the fill and deducts a
+SELL taker fee from the pUSD proceeds, so the position quantity equals the shares filled.
 If the exact result cannot be represented as `Money`, the adapter returns an error instead of using
 zero or a generic commission. See the
 [commission failure contract](../developer_guide/adapters.md#commission-failure-handling).
 
 A commission construction error fails a direct fill report request, terminal trade-history recovery,
 or complete mass status. Startup returns a mass-status error without applying that client's reports.
-When an active order report cannot enrich matched quantity from confirmed fills, the adapter logs
-the error and caps matched quantity to local and previously tracked evidence so reconciliation
-defers the unsupported residual. The adapter does not drop a failed fill while returning an order or
-position report that could recreate its quantity without the Polymarket commission.
+When an active order's trade-history request fails, the adapter logs the error and caps matched
+quantity to fills already applied in core. Reconciliation then defers any unsupported residual
+quantity. Commission construction and settlement validation errors instead fail the report request.
+The adapter does not drop a failed fill while returning an order or position report that could
+recreate its quantity without the Polymarket commission.
 
 For the latest public schedule, see Polymarket's
 [Fees](https://docs.polymarket.com/trading/fees) documentation.
@@ -1337,6 +1355,11 @@ the Polymarket order ID (`venue_order_id`). The execution reconciliation procedu
 is as follows:
 
 - Generate order reports for all instruments with active (open) orders, as reported by Polymarket.
+- Generate filled order reports from confirmed trades for orders that closed before startup and
+  are not in the cache, so their fills apply with the venue quantity and commission. For an
+  instrument with a position report, the fills must explain that position; see
+  [report precision](#report-precision). Without a lookback window, only those instruments qualify,
+  because fills miss balance changes such as redemption; see [missing reports](#missing-reports).
 - In owner mode, generate position reports from current user positions reported by Polymarket's Data API.
   Session mode omits these wallet-wide positions; see [session keys](#session-keys).
 - Compare these reports with Nautilus execution state.
@@ -1344,6 +1367,20 @@ is as follows:
   Polymarket.
 
 ### Position reports
+
+#### Report precision
+
+The Data API reports position size and average price to four decimal places. When the confirmed
+fills in a mass status build one long position from zero without returning to flat, and the
+resulting quantity differs from the reported size by less than `0.0001`, the position report takes
+the quantity and average entry price of those fills. Startup reconciliation then applies the fills
+without a synthetic adjustment for the rounding. A buy and a sell with the same match time do not
+qualify, because their order is ambiguous.
+
+Otherwise, including when the cache retains an open position that other trades built, the report
+keeps the Data API values, and the fills of closed orders in that instrument are not reported.
+These reports set `avg_px_open_precision` to 4, so a retained position whose fills fell outside a
+bounded lookback still passes the startup entry-price check against the truncated average. See [reported entry averages](../concepts/execution/reconciliation.md#reported-entry-averages).
 
 #### Resolved balances
 
@@ -1380,6 +1417,25 @@ Mass status checks the whole account; the other reports check the requested inst
 trade quarantined because its message failed validation blocks every report when it has no earlier
 admitted legs; otherwise the order and instrument scope of those legs applies. See
 [settlement updates](#settlement-updates) for how trades resolve.
+
+`QueryOrder` checks settlement before and after its venue reads. If settlement evidence for the
+order remains unresolved, the query emits no status report and leaves the local order unchanged.
+Queries for an unacknowledged submission still use
+[unknown-outcome reconciliation](#unknown-outcome-reconciliation).
+
+Fill-report generation checks retained settlement outcomes and rejects a `CONFIRMED` trade row that:
+
+- Belongs to a trade already settled as `FAILED`.
+- Contradicts a retained terminal leg.
+- Adds a leg to a retained terminal trade.
+
+Rejection fails the report request without creating a fill or changing the retained outcome.
+Scoped report evidence cannot establish a terminal outcome for the complete trade; only the
+[targeted terminal REST read](#failed-trades-and-rest-resolution) can do that. Applied fill values
+take precedence over non-terminal REST copies.
+
+Order reports cap `filled_qty` using fills already applied in core and fill reports that pass
+settlement validation, counting each fill once. This cap applies with or without a lookback window.
 
 ### Missing orders and API lag
 
@@ -1434,13 +1490,13 @@ Mass-status reconciliation pairs each order report with its venue fill reports. 
 first to preserve trade IDs and commissions, then infers only any residual quantity needed to reach the
 venue-reported status.
 
-When mass status declares no lookback, REST order reports cap matched quantity to authenticated
-`CONFIRMED` trade history, without a local-fill floor, so pending settlement cannot create an inferred
-fill. A bounded mass status keeps the venue open-order `size_matched` so a live partial fill outside the
-lookback window is not understated.
+Mass status caps REST matched quantity using fills already applied in core and authenticated
+`CONFIRMED` fill reports that pass settlement validation, counting each fill once. This prevents
+pending settlement from creating an inferred fill, with or without a lookback window. Applied fills
+outside the lookback window still contribute to the cap.
 
-Runtime order checks fetch confirmed trade history when the venue reports more matched quantity than the
-local order and WebSocket fill tracker contain. Unpaired fill reports retain the normal fill-only path.
+Runtime order checks fetch confirmed trade history when the venue's matched quantity exceeds the
+local order's applied fill quantity. Unpaired fill reports retain the normal fill-only path.
 
 A commission construction error fails the complete REST report request. Startup returns the error without
 applying a mass status; periodic and targeted reconciliation defer the affected work. The adapter does
@@ -1518,11 +1574,24 @@ snapshot reconciliation provide correction paths, so the local total is not an i
 
 #### REST evidence and cache state
 
-For runtime order checks, the adapter caps REST matched quantity at `min(venue_matched,
-max(local_applied_or_tracked, confirmed_trade_quantity))`. Local fill tracking accounts for WebSocket
-fills awaiting core processing. This prevents an unsupported increase in REST `size_matched` from
-becoming an inferred fill, while preserving evidence of locally observed matches. Unbounded mass status
-uses only confirmed fills for this cap; bounded mass status retains the venue matched total. See
+For runtime order checks, the adapter caps REST matched quantity at
+`min(venue_matched, max(local_applied, settlement_validated_quantity))`.
+
+The validated quantity combines effective fills in cached order history with fill reports that pass
+settlement validation:
+
+- Each venue fill ID counts once across applied fills and report rows.
+- Inferred core fills provide a floor rather than additional venue evidence. A later venue report
+  for the same quantity cannot inflate the total.
+- Cumulative fill voids remove only the corrected quantity. An older report cannot restore that
+  quantity through the cap.
+
+If core still retains quantity for a leg whose targeted REST settlement is `FAILED`, report generation
+fails closed rather than preserving that failed exposure through the cap.
+
+WebSocket fills awaiting core processing do not raise the local applied-fill floor. This prevents an
+unsupported increase in REST `size_matched` from becoming an inferred fill while preserving applied fills.
+Mass status uses the same validated quantity with or without a lookback window. See
 [mass-status reconciliation](#mass-status-reconciliation).
 
 The cache retains order identity, applied fills, and correction history used for replay handling. It is
@@ -1533,14 +1602,71 @@ settlement finality.
 
 Polymarket wire amounts use six-decimal fixed-point mantissas. Market SELL signing truncates the
 share-denominated `makerAmount` to two decimal places, while market BUY quote conversion can leave
-a few microshares of drift between the registered and filled quantities. Both effects are fixed in
-absolute share terms, so the adapter uses `DUST_SNAP_THRESHOLD_DEC = 0.01` shares. Anything at or above
-that threshold remains a real partial fill or overfill.
+a few microshares of drift between the registered and filled quantities. Every fill keeps the venue
+quantity. Truncation is fixed in absolute share terms, so for underfill the adapter uses
+`DUST_SNAP_THRESHOLD_DEC = 0.01` shares; a shortfall at or above that threshold remains a real
+partial fill.
 
 | Direction | Source                                         | Adapter behavior                             |
 | --------- | ---------------------------------------------- | -------------------------------------------- |
-| Overfill  | Market BUY quote conversion (microshares)      | Snap fill down to `submitted_qty`            |
+| Overfill  | BUY filled below its limit, or quote drift     | Raise the BUY order quantity to the fill     |
 | Underfill | Signed or venue quantity truncation (`< 0.01`) | Normalize atomic FOK; cancel a FAK remainder |
+
+See [BUY overfills](#buy-overfills) for how a BUY can receive more shares than it signed.
+
+### BUY overfills
+
+A Polymarket BUY is sized by the pUSD it spends, so it can receive more shares than it signed. The
+adapter keeps every fill at the venue quantity and raises the order quantity to match. A SELL is
+sized in shares and never fills past its signed quantity.
+
+:::info
+A BUY order's quantity can increase after submission, through an `OrderUpdated` event. Treat its
+filled quantity, or the position quantity, as the shares held.
+:::
+
+#### Why a BUY receives extra shares
+
+The signed order sets `makerAmount` (pUSD to spend) and `takerAmount` (shares to receive). The
+exchange guarantees at least that ratio of shares per pUSD for whatever part executes, then credits
+the shares actually delivered. A partial execution spends less and receives proportionally fewer
+shares. A full execution receives more than `takerAmount` in two cases:
+
+- Price improvement: a limit BUY of 9 shares at 0.58 commits 5.22 pUSD. Filled entirely at 0.56, it
+  receives 9.321429 shares.
+- Signing precision: a market BUY signs shares truncated to the tick's decimal places plus two,
+  while settlement uses six. A 5 pUSD market BUY at 0.66 signs 7.5757 shares and receives 7.575758.
+
+#### How the adapter raises the order quantity
+
+Nautilus orders are sized in shares, and the execution engine rejects a fill past the order quantity
+by default. The quantity therefore rises before the fill applies, through an `OrderUpdated` event
+recorded in the order's history like any other amendment:
+
+- WebSocket fills: the adapter emits `OrderUpdated` with the cumulative filled quantity, then
+  `OrderFilled`, so the order reaches `Filled`.
+- REST reports: a `Filled` BUY status report carries its evidence-capped filled quantity as its
+  quantity. Reconciliation sees that it differs from the cached order and applies a reconciliation
+  `OrderUpdated` before the fills. Status checks accept the raised quantity.
+- Modified orders: the raised quantity covers the whole order, including fills on earlier venue
+  orders.
+
+Commission is computed on the venue fill quantity.
+
+#### Recovery limitations
+
+Two REST recovery paths apply a recovered BUY overfill without raising the order quantity first, so
+the engine rejects the fill unless `LiveExecutionEngineConfig.allow_overfills` is enabled:
+
+- The periodic position check applies recovered fills as standalone reports. A rejected fill holds
+  back position reconciliation until `position_check_threshold_ms` passes. A later check then
+  synthesizes a correcting fill, without the venue commission, when `generate_missing_orders` is
+  enabled.
+- Reconciliation of an order with a pending cancel or modify skips the quantity update for a
+  `Filled` report, so its fills apply against the signed quantity.
+
+Both paths apply only when the user stream misses the fill and stream-gap trade discovery does not
+recover it.
 
 ### Terminal order handling
 
@@ -1559,13 +1685,13 @@ confirmed trade arrives before the submit response. A buffered `Canceled`, `Expi
 
 ### Commissions and tracking scope
 
-`FillReport.commission` reflects the venue-reported size and is not recalculated after snapping.
-The resulting difference depends on the snapped quantity, fill price, fee schedule, and rounding.
+`FillReport.commission` is computed from the venue-reported fill size, the same quantity the fill
+carries.
 
-The fill tracker is keyed by `venue_order_id` and registered on order
-accept, so fill reports for orders placed in another session pass through
-unchanged. `DUST_SNAP_THRESHOLD_DEC` is not configurable per-strategy; it lives
-in `nautilus_polymarket::common::consts`.
+The fill tracker is keyed by `venue_order_id`. It registers orders on accept and restores cached
+open orders on startup, so the WebSocket overfill raise applies only to orders it tracks.
+`DUST_SNAP_THRESHOLD_DEC` is not configurable per-strategy; it lives in
+`nautilus_polymarket::common::consts`.
 
 ### Order message size denomination
 
@@ -1607,8 +1733,13 @@ venue reports.
 The data adapter opens `market` subscriptions dynamically as instruments are requested. It spreads
 those subscriptions across a pool of market WebSocket connections so that no single connection
 carries more than `ws_max_subscriptions` assets. The pool grows lazily (a universe below the cap
-stays on one connection) and closes a secondary connection once it owns no assets. Each connection
-replays only its own assets on reconnect. A shard reconnect also drops that shard's local books and
+stays on one connection) and closes a secondary connection once it owns no assets.
+
+The pool does not open a connection when the data client connects, unless `subscribe_new_markets`
+is set. That setting opens the primary connection for new-market discovery. Otherwise the first
+asset subscription opens a connection.
+
+Each connection replays only its own assets on reconnect. A shard reconnect also drops that shard's local books and
 gates its book deltas (and book-derived `best_bid_ask` tops) until fresh snapshots arrive; a
 one-shot monitor starts recovery if a snapshot is still missing after `book_snapshot_timeout_secs`.
 

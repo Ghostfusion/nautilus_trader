@@ -188,6 +188,9 @@ Add a scenario for every change that alters deterministic backtest behaviour, an
 `python/tests/regression/registry.py`, which is an explicit list rather than reflection. A scenario
 builds its own engine from committed instruments and data, so it needs no adapter credentials and
 runs in a clean baseline.
+`make pytest` runs tests in parallel with pytest-xdist, using one worker per CPU up to 32. Set
+`PYTEST_XDIST_AUTO_NUM_WORKERS` to change the worker count, for example
+`make pytest PYTEST_XDIST_AUTO_NUM_WORKERS=8`.
 
 Local `make pytest` runs use the debug extension from `make build-debug`.
 CI tests a release wheel.

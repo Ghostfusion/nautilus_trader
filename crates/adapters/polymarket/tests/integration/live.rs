@@ -27,7 +27,10 @@ use nautilus_common::{
     testing::wait_until_async,
 };
 use nautilus_core::{UUID4, UnixNanos};
-use nautilus_live::{SocketReconnectRequestOutcome, testing::ExecutionHarness};
+use nautilus_live::{
+    SocketReconnectRequestOutcome,
+    testing::{ExecutionHarness, RoutedKind},
+};
 use nautilus_model::{
     enums::{LiquiditySide, OrderSide, OrderStatus, OrderType, TimeInForce},
     events::{OrderEventAny, OrderRejected},
@@ -163,6 +166,40 @@ async fn exec_tester_drives_submit_to_accepted() {
     assert!(accepted, "ExecTester-driven order did not reach Accepted");
     assert_eq!(h.risk_command_count(), 1);
     harness::invariants::assert_tracked_used_events(h.routed());
+}
+
+#[rstest]
+#[tokio::test]
+async fn tracked_gtd_expiry_within_window_becomes_expired() {
+    let mut h = harness::Harness::build().await;
+    let order = harness::limit_order(h.instrument_id(), "O-1");
+    h.submit_via_risk(&order);
+    assert!(
+        h.pump_until(DEADLINE, |cache| {
+            order_reached(cache, &order, OrderStatus::Accepted)
+        })
+        .await,
+        "order did not reach Accepted",
+    );
+
+    let mut message = load_json("ws_user_order_cancellation.json");
+    message["event_type"] = json!("order");
+    message["order_type"] = json!("GTD");
+    message["expiration"] = json!("1703875265");
+    h.mock_state.send_user(message).await;
+
+    let expired = h
+        .pump_until(DEADLINE, |cache| {
+            order_reached(cache, &order, OrderStatus::Expired)
+        })
+        .await;
+
+    assert!(expired, "in-window GTD cancel did not become Expired");
+    harness::invariants::assert_order_status(
+        &h.cache().borrow(),
+        &order.client_order_id(),
+        OrderStatus::Expired,
+    );
 }
 
 #[rstest]
@@ -637,6 +674,7 @@ async fn stalled_submit_query_and_buffered_trade_apply_fill_once(
     venue_order["size_matched"] = json!("25.0000");
     venue_order["status"] = json!("CANCELED");
     *h.mock_state.single_order_response.lock().await = Some(venue_order);
+    h.mock_state.trade_queries.lock().await.clear();
     h.exec_engine()
         .borrow()
         .execute(TradingCommand::QueryOrder(QueryOrder::new(
@@ -677,16 +715,19 @@ async fn stalled_submit_query_and_buffered_trade_apply_fill_once(
         cached.trade_ids(),
         vec![&TradeId::from("trade-0xabcdef1234")]
     );
-    let cache = h.cache().borrow();
-    let positions = cache.positions_open(
-        None,
-        Some(&h.instrument_id()),
-        None,
-        Some(&h.account_id()),
-        None,
-    );
-    assert_eq!(positions.len(), 1);
-    assert_eq!(positions[0].quantity, Quantity::from("25"));
+    {
+        let cache = h.cache().borrow();
+        let positions = cache.positions_open(
+            None,
+            Some(&h.instrument_id()),
+            None,
+            Some(&h.account_id()),
+            None,
+        );
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].quantity, Quantity::from("25"));
+    }
+
     assert_eq!(cached.filled_qty(), Quantity::from("25"));
     assert_eq!(cached.status(), OrderStatus::Canceled);
     assert_eq!(
@@ -696,6 +737,19 @@ async fn stalled_submit_query_and_buffered_trade_apply_fill_once(
     assert_eq!(
         event_count(&cached, |event| matches!(event, OrderEventAny::Accepted(_))),
         1
+    );
+    assert!(
+        h.mock_state
+            .trade_queries
+            .lock()
+            .await
+            .contains(&std::collections::HashMap::from([
+                (
+                    "market".to_string(),
+                    crate::mock_venue::TEST_CONDITION_ID.to_string()
+                ),
+                ("next_cursor".to_string(), "MA==".to_string()),
+            ]))
     );
 }
 
@@ -1233,6 +1287,20 @@ async fn ambiguous_submit_resolves_trade_matched_before_order_creation() {
 
     assert_eq!(fill_trade_ids, vec![TradeId::from("trade-0xfull")]);
     assert_eq!(*declined.borrow(), Vec::<OrderEventAny>::new());
+    assert!(
+        h.mock_state
+            .trade_queries
+            .lock()
+            .await
+            .contains(&std::collections::HashMap::from([
+                (
+                    "market".to_string(),
+                    crate::mock_venue::TEST_CONDITION_ID.to_string()
+                ),
+                ("after".to_string(), "1704067201".to_string()),
+                ("next_cursor".to_string(), "MA==".to_string()),
+            ]))
+    );
 }
 
 #[rstest]
@@ -1346,11 +1414,24 @@ async fn stream_failed_trade_confirmed_by_rest_keeps_fill_and_resumes_reports() 
         )),
         0,
     );
-    let cache = h.cache().borrow();
-    let positions = cache.positions_open(None, Some(&h.instrument_id()), None, None, None);
-    assert_eq!(positions.len(), 1);
-    assert_eq!(positions[0].quantity, Quantity::from("100.0000"));
+    {
+        let cache = h.cache().borrow();
+        let positions = cache.positions_open(None, Some(&h.instrument_id()), None, None, None);
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].quantity, Quantity::from("100.0000"));
+    }
+
     assert_eq!(*declined.borrow(), Vec::<OrderEventAny>::new());
+    assert!(
+        h.mock_state
+            .trade_queries
+            .lock()
+            .await
+            .contains(&std::collections::HashMap::from([
+                ("id".to_string(), "trade-0xfull".to_string()),
+                ("next_cursor".to_string(), "MA==".to_string()),
+            ]))
+    );
 }
 
 #[rstest]
@@ -1768,6 +1849,157 @@ async fn rest_confirmation_applies_quarantined_unapplied_trade_once() {
     assert_eq!(fills[0].last_px, Price::from("0.5000"));
     assert_eq!(fills[0].liquidity_side, LiquiditySide::Taker);
     assert_eq!(cached.filled_qty(), Quantity::from("100.0000"));
+    assert_eq!(*declined.borrow(), Vec::<OrderEventAny>::new());
+}
+
+#[rstest]
+#[case::before_read(false)]
+#[case::during_read(true)]
+#[tokio::test]
+async fn query_order_defers_during_quarantine_and_resumes_after_settlement(
+    #[case] quarantine_during_read: bool,
+) {
+    let mut h = harness::Harness::build().await;
+    let declined = record_declined_fills();
+    let order = harness::limit_order(h.instrument_id(), "O-QUERY-SETTLEMENT");
+    submit_until_accepted(&mut h, &order).await;
+    serve_rest_trades(&h, &[]).await;
+    let mut venue_order = load_json("http_open_order.json");
+    venue_order["status"] = json!("MATCHED");
+    venue_order["size_matched"] = json!("100.0000");
+    let order_response = h.mock_state.single_order_response.clone();
+    let mut response = order_response.lock().await;
+    *response = Some(venue_order);
+    let order_reads = h.mock_state.single_order_get_count.clone();
+    let reads_before = order_reads.load(std::sync::atomic::Ordering::Acquire);
+
+    let query = QueryOrder::new(
+        order.trader_id(),
+        Some(h.client_id()),
+        order.strategy_id(),
+        order.instrument_id(),
+        order.client_order_id(),
+        None,
+        UUID4::new(),
+        UnixNanos::default(),
+        None,
+        None,
+    );
+
+    if quarantine_during_read {
+        h.exec_engine()
+            .borrow()
+            .execute(TradingCommand::QueryOrder(query.clone()));
+
+        let read_started = pump_until_venue(&mut h, || {
+            order_reads.load(std::sync::atomic::Ordering::Acquire) > reads_before
+        })
+        .await;
+
+        assert!(read_started);
+    }
+
+    h.mock_state
+        .send_user(user_trade("ws_user_trade_full.json", "FAILED"))
+        .await;
+    let blocked = reports_block(&mut h).await;
+    assert_eq!(blocked.unwrap().to_string(), UNRESOLVED_MASS_STATUS_ERROR);
+
+    if !quarantine_during_read {
+        h.exec_engine()
+            .borrow()
+            .execute(TradingCommand::QueryOrder(query.clone()));
+    }
+
+    drop(response);
+    h.pump_for(Duration::from_millis(200)).await;
+    let during = cached_order(&h, &order);
+    let reports_during = h
+        .routed()
+        .iter()
+        .filter(|kind| **kind == RoutedKind::Report)
+        .count();
+    let reads_during = order_reads.load(std::sync::atomic::Ordering::Acquire);
+    serve_rest_trades(&h, &[user_trade("ws_user_trade_full.json", "CONFIRMED")]).await;
+
+    let filled = h
+        .pump_until(DEADLINE, |cache| {
+            order_reached(cache, &order, OrderStatus::Filled)
+        })
+        .await;
+
+    assert!(reports_resume(&mut h).await);
+    h.exec_engine()
+        .borrow()
+        .execute(TradingCommand::QueryOrder(query));
+    let report_resumed = h.pump_until_routed(DEADLINE, RoutedKind::Report).await;
+    let after = cached_order(&h, &order);
+
+    assert_eq!(during.status(), OrderStatus::Accepted);
+    assert_eq!(during.filled_qty(), Quantity::from("0.0000"));
+    assert_eq!(reports_during, 0);
+    assert_eq!(
+        reads_during,
+        reads_before + usize::from(quarantine_during_read)
+    );
+    assert!(filled);
+    assert!(report_resumed);
+    assert_eq!(after.status(), OrderStatus::Filled);
+    assert_eq!(after.filled_qty(), Quantity::from("100.0000"));
+    assert_eq!(
+        event_count(&after, |event| matches!(event, OrderEventAny::Filled(_))),
+        1
+    );
+    assert_eq!(
+        event_count(&after, |event| matches!(
+            event,
+            OrderEventAny::FillVoided(_)
+        )),
+        0
+    );
+    assert_eq!(*declined.borrow(), Vec::<OrderEventAny>::new());
+}
+
+#[rstest]
+#[tokio::test]
+async fn contradictory_report_after_rest_failure_does_not_create_fill_or_void() {
+    let mut h = harness::Harness::build().await;
+    let declined = record_declined_fills();
+    let order = harness::limit_order(h.instrument_id(), "O-REPORT-TOMBSTONE");
+    submit_until_accepted(&mut h, &order).await;
+    serve_rest_trades(&h, &[user_trade("ws_user_trade_full.json", "FAILED")]).await;
+    h.mock_state
+        .send_user(user_trade("ws_user_trade_full.json", "FAILED"))
+        .await;
+    h.pump_for(Duration::from_millis(200)).await;
+    assert!(reports_resume(&mut h).await);
+    serve_rest_trades(&h, &[user_trade("ws_user_trade_full.json", "CONFIRMED")]).await;
+
+    let report = generate_mass_status(&h).await;
+    h.pump_for(Duration::from_millis(200)).await;
+    let cached = cached_order(&h, &order);
+
+    assert!(report.unwrap_err().to_string().contains("settled FAILED"));
+    assert_eq!(cached.status(), OrderStatus::Accepted);
+    assert_eq!(cached.filled_qty(), Quantity::from("0.0000"));
+    assert_eq!(cached.voided_qty(), Quantity::from("0.0000"));
+    assert_eq!(
+        event_count(&cached, |event| matches!(event, OrderEventAny::Filled(_))),
+        0
+    );
+    assert_eq!(
+        event_count(&cached, |event| matches!(
+            event,
+            OrderEventAny::FillVoided(_)
+        )),
+        0
+    );
+    assert!(
+        h.cache()
+            .borrow()
+            .positions_open(None, Some(&h.instrument_id()), None, None, None)
+            .is_empty()
+    );
     assert_eq!(*declined.borrow(), Vec::<OrderEventAny>::new());
 }
 

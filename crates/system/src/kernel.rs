@@ -43,8 +43,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "streaming")]
-use anyhow::Context;
 use nautilus_common::{
     cache::{Cache, CacheConfig, database::CacheDatabaseAdapter},
     clock::Clock,
@@ -70,8 +68,9 @@ use nautilus_execution::{
 use nautilus_model::identifiers::{ClientId, TraderId};
 #[cfg(feature = "streaming")]
 use nautilus_persistence::{
-    backend::default_writer_factories,
-    common::paths::environment_directory,
+    backend::{default_catalog_factories, default_writer_factories},
+    catalog::factory::create_catalog,
+    common::paths::{create_local_directory, environment_directory},
     config::{DataCatalogConfig, StreamingConfig},
     writer::{
         factory::{WriterConnectConfig, create_writer, replace_existing_writer_data},
@@ -224,6 +223,19 @@ impl NautilusKernel {
         connect.use_ts_event_for_ts_init = config.use_ts_event_for_ts_init;
 
         if config.replace_existing {
+            // Writer creation follows replacement, so open the catalog first to fail before the
+            // run directory is emptied.
+            if let Some(catalog) = &config.catalog
+                && let Some(catalog_connect) = &connect.catalog
+            {
+                create_local_directory(&catalog_connect.uri)?;
+                create_catalog(
+                    catalog.catalog_backend(),
+                    catalog_connect,
+                    &default_catalog_factories(),
+                )?;
+            }
+
             replace_existing_writer_data(&connect)?;
         }
 
@@ -416,6 +428,7 @@ impl NautilusKernel {
         let mut data_engine = data_engine;
         #[cfg(feature = "streaming")]
         {
+            let catalog_factories = default_catalog_factories();
             let mut unnamed_index = 0;
             let mut catalog_names = HashSet::new();
 
@@ -432,9 +445,15 @@ impl NautilusKernel {
                     catalog_names.insert(name.clone()),
                     "Duplicate data catalog name '{name}'",
                 );
-                let catalog = catalog_config.create_catalog().with_context(|| {
-                    format!(
-                        "Failed to create data catalog from '{}'",
+
+                let catalog = create_catalog(
+                    catalog_config.catalog_backend(),
+                    &catalog_config.connect_config(),
+                    &catalog_factories,
+                )
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to create data catalog from '{}': {e:#}",
                         catalog_config.path()
                     )
                 })?;
@@ -781,10 +800,15 @@ impl NautilusKernel {
 
         self.start_engines();
 
-        log::info!("Initializing trader");
-        if let Err(e) = self.trader.borrow_mut().initialize() {
-            log::error!("Error initializing trader: {e:?}");
-            return;
+        // `Trader::reset` ends in `Ready`, where `initialize` is an invalid transition
+        let trader_state = self.trader.borrow().state();
+        if trader_state == ComponentState::PreInitialized {
+            log::info!("Initializing trader");
+
+            if let Err(e) = self.trader.borrow_mut().initialize() {
+                log::error!("Error initializing trader: {e:?}");
+                return;
+            }
         }
 
         // Execution and data clients are started by their engines via `start_engines` above
@@ -1321,6 +1345,7 @@ mod streaming_tests {
         messages::data::{DataCommand, QuotesResponse, RequestCommand, RequestQuotes},
         msgbus::{self, MStr, ShareableMessageHandler},
     };
+    use nautilus_core::Params;
     use nautilus_model::{
         data::{CustomData, DataType, NautilusDataType, QuoteTick},
         identifiers::InstrumentId,
@@ -1414,6 +1439,34 @@ mod streaming_tests {
     }
 
     #[rstest]
+    fn test_configured_catalog_error_names_rejected_param() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().to_string_lossy().into_owned();
+        let mut params = Params::new();
+        params.insert("batch_size".to_string(), serde_json::json!(1024));
+
+        let config = KernelConfig {
+            catalogs: vec![
+                DataCatalogConfig::new(path.clone(), Some("file".to_string()), None)
+                    .with_params(Some(params)),
+            ],
+            ..KernelConfig::default()
+        };
+
+        let error = NautilusKernel::new("CatalogParamTest".to_string(), config)
+            .err()
+            .unwrap();
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Failed to create data catalog from '{path}': Unknown Parquet catalog param \
+                 'batch_size': this catalog takes no params"
+            )
+        );
+    }
+
+    #[rstest]
     fn test_configured_streaming_excludes_custom_data() {
         ensure_custom_data_registered::<RustTestCustomData>();
 
@@ -1458,7 +1511,23 @@ mod streaming_tests {
     }
 
     #[rstest]
-    fn test_invalid_streaming_config_fails_before_replacing_files() {
+    #[case::promotion_without_catalog(
+        None,
+        "promotion_interval_ms requires catalog: promotion needs a catalog"
+    )]
+    #[case::catalog_param(
+        Some(serde_json::json!({"params": {"batch_size": 1024}})),
+        "Unknown Parquet catalog param 'batch_size': this catalog takes no params"
+    )]
+    #[case::zero_batch_size(
+        Some(serde_json::json!({"batch_size": 0})),
+        "invalid batch_size: must be a positive number of rows; omit the field for the \
+         backend default"
+    )]
+    fn test_invalid_streaming_config_fails_before_replacing_files(
+        #[case] catalog_fields: Option<serde_json::Value>,
+        #[case] expected: &str,
+    ) {
         let directory = tempdir().unwrap();
         let instance_id = UUID4::new();
         let run_directory = directory
@@ -1469,9 +1538,17 @@ mod streaming_tests {
         let existing = run_directory.join("existing.feather");
         std::fs::write(&existing, b"preserve").unwrap();
 
+        let catalog_path = directory.path().join("catalog");
+
+        // Deserialized like a config file, which skips `DataCatalogConfig::validate`
+        let catalog = catalog_fields.map(|mut fields| {
+            fields["path"] = serde_json::json!(catalog_path.to_string_lossy());
+            serde_json::from_value::<DataCatalogConfig>(fields).unwrap()
+        });
+
         let mut streaming = StreamingConfig::new(
             directory.path().to_string_lossy().into_owned(),
-            None,
+            catalog,
             1_000,
             true,
             RotationConfig::NoRotation,
@@ -1488,11 +1565,47 @@ mod streaming_tests {
         .err()
         .unwrap();
 
-        assert_eq!(
-            error.to_string(),
-            "promotion_interval_ms requires catalog: promotion needs a catalog"
-        );
+        assert_eq!(error.to_string(), expected);
         assert_eq!(std::fs::read(&existing).unwrap(), b"preserve");
+    }
+
+    #[rstest]
+    fn test_streaming_replace_existing_creates_missing_catalog_directory() {
+        let directory = tempdir().unwrap();
+        let instance_id = UUID4::new();
+        let run_directory = directory
+            .path()
+            .join("backtest")
+            .join(instance_id.to_string());
+        std::fs::create_dir_all(&run_directory).unwrap();
+        let existing = run_directory.join("existing.feather");
+        std::fs::write(&existing, b"replace").unwrap();
+        let catalog_path = directory.path().join("catalog");
+
+        let streaming = StreamingConfig::new(
+            directory.path().to_string_lossy().into_owned(),
+            Some(DataCatalogConfig::new(
+                catalog_path.to_string_lossy().into_owned(),
+                None,
+                None,
+            )),
+            1_000,
+            true,
+            RotationConfig::NoRotation,
+        );
+        let clock: Rc<RefCell<dyn Clock>> = Rc::new(RefCell::new(VirtualClock::new()));
+
+        let (_, subscription) = NautilusKernel::setup_streaming_writer(
+            Environment::Backtest,
+            instance_id,
+            &streaming,
+            &clock,
+        )
+        .unwrap();
+        subscription.close().unwrap();
+
+        assert!(!existing.exists());
+        assert!(catalog_path.is_dir());
     }
 
     #[rstest]
@@ -1539,7 +1652,7 @@ mod streaming_tests {
 
         let mut catalog = ParquetDataCatalog::new(&catalog_path, None, None, None, None);
         let promoted = catalog
-            .query_typed_data::<QuoteTick>(None, None, None, None, None, true)
+            .query::<QuoteTick>(None, None, None, None, None, true)
             .unwrap();
         let run_directory = writer_directory
             .path()
@@ -1559,6 +1672,7 @@ mod lifecycle_tests {
     use nautilus_common::{
         actor::registry::get_actor_unchecked,
         cache::Cache,
+        clock::VirtualClock,
         messages::data::{DataCommand, SubscribeCommand, UnsubscribeCommand},
         msgbus::stubs::{TypedIntoMessageSavingHandler, get_typed_into_message_saving_handler},
     };
@@ -2152,5 +2266,32 @@ mod lifecycle_tests {
 
         drop(emulator);
         kernel.dispose();
+    }
+
+    #[rstest]
+    fn test_start_after_reset_skips_trader_initialize() {
+        let mut kernel = NautilusKernelBuilder::default().build().unwrap();
+        kernel.start();
+        kernel.start_trader().unwrap();
+        kernel.stop_trader();
+        kernel.reset();
+        let restart_ns = UnixNanos::from(1_700_000_000_000_000_000);
+        kernel
+            .clock
+            .borrow_mut()
+            .as_any_mut()
+            .downcast_mut::<VirtualClock>()
+            .unwrap()
+            .set_time(restart_ns);
+
+        kernel.start();
+        let ts_started = kernel.ts_started();
+        kernel.start_trader().unwrap();
+        let trader_state = kernel.trader.borrow().state();
+        kernel.stop_trader();
+        kernel.dispose();
+
+        assert_eq!(ts_started, Some(restart_ns));
+        assert_eq!(trader_state, ComponentState::Running);
     }
 }

@@ -23,7 +23,10 @@ use nautilus_model::{
     python::{instruments::instrument_any_to_pyobject, orders::order_any_to_pyobject},
     types::Price,
 };
-use pyo3::prelude::*;
+use pyo3::{
+    prelude::*,
+    types::{PyDict, PyTuple},
+};
 
 use crate::models::fill::{
     AdverseSelectionFillModel, BestPriceFillModel, CompetitionAwareFillModel, DefaultFillModel,
@@ -43,11 +46,13 @@ use crate::models::fill::{
 #[derive(Debug)]
 pub struct PyFillModel;
 
-#[pymethods]
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
+#[pymethods]
 impl PyFillModel {
     #[new]
-    fn py_new() -> Self {
+    #[gen_stub(override_return_type(type_repr = "typing.Self", imports = ("typing",)))]
+    #[pyo3(signature = (*_args, **_kwargs))]
+    fn py_new(_args: &Bound<'_, PyTuple>, _kwargs: Option<&Bound<'_, PyDict>>) -> Self {
         Self
     }
 

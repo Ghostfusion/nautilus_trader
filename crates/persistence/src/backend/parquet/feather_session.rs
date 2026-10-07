@@ -451,7 +451,7 @@ impl ParquetDataCatalog {
 
     /// Reads a feather file and returns all `RecordBatches`.
     fn read_feather_file(&self, file_path: &str) -> anyhow::Result<Vec<RecordBatch>> {
-        let path = ObjectPath::from(file_path);
+        let path = self.to_object_path_parsed(file_path)?;
 
         let batches = self.execute_async(|| async {
             read_feather_record_batches(self.object_store.clone(), &path).await
@@ -1703,7 +1703,7 @@ mod read_run_tests {
 
         assert_eq!(
             catalog
-                .query_typed_data::<QuoteTick>(None, None, None, None, None, true)
+                .query::<QuoteTick>(None, None, None, None, None, true)
                 .unwrap(),
             vec![quote_aud(1_000), quote_eth(2_000)],
         );
@@ -1755,7 +1755,7 @@ mod read_run_tests {
 
         assert_eq!(
             catalog
-                .query_typed_data::<QuoteTick>(None, None, None, None, None, true)
+                .query::<QuoteTick>(None, None, None, None, None, true)
                 .unwrap(),
             vec![quote_aud(1_000)],
         );

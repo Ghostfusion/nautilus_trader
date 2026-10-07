@@ -58,6 +58,8 @@ from nautilus_trader.model import InstrumentId
 from nautilus_trader.model import LeveragedMarginModel
 from nautilus_trader.model import Money
 from nautilus_trader.model import NautilusDataType
+from nautilus_trader.model import NautilusInstrumentType
+from nautilus_trader.model import NautilusRecordType
 from nautilus_trader.model import OmsType
 from nautilus_trader.model import OtoTriggerMode
 from nautilus_trader.model import PriceType
@@ -65,6 +67,7 @@ from nautilus_trader.model import StandardMarginModel
 from nautilus_trader.persistence import CatalogBackend
 from nautilus_trader.persistence import DataCatalogConfig
 from nautilus_trader.persistence import RotationConfig
+from nautilus_trader.persistence import RotationMode
 from nautilus_trader.persistence import StreamingConfig
 from nautilus_trader.risk import RiskEngineConfig
 from nautilus_trader.trading import ImportableControllerConfig
@@ -202,6 +205,89 @@ def test_engine_config_accepts_streaming_and_catalog_configs(
     assert config.catalogs == [catalog]
 
 
+def test_data_catalog_config_exposes_constructor_values() -> None:
+    """
+    Test data catalog config keeps every constructor value and parses the codec name.
+    """
+    config = DataCatalogConfig(
+        path="bucket/catalog",
+        fs_protocol="s3",
+        catalog_backend=CatalogBackend.External("DuckLake"),
+        params={"snapshot_id": 7},
+        name="history",
+        read_only=True,
+        fs_rust_storage_options={"region": "eu-west-1"},
+        batch_size=512,
+        compression="ZSTD",
+        max_row_group_size=2048,
+    )
+
+    assert config.path == "bucket/catalog"
+    assert config.fs_protocol == "s3"
+    assert config.catalog_backend == CatalogBackend.External("DuckLake")
+    assert config.params == {"snapshot_id": 7}
+    assert config.name == "history"
+    assert config.read_only is True
+    assert config.fs_rust_storage_option_keys == ["region"]
+    assert config.batch_size == 512
+    assert config.compression == "zstd"
+    assert config.max_row_group_size == 2048
+
+
+def test_data_catalog_config_defaults_typed_settings_to_none() -> None:
+    """
+    Test data catalog config leaves the typed settings to the backend defaults.
+    """
+    config = DataCatalogConfig(path="/data/catalog")
+
+    assert config.batch_size is None
+    assert config.compression is None
+    assert config.max_row_group_size is None
+
+
+def test_data_catalog_config_repr_redacts_storage_option_values() -> None:
+    """
+    Test data catalog config repr shows storage option keys with redacted values.
+    """
+    config = DataCatalogConfig(
+        path="bucket/catalog",
+        fs_protocol="s3",
+        fs_rust_storage_options={"aws_secret_access_key": "catalog-secret-sentinel"},
+    )
+
+    result = repr(config)
+
+    assert "catalog-secret-sentinel" not in result
+    assert 'fs_rust_storage_options: Some({"aws_secret_access_key": <redacted>})' in result
+
+
+@pytest.mark.parametrize("compression", ["lzo", "zip"])
+def test_data_catalog_config_rejects_unsupported_compression(compression: str) -> None:
+    """
+    Test data catalog config rejects LZO and unknown codec names at construction.
+    """
+    with pytest.raises(ValueError, match="unknown compression") as exc_info:
+        DataCatalogConfig(path="/data/catalog", compression=compression)
+
+    assert str(exc_info.value) == (
+        f"unknown compression `{compression}`; "
+        "valid values: uncompressed, snappy, gzip, brotli, lz4, zstd"
+    )
+
+
+@pytest.mark.parametrize("field", ["batch_size", "max_row_group_size"])
+def test_data_catalog_config_rejects_zero_count(field: str) -> None:
+    """
+    Test data catalog config rejects a zero row count at construction.
+    """
+    with pytest.raises(ValueError, match=f"invalid {field}") as exc_info:
+        DataCatalogConfig(path="/data/catalog", **{field: 0})
+
+    assert str(exc_info.value) == (
+        f"invalid {field}: must be a positive number of rows; omit the field for the backend default"
+    )
+
+
 def test_streaming_config_defaults_to_feather_without_catalog() -> None:
     """
     Test streaming config keeps only Feather files when no catalog is configured.
@@ -213,7 +299,7 @@ def test_streaming_config_defaults_to_feather_without_catalog() -> None:
     assert config.writer_backend == "Feather"
     assert config.flush_interval_ms == 1000
     assert config.replace_existing is False
-    assert config.rotation_config.mode == "no_rotation"
+    assert config.rotation_config.mode == RotationMode.NO_ROTATION
     assert config.rotation_config.timezone is None
     assert config.promotion_interval_ms is None
     assert config.promote_on_close is True
@@ -272,7 +358,7 @@ def test_streaming_config_exposes_scheduled_rotation() -> None:
         ),
     )
 
-    assert config.rotation_config.mode == "scheduled_dates"
+    assert config.rotation_config.mode == RotationMode.SCHEDULED_DATES
     assert config.rotation_config.interval_ns == 5_000
     assert config.rotation_config.schedule_ns == 750
     assert config.rotation_config.timezone == "Australia/Sydney"
@@ -309,6 +395,40 @@ def test_rotation_config_rejects_invalid_parameters(
     """
     with pytest.raises(ValueError, match=f"invalid {field}"):
         create()
+
+
+def test_streaming_config_types_are_enums() -> None:
+    """
+    Test streaming config keeps its type selectors and record filters as enums.
+    """
+    config = StreamingConfig(
+        writer_path="/data/output",
+        data_types=[NautilusDataType.QuoteTick, NautilusRecordType.OrderFilled],
+        instrument_types=[NautilusInstrumentType.Equity],
+        record_filters={NautilusRecordType.AccountState: ["SIM-001"]},
+    )
+
+    assert config.data_types == [NautilusDataType.QuoteTick]
+    assert config.record_types == [NautilusRecordType.OrderFilled]
+    assert config.instrument_types == [NautilusInstrumentType.Equity]
+    assert config.record_filters == {NautilusRecordType.AccountState: ["SIM-001"]}
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"data_types": ["quotes"]}, "streaming type must be NautilusDataType"),
+        ({"record_types": ["order_filled"]}, "record_type must be NautilusRecordType"),
+        ({"instrument_types": ["equity"]}, "instrument_type must be NautilusInstrumentType"),
+        ({"record_filters": {"account_state": None}}, "record_type must be NautilusRecordType"),
+    ],
+)
+def test_streaming_config_rejects_type_strings(kwargs: dict, message: str) -> None:
+    """
+    Test streaming config rejects strings where it expects type enums.
+    """
+    with pytest.raises(TypeError, match=message):
+        StreamingConfig(writer_path="/data/output", **kwargs)
 
 
 def test_streaming_config_rejects_flat_rotation_arguments() -> None:
@@ -846,6 +966,26 @@ def test_data_config_repr() -> None:
         instrument_id=InstrumentId.from_str("EUR/USD.SIM"),
     )
     assert "BacktestDataConfig" in repr(config)
+
+
+def test_data_config_repr_redacts_storage_option_values() -> None:
+    """
+    Test data config repr shows storage option keys with redacted values.
+    """
+    config = BacktestDataConfig(
+        data_type=NautilusDataType.TradeTick,
+        catalog_path="/data/catalog",
+        catalog_fs_storage_options={"key": "fs-key-sentinel"},
+        catalog_fs_rust_storage_options={"aws_secret_access_key": "rust-secret-sentinel"},
+        instrument_id=InstrumentId.from_str("EUR/USD.SIM"),
+    )
+
+    result = repr(config)
+
+    assert "fs-key-sentinel" not in result
+    assert "rust-secret-sentinel" not in result
+    assert 'catalog_fs_storage_options: Some({"key": <redacted>})' in result
+    assert 'catalog_fs_rust_storage_options: Some({"aws_secret_access_key": <redacted>})' in result
 
 
 def test_run_config_auto_id() -> None:

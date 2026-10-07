@@ -32,7 +32,10 @@ use nautilus_model::{
 };
 use nautilus_persistence::{
     backend::{migration::build_catalog_migration_plan, parquet::catalog::ParquetDataCatalog},
-    catalog::traits::{CatalogInstrumentQuery, CatalogQuery, CatalogReader, CatalogWriter},
+    catalog::{
+        traits::{CatalogInstrumentQuery, CatalogQuery, CatalogReader, CatalogWriter},
+        types::parquet_catalog_data_type_path_prefixes,
+    },
 };
 use serde_json::{Value, json};
 
@@ -61,19 +64,21 @@ fn inspect(args: &CatalogDataOpt) -> anyhow::Result<()> {
     let mut catalog = open_catalog(&args.catalog, &args.storage_options)?;
 
     let mut data_types = Vec::new();
-    for name in catalog.list_data_types()? {
-        let directory = format!("data/{name}");
-        let intervals = catalog.get_directory_intervals(&directory)?;
-        let coverage: Vec<Value> = intervals
-            .iter()
-            .map(|(start, end)| json!({"start_ns": start, "end_ns": end}))
-            .collect();
-        data_types.push(json!({
-            "name": name,
-            "identifiers": catalog.list_directory_stems(&directory)?,
-            "files": intervals.len(),
-            "coverage": coverage,
-        }));
+    for data_type in catalog.list_data_types()? {
+        for name in parquet_catalog_data_type_path_prefixes(&data_type) {
+            let directory = format!("data/{name}");
+            let intervals = catalog.get_directory_intervals(&directory)?;
+            let coverage: Vec<Value> = intervals
+                .iter()
+                .map(|(start, end)| json!({"start_ns": start, "end_ns": end}))
+                .collect();
+            data_types.push(json!({
+                "name": name.as_ref(),
+                "identifiers": catalog.list_directory_stems(&directory)?,
+                "files": intervals.len(),
+                "coverage": coverage,
+            }));
+        }
     }
 
     let instruments = CatalogReader::instruments(&mut catalog, &CatalogInstrumentQuery::new())?;
@@ -138,23 +143,25 @@ fn validate(args: &CatalogDataOpt) -> anyhow::Result<()> {
         Err(error) => problems.push(format!("catalog schema preflight failed: {error}")),
     }
 
-    for name in catalog.list_data_types()? {
-        let query = match resolve_family(&name) {
-            Some(FamilySelector::Data(data_type)) => {
-                if matches!(data_type, NautilusDataType::Custom { .. }) {
-                    continue;
+    for data_type in catalog.list_data_types()? {
+        for name in parquet_catalog_data_type_path_prefixes(&data_type) {
+            let query = match resolve_family(&name) {
+                Some(FamilySelector::Data(data_type)) => {
+                    if matches!(data_type, NautilusDataType::Custom { .. }) {
+                        continue;
+                    }
+                    CatalogQuery::new(data_type)
                 }
-                CatalogQuery::new(data_type)
-            }
-            Some(FamilySelector::InstrumentClass(instrument_type)) => {
-                CatalogQuery::new(NautilusDataType::Instrument)
-                    .with_instrument_type(Some(instrument_type))
-            }
-            None => continue,
-        };
+                Some(FamilySelector::InstrumentClass(instrument_type)) => {
+                    CatalogQuery::new(NautilusDataType::Instrument)
+                        .with_instrument_type(Some(instrument_type))
+                }
+                None => continue,
+            };
 
-        if let Err(error) = CatalogReader::query_batch(&mut catalog, &query) {
-            problems.push(format!("failed to read data type '{name}': {error}"));
+            if let Err(error) = CatalogReader::query_batch(&mut catalog, &query) {
+                problems.push(format!("failed to read data type '{name}': {error}"));
+            }
         }
     }
 
@@ -210,7 +217,12 @@ fn convert(args: &CatalogConvertOpt) -> anyhow::Result<()> {
     let mut target = open_catalog(&args.destination, &args.target_options)?;
     ensure_target_empty(&target)?;
 
-    let present = source.list_data_types()?;
+    let present: Vec<String> = source
+        .list_data_types()?
+        .iter()
+        .flat_map(parquet_catalog_data_type_path_prefixes)
+        .map(|name| name.into_owned())
+        .collect();
     let selected: Vec<String> = if args.data_types.is_empty() {
         present.clone()
     } else {

@@ -4029,6 +4029,7 @@ impl ExecutionEngine {
                     fill.last_qty,
                     order.quantity()
                 );
+                log::warn!("{msg}");
                 anyhow::bail!("{msg}");
             }
         }
@@ -4468,16 +4469,35 @@ impl ExecutionEngine {
                     return Vec::new();
                 }
 
+                // Copy these before `fill` moves into `open_position`
+                let instrument_id = fill.instrument_id;
+                let trade_id = fill.trade_id;
+
                 self.open_position(instrument, None, true, fill, oms_type)
-                    .unwrap_or_default()
+                    .unwrap_or_else(|e| {
+                        log::error!(
+                            "Failed to open position {position_id} for instrument \
+                             {instrument_id} from fill {trade_id}: {e:?}"
+                        );
+                        Vec::new()
+                    })
             }
             Action::Reopen => {
                 if self.reject_reduce_only_position_open(&fill, oms_type) {
                     return Vec::new();
                 }
 
+                let instrument_id = fill.instrument_id;
+                let trade_id = fill.trade_id;
+
                 self.open_position(instrument, Some(position_id), true, fill, oms_type)
-                    .unwrap_or_default()
+                    .unwrap_or_else(|e| {
+                        log::error!(
+                            "Failed to reopen position {position_id} for instrument \
+                             {instrument_id} from fill {trade_id}: {e:?}"
+                        );
+                        Vec::new()
+                    })
             }
             Action::Flip(mut position) => {
                 self.flip_position(instrument, &mut position, &fill, oms_type)

@@ -303,6 +303,7 @@ pub fn dispatch_ws_message(
         BybitWsMessage::Auth(_)
         | BybitWsMessage::Orderbook(_)
         | BybitWsMessage::Trade(_)
+        | BybitWsMessage::Liquidation(_)
         | BybitWsMessage::Kline(_)
         | BybitWsMessage::TickerLinear(_)
         | BybitWsMessage::TickerOption(_) => {}

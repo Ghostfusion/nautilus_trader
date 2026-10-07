@@ -17,7 +17,12 @@
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
-use nautilus_analysis::{Returns, analyzer::Statistic, statistic::PortfolioStatistic};
+use nautilus_analysis::{
+    Returns,
+    analyzer::Statistic,
+    metric::{MetricDefinition, MetricDirection, MetricInput, MetricUnits},
+    statistic::PortfolioStatistic,
+};
 use nautilus_common::{
     cache::Cache,
     clock::{Clock, VirtualClock},
@@ -51,8 +56,9 @@ use nautilus_model::{
     instruments::{
         CryptoFuture, CryptoPerpetual, CurrencyPair, Instrument, InstrumentAny,
         stubs::{
-            audusd_sim, betting, binary_option, btcusd_bybit, currency_pair_btcusdt,
-            default_fx_ccy, equity_aapl, ethusd_bybit, futures_spread_es,
+            audusd_sim, betting, binary_option, btcusd_bybit, commodity_gold,
+            crypto_futures_spread_btc_deribit, crypto_option_btc_deribit, currency_pair_btcusdt,
+            default_fx_ccy, equity_aapl, ethusd_bybit, futures_contract_es, futures_spread_es,
         },
     },
     orders::{Order, OrderAny, OrderTestBuilder},
@@ -9122,6 +9128,97 @@ fn test_missing_price_tracked_for_unpriced_margin_position(
 }
 
 #[rstest]
+fn test_missing_price_tracked_for_unpriced_cash_snapshot(
+    mut portfolio: Portfolio,
+    instrument_audusd: InstrumentAny,
+) {
+    let account_id = AccountId::new("SIM-001");
+    portfolio.update_account(&get_cash_account(Some(account_id.as_str())));
+
+    let fill = make_fill_for_account(
+        &instrument_audusd,
+        account_id,
+        OrderSide::Buy,
+        Quantity::from("1"),
+        Price::new(100.0, 0),
+        PositionId::new("P-CUP1"),
+    );
+    portfolio
+        .cache()
+        .borrow_mut()
+        .add_position(&Position::new(&instrument_audusd, fill), OmsType::Hedging)
+        .unwrap();
+
+    let snapshot = portfolio.build_snapshot(&account_id).unwrap();
+
+    assert_eq!(snapshot.unpriced_instruments, vec![instrument_audusd.id()]);
+    assert_eq!(
+        portfolio.missing_price_instruments(&Venue::test_default(), Some(&account_id)),
+        vec![instrument_audusd.id()],
+        "cash snapshot path must track unpriced open positions"
+    );
+}
+
+// Positions restored before the first account state (for example from a database
+// cache) are unpriced when the equity curve takes its registration snapshot
+#[rstest]
+#[case::margin(get_margin_account(Some("SIM-001")))]
+#[case::cash(get_cash_account(Some("SIM-001")))]
+fn test_equity_curve_snapshot_does_not_latch_missing_prices(
+    #[case] state: AccountState,
+    mut portfolio: Portfolio,
+    instrument_audusd: InstrumentAny,
+    instrument_gbpusd: InstrumentAny,
+) {
+    let account_id = state.account_id;
+    let venue = Venue::test_default();
+
+    for (instrument, position_id) in [
+        (&instrument_audusd, PositionId::new("P-RESTORED-1")),
+        (&instrument_gbpusd, PositionId::new("P-RESTORED-2")),
+    ] {
+        let fill = make_fill_for_account(
+            instrument,
+            account_id,
+            OrderSide::Buy,
+            Quantity::from("1"),
+            Price::new(100.0, 0),
+            position_id,
+        );
+        portfolio
+            .cache()
+            .borrow_mut()
+            .add_position(&Position::new(instrument, fill), OmsType::Hedging)
+            .unwrap();
+    }
+
+    portfolio.update_account(&state);
+
+    let snapshots = portfolio.snapshots(&account_id);
+    assert_eq!(snapshots.len(), 1);
+    assert!(snapshots[0].is_stale);
+    assert_eq!(
+        snapshots[0].unpriced_instruments,
+        vec![instrument_audusd.id(), instrument_gbpusd.id()],
+    );
+    assert!(portfolio.missing_price_instruments(&venue, None).is_empty());
+
+    for instrument in [&instrument_audusd, &instrument_gbpusd] {
+        let quote = get_quote_tick(instrument, 100.0, 101.0, 1.0, 1.0);
+        portfolio.cache().borrow_mut().add_quote(quote).unwrap();
+        portfolio.update_quote_tick(&quote);
+    }
+
+    assert!(portfolio.unrealized_pnls(&venue, None, None).is_some());
+    assert!(portfolio.missing_price_instruments(&venue, None).is_empty());
+    assert!(
+        portfolio
+            .missing_price_instruments(&venue, Some(&account_id))
+            .is_empty()
+    );
+}
+
+#[rstest]
 fn test_margin_snapshot_keeps_priced_pnl_when_another_instrument_is_unpriced(
     mut portfolio: Portfolio,
     instrument_audusd: InstrumentAny,
@@ -10411,6 +10508,16 @@ impl PortfolioStatistic for InputCountStatistic {
         "Input Count".to_string()
     }
 
+    fn definition(&self) -> MetricDefinition {
+        MetricDefinition::new(
+            "input_count",
+            "Input Count",
+            MetricUnits::Ratio,
+            MetricDirection::Informational,
+            [MetricInput::Returns],
+        )
+    }
+
     fn calculate_from_returns(&self, returns: &Returns) -> Option<f64> {
         Some(returns.len() as f64)
     }
@@ -10723,4 +10830,221 @@ fn open_order(portfolio: &mut Portfolio, order: &mut OrderAny, account: AccountI
         .update_order(&OrderEventAny::Accepted(accepted))
         .expect("cache should accept the accepted order");
     portfolio.update_order(&OrderEventAny::Accepted(accepted));
+}
+
+fn open_position_at(
+    portfolio: &mut Portfolio,
+    instrument: InstrumentAny,
+    account_id: AccountId,
+    side: OrderSide,
+    px: f64,
+    bid: f64,
+    ask: f64,
+) -> InstrumentAny {
+    portfolio
+        .cache()
+        .borrow_mut()
+        .add_instrument(instrument.clone())
+        .unwrap();
+    portfolio.update_account(&get_cash_account(Some(account_id.as_str())));
+    set_quote(portfolio, &instrument, bid, ask, "1");
+
+    let fill = make_fill_for_account(
+        &instrument,
+        account_id,
+        side,
+        Quantity::from("1"),
+        Price::new(px, instrument.price_precision()),
+        PositionId::new("P-NEG-PRICE"),
+    );
+    let position = Position::new(&instrument, fill);
+    portfolio
+        .cache()
+        .borrow_mut()
+        .add_position(&position, OmsType::Hedging)
+        .unwrap();
+    portfolio.update_position(&PositionEvent::PositionOpened(get_open_position(&position)));
+    instrument
+}
+
+fn set_quote(
+    portfolio: &mut Portfolio,
+    instrument: &InstrumentAny,
+    bid: f64,
+    ask: f64,
+    size: &str,
+) {
+    let quote = QuoteTick::new(
+        instrument.id(),
+        Price::new(bid, instrument.price_precision()),
+        Price::new(ask, instrument.price_precision()),
+        Quantity::from(size),
+        Quantity::from(size),
+        0.into(),
+        0.into(),
+    );
+    portfolio.cache().borrow_mut().add_quote(quote).unwrap();
+    portfolio.update_quote_tick(&quote);
+}
+
+#[rstest]
+#[case::futures_spread_negative(InstrumentAny::FuturesSpread(futures_spread_es()), -5.0, -4.9, 5.0)]
+#[case::futures_spread_zero(InstrumentAny::FuturesSpread(futures_spread_es()), 0.0, 0.1, 10.0)]
+#[case::futures_negative(
+    InstrumentAny::FuturesContract(futures_contract_es(None, None)),
+    -5.0,
+    -4.9,
+    5.0
+)]
+#[case::spot_commodity_negative(InstrumentAny::Commodity(commodity_gold()), -5.0, -4.9, 5.0)]
+fn test_unrealized_pnl_values_negative_price_instrument_at_non_positive_quote(
+    mut portfolio: Portfolio,
+    #[case] instrument: InstrumentAny,
+    #[case] bid: f64,
+    #[case] ask: f64,
+    #[case] expected_pnl: f64,
+) {
+    let account_id = AccountId::new("SIM-001");
+    let instrument = open_position_at(
+        &mut portfolio,
+        instrument,
+        account_id,
+        OrderSide::Buy,
+        -10.0,
+        bid,
+        ask,
+    );
+    let venue = instrument.id().venue;
+
+    // Long 1 @ -10.00 marked at the bid with multiplier 1
+    assert_eq!(
+        portfolio.unrealized_pnl(&instrument.id()),
+        Some(Money::new(expected_pnl, Currency::USD()))
+    );
+    let snapshot = portfolio.build_snapshot(&account_id).unwrap();
+    assert!(!snapshot.is_stale);
+    assert!(snapshot.unpriced_instruments.is_empty());
+    assert!(portfolio.missing_price_instruments(&venue, None).is_empty());
+}
+
+#[rstest]
+fn test_unrealized_pnl_does_not_carry_positive_price_over_negative_quote(mut portfolio: Portfolio) {
+    let account_id = AccountId::new("SIM-001");
+    let spread = InstrumentAny::FuturesSpread(futures_spread_es());
+    let instrument = open_position_at(
+        &mut portfolio,
+        spread,
+        account_id,
+        OrderSide::Buy,
+        4.0,
+        5.0,
+        5.1,
+    );
+    assert_eq!(
+        portfolio.unrealized_pnl(&instrument.id()),
+        Some(Money::new(1.0, Currency::USD()))
+    );
+
+    set_quote(&mut portfolio, &instrument, -2.0, -1.9, "1");
+
+    // Long 1 @ 4.00 marked at bid -2.00 with multiplier 1
+    assert_eq!(
+        portfolio.unrealized_pnl(&instrument.id()),
+        Some(Money::new(-6.0, Currency::USD()))
+    );
+    let snapshot = portfolio.build_snapshot(&account_id).unwrap();
+    assert!(!snapshot.is_stale);
+    assert!(snapshot.stale_instruments.is_empty());
+}
+
+// Options value their premium linearly even when inverse, so an inverse option is marked at a
+// zero bid like any other option
+#[rstest]
+fn test_unrealized_pnl_values_inverse_option_at_zero_quote(mut portfolio: Portfolio) {
+    let account_id = AccountId::new("SIM-001");
+    let mut option = crypto_option_btc_deribit(3, 1, Price::from("0.001"), Quantity::from("0.1"));
+    option.is_inverse = true;
+    let option = InstrumentAny::CryptoOption(option);
+    let instrument = open_position_at(
+        &mut portfolio,
+        option,
+        account_id,
+        OrderSide::Buy,
+        0.05,
+        0.0,
+        0.001,
+    );
+
+    // Long 1 @ 0.050 marked at bid 0.000 with multiplier 1, in the BTC settlement currency
+    assert_eq!(
+        portfolio.unrealized_pnl(&instrument.id()),
+        Some(Money::new(-0.05, Currency::BTC()))
+    );
+    let snapshot = portfolio.build_snapshot(&account_id).unwrap();
+    assert!(!snapshot.is_stale);
+    assert!(snapshot.unpriced_instruments.is_empty());
+}
+
+// Inverse futures spread notional divides by price, so a price at or below zero is skipped and the
+// last valid price carried forward, even though the class allows negative prices
+#[rstest]
+#[case::zero(0.0, 0.5)]
+#[case::negative(-5.0, -4.5)]
+fn test_unrealized_pnl_carries_price_over_non_positive_quote_for_inverse_spread(
+    mut portfolio: Portfolio,
+    #[case] bid: f64,
+    #[case] ask: f64,
+) {
+    let account_id = AccountId::new("SIM-001");
+    let mut spread = crypto_futures_spread_btc_deribit();
+    spread.is_inverse = true;
+    let spread = InstrumentAny::CryptoFuturesSpread(spread);
+    let instrument = open_position_at(
+        &mut portfolio,
+        spread,
+        account_id,
+        OrderSide::Buy,
+        50.0,
+        60.0,
+        60.5,
+    );
+    let pnl_at_last_valid_price = portfolio.unrealized_pnl(&instrument.id());
+    assert!(pnl_at_last_valid_price.is_some());
+
+    set_quote(&mut portfolio, &instrument, bid, ask, "1");
+
+    assert_eq!(
+        portfolio.unrealized_pnl(&instrument.id()),
+        pnl_at_last_valid_price
+    );
+    let snapshot = portfolio.build_snapshot(&account_id).unwrap();
+    assert!(snapshot.stale_instruments.contains(&instrument.id()));
+}
+
+// An empty quote side can arrive as a zero price with zero size, which is not a mark
+#[rstest]
+fn test_unrealized_pnl_skips_empty_zero_quote_side(mut portfolio: Portfolio) {
+    let account_id = AccountId::new("SIM-001");
+    let mut option = crypto_option_btc_deribit(3, 1, Price::from("0.001"), Quantity::from("0.1"));
+    option.is_inverse = true;
+    let option = InstrumentAny::CryptoOption(option);
+    let instrument = open_position_at(
+        &mut portfolio,
+        option,
+        account_id,
+        OrderSide::Sell,
+        0.05,
+        0.04,
+        0.05,
+    );
+
+    set_quote(&mut portfolio, &instrument, 0.0, 0.0, "0");
+
+    // Short 1 @ 0.050 still marked at the last ask 0.050
+    assert_eq!(
+        portfolio.unrealized_pnl(&instrument.id()),
+        Some(Money::new(0.0, Currency::BTC()))
+    );
+    let snapshot = portfolio.build_snapshot(&account_id).unwrap();
+    assert!(snapshot.stale_instruments.contains(&instrument.id()));
 }

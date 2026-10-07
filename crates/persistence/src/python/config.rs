@@ -15,27 +15,30 @@
 
 //! Python bindings for persistence configuration types.
 
+use std::str::FromStr;
+
 use nautilus_common::python::config_error_to_pyvalue_err;
 use nautilus_core::{
     DurationNanos, UnixNanos, from_pydict,
-    python::{params::params_to_pydict, to_pytype_err, to_pyvalue_err},
+    python::{enums::parse_enum, params::params_to_pydict, to_pytype_err, to_pyvalue_err},
 };
 use nautilus_model::{
     data::{NautilusDataType, NautilusRecordType},
     instruments::NautilusInstrumentType,
     python::{
+        common::EnumIterator,
         data::{PyNautilusDataType, PyNautilusRecordType},
         instruments::PyNautilusInstrumentType,
     },
 };
 use pyo3::{
-    Bound, Py, PyAny, PyRef, PyResult, Python,
-    types::{PyAnyMethods, PyDict},
+    Bound, Py, PyAny, PyRef, PyResult, PyTypeInfo, Python,
+    types::{PyAnyMethods, PyDict, PyType},
 };
 
 use crate::config::{
-    CatalogBackendType, DEFAULT_ROTATION_TIMEZONE, DataCatalogConfig, RotationConfig,
-    StreamingConfig, StreamingRecordFilterConfig,
+    CatalogBackendType, CatalogCompression, DEFAULT_ROTATION_TIMEZONE, DataCatalogConfig,
+    RotationConfig, RotationMode, StreamingConfig, StreamingRecordFilterConfig,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -221,13 +224,8 @@ impl PyRotationConfig {
     }
 
     #[getter]
-    fn mode(&self) -> &'static str {
-        match self.inner {
-            RotationConfig::Size { .. } => "size",
-            RotationConfig::Interval { .. } => "interval",
-            RotationConfig::ScheduledDates { .. } => "scheduled_dates",
-            RotationConfig::NoRotation => "no_rotation",
-        }
+    const fn mode(&self) -> RotationMode {
+        self.inner.mode()
     }
 
     #[getter]
@@ -265,6 +263,53 @@ impl PyRotationConfig {
 
     fn __repr__(&self) -> String {
         format!("{:?}", self.inner)
+    }
+}
+
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+#[pyo3::pymethods]
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "PyO3 enum methods take self by reference for Python API parity"
+)]
+impl RotationMode {
+    /// The rotation policy of a streaming writer, without its parameters.
+    #[new]
+    fn py_new(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let t = Self::type_object(py);
+        Self::py_from_str(&t, value)
+    }
+
+    const fn __hash__(&self) -> isize {
+        *self as isize
+    }
+
+    fn __str__(&self) -> String {
+        self.to_string()
+    }
+
+    #[getter]
+    #[must_use]
+    pub fn name(&self) -> String {
+        self.to_string()
+    }
+
+    #[getter]
+    #[must_use]
+    pub const fn value(&self) -> u8 {
+        *self as u8
+    }
+
+    #[classmethod]
+    fn variants(_: &Bound<'_, PyType>, py: Python<'_>) -> EnumIterator {
+        EnumIterator::new::<Self>(py)
+    }
+
+    #[classmethod]
+    #[pyo3(name = "from_str")]
+    fn py_from_str(_: &Bound<'_, PyType>, data: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let data_str: &str = data.extract()?;
+        Self::from_str(data_str).map_err(to_pyvalue_err)
     }
 }
 
@@ -408,24 +453,27 @@ impl StreamingConfig {
     }
 
     #[getter]
-    fn data_types(&self) -> Option<Vec<String>> {
+    fn data_types(&self) -> Option<Vec<PyNautilusDataType>> {
         self.data_types
             .clone()
-            .map(|values| values.into_iter().map(|value| value.to_string()).collect())
+            .map(|values| values.into_iter().map(PyNautilusDataType::new).collect())
     }
 
     #[getter]
-    fn record_types(&self) -> Option<Vec<String>> {
+    fn record_types(&self) -> Option<Vec<PyNautilusRecordType>> {
         self.record_types
             .clone()
-            .map(|values| values.into_iter().map(|value| value.to_string()).collect())
+            .map(|values| values.into_iter().map(PyNautilusRecordType::new).collect())
     }
 
     #[getter]
-    fn instrument_types(&self) -> Option<Vec<String>> {
-        self.instrument_types
-            .clone()
-            .map(|values| values.into_iter().map(|value| value.to_string()).collect())
+    fn instrument_types(&self) -> Option<Vec<PyNautilusInstrumentType>> {
+        self.instrument_types.clone().map(|values| {
+            values
+                .into_iter()
+                .map(PyNautilusInstrumentType::new)
+                .collect()
+        })
     }
 
     #[getter]
@@ -436,7 +484,10 @@ impl StreamingConfig {
 
         let result = PyDict::new(py);
         for filter in filters {
-            result.set_item(filter.record_type.to_string(), filter.identifiers.clone())?;
+            result.set_item(
+                PyNautilusRecordType::new(filter.record_type),
+                filter.identifiers.clone(),
+            )?;
         }
 
         Ok(Some(result.unbind()))
@@ -452,7 +503,11 @@ impl StreamingConfig {
 impl DataCatalogConfig {
     /// Configuration for a catalog available to request-time historical data loading.
     #[new]
-    #[pyo3(signature = (path, fs_protocol = None, catalog_backend = None, params = None, name = None, read_only = false, fs_rust_storage_options = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the PyO3 constructor mirrors the public Python configuration signature"
+    )]
+    #[pyo3(signature = (path, fs_protocol = None, catalog_backend = None, params = None, name = None, read_only = false, fs_rust_storage_options = None, batch_size = None, compression = None, max_row_group_size = None))]
     fn py_new(
         path: String,
         fs_protocol: Option<String>,
@@ -461,21 +516,38 @@ impl DataCatalogConfig {
         name: Option<String>,
         read_only: bool,
         fs_rust_storage_options: Option<std::collections::HashMap<String, String>>,
+        batch_size: Option<usize>,
+        compression: Option<&str>,
+        max_row_group_size: Option<usize>,
     ) -> pyo3::PyResult<Self> {
         let catalog_backend = catalog_backend.map(|backend| backend.inner());
+        let compression = compression
+            .map(|compression| parse_enum::<CatalogCompression>(compression, "compression"))
+            .transpose()?;
 
         let params = Python::attach(|py| match params {
             Some(params) => from_pydict(py, &params),
             None => Ok(None),
         })?;
 
-        Ok(Self::new(path, fs_protocol, catalog_backend)
-            .with_params(params)
-            .with_name(name)
-            .with_read_only(read_only)
-            .with_storage_options(
-                fs_rust_storage_options.map(|options| options.into_iter().collect()),
-            ))
+        Self::builder()
+            .path(path)
+            .maybe_name(name)
+            .maybe_fs_protocol(fs_protocol)
+            .maybe_catalog_backend(catalog_backend)
+            .maybe_batch_size(batch_size)
+            .maybe_compression(compression)
+            .maybe_max_row_group_size(max_row_group_size)
+            .maybe_params(params)
+            .maybe_fs_rust_storage_options(fs_rust_storage_options.map(|options| {
+                options
+                    .into_iter()
+                    .map(|(key, value)| (key, value.into()))
+                    .collect()
+            }))
+            .read_only(read_only)
+            .build()
+            .map_err(config_error_to_pyvalue_err)
     }
 
     /// Returns the path to the data catalog.
@@ -511,6 +583,28 @@ impl DataCatalogConfig {
     #[pyo3(name = "catalog_backend")]
     fn py_catalog_backend(&self) -> PyCatalogBackend {
         PyCatalogBackend::new(self.catalog_backend().clone())
+    }
+
+    /// Returns the number of rows per batch the catalog reads and writes.
+    #[getter]
+    #[pyo3(name = "batch_size")]
+    fn py_batch_size(&self) -> Option<usize> {
+        self.batch_size()
+    }
+
+    /// Returns the compression codec of written data files.
+    #[getter]
+    #[pyo3(name = "compression")]
+    fn py_compression(&self) -> Option<String> {
+        self.compression()
+            .map(|compression| compression.to_string())
+    }
+
+    /// Returns the maximum number of rows per written row group.
+    #[getter]
+    #[pyo3(name = "max_row_group_size")]
+    fn py_max_row_group_size(&self) -> Option<usize> {
+        self.max_row_group_size()
     }
 
     /// Returns backend-specific catalog parameters.
@@ -562,25 +656,8 @@ fn py_streaming_type_from_any(
         return Ok(());
     }
 
-    if let Ok(value) = value.extract::<String>() {
-        if let Ok(data_type) = value.parse::<NautilusDataType>() {
-            parsed.data.push(data_type);
-            return Ok(());
-        }
-
-        if let Ok(record_type) = value.parse::<NautilusRecordType>() {
-            parsed.records.push(record_type);
-            return Ok(());
-        }
-
-        if let Ok(instrument_type) = value.parse::<NautilusInstrumentType>() {
-            parsed.instruments.push(instrument_type);
-            return Ok(());
-        }
-    }
-
     Err(to_pytype_err(
-        "streaming type must be NautilusDataType, NautilusRecordType, NautilusInstrumentType, or str",
+        "streaming type must be NautilusDataType, NautilusRecordType, or NautilusInstrumentType",
     ))
 }
 
@@ -603,15 +680,7 @@ fn py_record_type_from_any(record_type: &Bound<'_, PyAny>) -> pyo3::PyResult<Nau
         return Ok(record_type.inner());
     }
 
-    if let Ok(record_type) = record_type.extract::<String>() {
-        return record_type
-            .parse::<NautilusRecordType>()
-            .map_err(to_pytype_err);
-    }
-
-    Err(to_pytype_err(
-        "record_type must be NautilusRecordType or str",
-    ))
+    Err(to_pytype_err("record_type must be NautilusRecordType"))
 }
 
 fn py_record_types_from_any(
@@ -634,14 +703,8 @@ pub(crate) fn py_instrument_type_from_any(
         return Ok(instrument_type.inner());
     }
 
-    if let Ok(instrument_type) = instrument_type.extract::<String>() {
-        return instrument_type
-            .parse::<NautilusInstrumentType>()
-            .map_err(to_pytype_err);
-    }
-
     Err(to_pytype_err(
-        "instrument_type must be NautilusInstrumentType or str",
+        "instrument_type must be NautilusInstrumentType",
     ))
 }
 
@@ -685,4 +748,42 @@ fn py_record_filters_from_any(
     }
 
     Ok((!filters.is_empty()).then_some(filters))
+}
+
+#[cfg(test)]
+mod tests {
+    use ahash::AHashMap;
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    fn test_data_catalog_config_py_new_keeps_storage_option_values() {
+        Python::initialize();
+
+        let config = DataCatalogConfig::py_new(
+            "bucket/catalog".to_string(),
+            Some("s3".to_string()),
+            None,
+            None,
+            None,
+            false,
+            Some(std::collections::HashMap::from([(
+                "aws_secret_access_key".to_string(),
+                "catalog-secret".to_string(),
+            )])),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.connect_config().storage_options,
+            Some(AHashMap::from([(
+                "aws_secret_access_key".to_string(),
+                "catalog-secret".to_string(),
+            )]))
+        );
+    }
 }
