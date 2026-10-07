@@ -1,0 +1,63 @@
+{
+  "checks": [
+    "a correction without a declared outcome metric is refused: a correction requires a declared outcome metric; none was declared"
+  ],
+  "rows": {
+    "Correction Impact: sharpe_ratio (corrected)": 0.589,
+    "Correction Impact: sharpe_ratio (delta)": -0.929,
+    "Correction Impact: sharpe_ratio (uncorrected)": 1.518,
+    "Deflated Sharpe Ratio (12 trials, value, window 1000-2000)": 0.7531292747003553,
+    "Detector Report: accuracy": 0.99,
+    "Detector Report: base rate": 0.002,
+    "Detector Report: f1": 0.16666666666666669,
+    "Detector Report: false discovery rate": 0.9,
+    "Detector Report: false negatives": 1.0,
+    "Detector Report: false positives": 9.0,
+    "Detector Report: precision": 0.1,
+    "Detector Report: recall": 0.5,
+    "Detector Report: true negatives": 989.0,
+    "Detector Report: true positives": 1.0,
+    "Specification Bound: least_favourable": {
+      "extreme": "least_favourable",
+      "specification": {
+        "adjustment_model": "unadjusted",
+        "data_window": {
+          "end": 2000,
+          "start": 1000
+        },
+        "exclusions": [],
+        "universe_rule": "top_500_by_capitalisation",
+        "weighting": "equal"
+      },
+      "specification_label": "equal, window 1000-2000",
+      "value": 0.3221924646806321
+    },
+    "Specification Bound: most_favourable": {
+      "extreme": "most_favourable",
+      "specification": {
+        "adjustment_model": "unadjusted",
+        "data_window": {
+          "end": 2000,
+          "start": 1000
+        },
+        "exclusions": [],
+        "universe_rule": "top_500_by_capitalisation",
+        "weighting": "value"
+      },
+      "specification_label": "value, window 1000-2000",
+      "value": 0.9947614768418518
+    },
+    "Trial Specification: value, window 1000-2000": {
+      "adjustment_model": "unadjusted",
+      "data_window": {
+        "end": 2000,
+        "start": 1000
+      },
+      "exclusions": [],
+      "universe_rule": "top_500_by_capitalisation",
+      "weighting": "value"
+    }
+  },
+  "scenario": "report_rows",
+  "schema": "nautilus-regression-report/v1"
+}

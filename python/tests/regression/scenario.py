@@ -42,11 +42,14 @@ from nautilus_trader.backtest import BacktestEngine
 
 
 EXPECTATIONS_SCHEMA = "nautilus-regression-expectations/v1"
+REPORT_SCHEMA = "nautilus-regression-report/v1"
 EXPECTATIONS_DIR = Path(__file__).resolve().parent / "expected"
 
 LAYER_DIGEST = "digest"
 LAYER_STATISTICS = "statistics"
 LAYER_CHECKPOINTS = "checkpoints"
+LAYER_ROWS = "rows"
+LAYER_CHECKS = "checks"
 
 DEFAULT_STATISTICS = (
     "run.outcome",
@@ -202,6 +205,29 @@ class Scenario:
 
 
 @dataclass(frozen=True)
+class ReportScenario:
+    """
+    A declared regression scenario that records a report's rows rather than a canonical run.
+
+    A row that renders only when a report is explicitly configured is absent from every canonical
+    document, so the canonical layer cannot pin it. A report scenario builds those rows through the
+    same public Python API a caller uses and records them under the names the report renders, so a
+    change to a row's name or value is caught the same way a canonical divergence is. The declared
+    checks are the behaviours the case asserts rather than rows it records, such as a refusal.
+    """
+
+    name: str
+    execute: Callable[[], dict[str, Any]]
+
+    @property
+    def path(self) -> Path:
+        """
+        The committed expectations path of this scenario.
+        """
+        return EXPECTATIONS_DIR / f"{self.name}.json"
+
+
+@dataclass(frozen=True)
 class ScenarioOutcome:
     """
     The observed layers of one scenario run.
@@ -313,6 +339,97 @@ def verify_scenario(
         report = "\n".join(f"  {line}" for line in lines)
         raise AssertionError(
             f"Regression scenario {scenario.name!r} diverged:\n{report}\n"
+            f"  Regenerate with `--regenerate-regression` only if the divergence is intended.",
+        )
+
+
+def run_report_scenario(scenario: ReportScenario) -> dict[str, Any]:
+    """
+    Build the report document of a scenario.
+    """
+    document = scenario.execute()
+    if not isinstance(document, dict) or "rows" not in document or "checks" not in document:
+        raise TypeError(
+            f"Report scenario {scenario.name!r} must return a mapping with 'rows' and 'checks'",
+        )
+    return document
+
+
+def load_report_expectations(scenario: ReportScenario) -> dict[str, Any]:
+    """
+    Load the committed report expectations of a scenario.
+    """
+    path = scenario.path
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing regression report: {path}. Regenerate it with `--regenerate-regression`.",
+        )
+    with path.open(encoding="utf-8") as file:
+        payload = json.load(file)
+    if payload.get("schema") != REPORT_SCHEMA:
+        raise ValueError(
+            f"Unsupported report schema in {path}: {payload.get('schema')!r}",
+        )
+    return payload
+
+
+def write_report_expectations(scenario: ReportScenario, document: dict[str, Any]) -> Path:
+    """
+    Rewrite the recorded rows and checks of a report scenario.
+    """
+    path = scenario.path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": REPORT_SCHEMA,
+        "scenario": scenario.name,
+        "rows": document["rows"],
+        "checks": document["checks"],
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def verify_report_scenario(
+    scenario: ReportScenario,
+    document: dict[str, Any],
+    expected: dict[str, Any],
+) -> None:
+    """
+    Verify the rows and checks of a report scenario and report every difference.
+
+    A row that has disappeared from the report is reported as well as one whose value moved, so a
+    rename is caught rather than read as a silently dropped row.
+    """
+    lines: list[str] = []
+
+    expected_rows = expected.get("rows", {})
+    actual_rows = document["rows"]
+    for name, value in actual_rows.items():
+        expected_value = expected_rows.get(name, _MISSING)
+        if expected_value is _MISSING:
+            lines.append(f"[{LAYER_ROWS}] {name}: missing from the declared expectations")
+        elif expected_value != value:
+            lines.append(
+                f"[{LAYER_ROWS}] {name}: "
+                f"expected {_format(expected_value)}, actual {_format(value)}",
+            )
+    lines.extend(
+        f"[{LAYER_ROWS}] {name}: declared row is no longer rendered"
+        for name in expected_rows
+        if name not in actual_rows
+    )
+
+    expected_checks = expected.get("checks", [])
+    if list(document["checks"]) != list(expected_checks):
+        lines.append(
+            f"[{LAYER_CHECKS}] expected {_format(expected_checks)}, "
+            f"actual {_format(document['checks'])}",
+        )
+
+    if lines:
+        report = "\n".join(f"  {line}" for line in lines)
+        raise AssertionError(
+            f"Regression report {scenario.name!r} diverged:\n{report}\n"
             f"  Regenerate with `--regenerate-regression` only if the divergence is intended.",
         )
 

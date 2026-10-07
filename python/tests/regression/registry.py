@@ -22,15 +22,18 @@ expectations are generated with `--regenerate-regression` and reviewed like any 
 from __future__ import annotations
 
 from tests.regression.cases.btcusdt_ema_cross import SCENARIO as BTCUSDT_EMA_CROSS
+from tests.regression.cases.data_quality_aggressor import SCENARIO as DATA_QUALITY_AGGRESSOR
 from tests.regression.cases.equity_session_events import SCENARIO as EQUITY_SESSION_EVENTS
 from tests.regression.cases.execution_realism_composed import SCENARIO as EXECUTION_REALISM_COMPOSED
 from tests.regression.cases.market_impact_model import SCENARIO as MARKET_IMPACT_MODEL
 from tests.regression.cases.market_impact_square_root import SCENARIO as MARKET_IMPACT_SQUARE_ROOT
 from tests.regression.cases.multi_venue_parity import SCENARIO as MULTI_VENUE_PARITY
 from tests.regression.cases.optimization_golden import SCENARIO as OPTIMIZATION_GOLDEN
+from tests.regression.cases.report_rows import SCENARIO as REPORT_ROWS
 from tests.regression.cases.target_pipeline_parity import SCENARIO as TARGET_PIPELINE_PARITY
 from tests.regression.cases.universe_membership import SCENARIO as UNIVERSE_MEMBERSHIP
 from tests.regression.cases.venue_slippage_model import SCENARIO as VENUE_SLIPPAGE_MODEL
+from tests.regression.scenario import ReportScenario
 from tests.regression.scenario import Scenario
 
 
@@ -45,4 +48,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     EXECUTION_REALISM_COMPOSED,
     TARGET_PIPELINE_PARITY,
     OPTIMIZATION_GOLDEN,
+    DATA_QUALITY_AGGRESSOR,
 )
+
+REPORT_SCENARIOS: tuple[ReportScenario, ...] = (REPORT_ROWS,)

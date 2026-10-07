@@ -24,12 +24,18 @@ from __future__ import annotations
 
 import pytest
 
+from tests.regression.registry import REPORT_SCENARIOS
 from tests.regression.registry import SCENARIOS
+from tests.regression.scenario import ReportScenario
 from tests.regression.scenario import Scenario
 from tests.regression.scenario import load_expectations
+from tests.regression.scenario import load_report_expectations
+from tests.regression.scenario import run_report_scenario
 from tests.regression.scenario import run_scenario
+from tests.regression.scenario import verify_report_scenario
 from tests.regression.scenario import verify_scenario
 from tests.regression.scenario import write_expectations
+from tests.regression.scenario import write_report_expectations
 
 
 @pytest.mark.regression
@@ -47,3 +53,24 @@ def test_declared_regression_scenario(
         write_expectations(scenario, outcome)
         return
     verify_scenario(scenario, outcome, load_expectations(scenario))
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "scenario",
+    REPORT_SCENARIOS,
+    ids=[scenario.name for scenario in REPORT_SCENARIOS],
+)
+def test_declared_regression_report(
+    scenario: ReportScenario,
+    regression_baseline: None,
+    regenerate_regression: bool,
+) -> None:
+    """
+    Test the declared rows and checks of a report scenario.
+    """
+    document = run_report_scenario(scenario)
+    if regenerate_regression:
+        write_report_expectations(scenario, document)
+        return
+    verify_report_scenario(scenario, document, load_report_expectations(scenario))
