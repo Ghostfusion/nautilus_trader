@@ -341,6 +341,72 @@ Market impact applies only to liquidity-taking fills on an L1 book. On L2 or L3 
 book already determines how far an order walks, and a resting (maker) fill does not move the price
 against itself.
 
+### Model recoverability
+
+A market impact model whose parameters cannot be recovered from data cannot be described with a
+point estimate alone, so a venue can declare the verdict a recovery check returned for the model it
+configured. `SimulatedVenueConfig.market_impact_identification` takes a
+`MarketImpactIdentification`: `identified()` declares every parameter met the recovery tolerance,
+while `weakly_identified(parameter)` and `unidentified(parameter)` name the parameter that failed.
+The verdict strings are `identified`, `weakly_identified` and `unidentified` - the same vocabulary
+the parameter recovery measurement in `nautilus-research` uses, so a reader sees one vocabulary in a
+report. The type lives in `nautilus-backtest` rather than being imported from `nautilus-research`,
+because the backtest crate does not depend on it; the verdict travels as a declared value.
+
+The declaration is carried onto the run rather than applied silently:
+
+- `MarketImpactIdentification.label()` returns `{verdict} impact model: {parameter}`, or `None`
+  when the model is identified: an absent label is not a zero, so a report can tell a number
+  computed with an unrecoverable model from one computed with a recoverable model.
+- The run summary carries `market_impact.{venue}.identification` and
+  `market_impact.{venue}.failed_parameter`, emitted only when a declaration exists and names a
+  failing parameter; an identified declaration, and no declaration at all, add no entry.
+- The cost rows the model's fills contribute to are marked with the label in the rendered row name,
+  for example `Cost (basis points of turnover) [unidentified impact model: prefactor]`. The rows
+  marked are `cost_basis_points`, `breakeven_cost`, `gross_return`, `net_return`,
+  `total_commissions` and `total_turnover`; the values are unchanged and no row is dropped.
+
+The recovery measurement itself is Rust only (`crates/research`). A `RecoveryCheck` declares the
+parameter truths, the repetition count, a seed and a `RecoveryTolerance` (`max_absolute_bias`,
+`max_rmse`, `min_coverage`, `unidentified_rmse`). `parameter_recovery()` returns a
+`ParameterRecovery` per parameter carrying the `truth`, the `bias` (mean estimate minus truth), the
+`rmse`, the interval `coverage` (the fraction of repetitions whose declared interval covered the
+truth) and the `verdict`. A parameter is `identified` when its bias, RMSE and coverage all meet
+their thresholds, `unidentified` when its RMSE is beyond the unidentified tolerance or no repetition
+produced an estimate, and `weakly_identified` otherwise; the unidentified test is checked first, so
+a wide interval cannot make a parameter with an out-of-tolerance RMSE read as identified. A
+parameter that was never measured is labelled `unidentified` rather than omitted.
+
+### Interval coverage
+
+A prefactor interval is checked against the coverage it declares, not assumed.
+`PrefactorCoverageCheck` declares the known prefactor, the nominal level, the repetition count and
+a seed; `prefactor_coverage()` draws that many paths, fits the interval on each, and reports the
+fraction whose fitted interval contained the known prefactor. `PrefactorCoverageReport` carries the
+interval fitted on the reference repetition, its source, the known prefactor, the nominal level,
+the repetition count, the covered count and the observed coverage, and `holds()` is
+`coverage >= nominal`. The default nominal level is `PREFACTOR_COVERAGE_NOMINAL`, `0.9`. A
+deliberately over-tight interval reads below its nominal level rather than being excused: the fit is
+not widened to meet the level. The report renders as
+`prefactor coverage {:.3} of nominal {:.3} over {repetitions} repetitions ({covered} covered {truth}), interval {interval}`.
+The measurement is a pure function of the model, the check and the seed (`crates/execution`), and it
+is not wired into a run summary.
+
+### Synthetic flow recovery
+
+The synthetic flow reports its own calibration recovery. `SyntheticFlow::estimate()` is run against a
+`SyntheticRecoveryCheck`, which declares the shortest series worth reading and the band within which
+a recovered estimate counts as recovered; the defaults are `SYNTHETIC_READABLE_LENGTH`, `8192`, and
+`SYNTHETIC_RECOVERY_BAND`, `0.05`. A series shorter than the declared readable length is not
+estimated: the report carries no number and names the reason `below_readable_length`
+(`UnreadableReason::BelowReadableLength`), because at that length the estimator's bias is large
+enough to invent a result. A series at or above the length that the estimator still cannot resolve
+is reported unreadable with `degenerate_series` (`UnreadableReason::DegenerateSeries`) rather than
+given a number. `SyntheticFlowRecoveryReport` carries the series length, the declared readable
+length, the declared band, the recovered Hurst and impact exponents with their biases, and the
+`unreadable` reason exactly when it carries no number. The unreadable report renders as
+`estimate not readable at length {length} against the declared readable length {readable_length} ({reason})`.
+
 ### Custom fill models
 
 The low-level `BacktestEngine.add_venue()` method also accepts a custom Python object. It must

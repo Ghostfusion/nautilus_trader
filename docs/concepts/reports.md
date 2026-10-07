@@ -324,6 +324,45 @@ See the [Portfolio guide](portfolio.md#portfolio-statistics) for the default sta
 category is derived, and the difference between position returns and portfolio returns.
 :::
 
+### Report rows
+
+Beside the name-keyed dictionaries, a backtest result carries rows that state what the report's
+bookkeeping can and cannot say. Each row is a key in `stats_returns` or `stats_general`, and each
+row name is the code's own rendered title.
+
+Cost rows, in `stats_returns`:
+
+- `Cost (basis points of turnover)` - the frame's commission over its notional turnover.
+- `Breakeven Cost (basis points of turnover)` - the frame's gross PnL over its notional turnover.
+
+Fill causes, in `stats_general`: in a backtest run, one row `Fill Cause: {cause}` per cause in the
+closed vocabulary, rendered even when the count is zero. The causes are `book_match`, `halt`,
+`price_band`, `circuit_breaker`, `liquidation` and `corporate_action`.
+
+Metric chain, in `stats_general`: when the analyzer declares a scoring chain, each declared stage
+with no registered metric contributes `Metric Chain: {stage} stage has no metric`, where `{stage}`
+is `forecast`, `decision` or `account`. See the [Portfolio guide](portfolio.md#the-scoring-chain).
+
+Correction impact, in `stats_returns`: a correction's measured effect on a declared outcome metric
+is three rows, `Correction Impact: {metric} (uncorrected)`,
+`Correction Impact: {metric} (corrected)` and `Correction Impact: {metric} (delta)`. A correction
+that changed nothing renders a delta of exactly zero rather than omitting the row. A correction with
+no declared outcome metric is refused with
+`a correction requires a declared outcome metric; none was declared`.
+
+Detector report: `Detector Report: accuracy` is emitted only beside `Detector Report: base rate`, so
+an accuracy is never read without the positive rate that interprets it. Beside them, in
+`stats_returns`, are `Detector Report: precision`, `Detector Report: recall`, `Detector Report: f1`
+and `Detector Report: false discovery rate`; a rate that cannot be computed is omitted rather than
+given a plausible value. The four confusion-matrix counts land in `stats_general` as
+`Detector Report: true positives`, `Detector Report: false positives`,
+`Detector Report: true negatives` and `Detector Report: false negatives`.
+
+A number computed with a market impact model whose parameters are not recoverable carries the
+model's label in the affected cost row's name, for example
+`Cost (basis points of turnover) [unidentified impact model: prefactor]`; see
+[Fill models](backtesting/fill-models.md#model-recoverability).
+
 ### Visualization
 
 NautilusTrader provides interactive tearsheets and plots via Plotly:
@@ -424,8 +463,8 @@ results = {
     "total_positions": len(positions_closed),
     "pnl_total": stats_pnls.get("USD", {}).get("PnL (total)"),
     "win_rate": stats_pnls.get("USD", {}).get("Win Rate"),
-    "sharpe_ratio": stats_returns.get("Sharpe Ratio (252 days)"),
-    "profit_factor": stats_returns.get("Profit Factor"),
+    "sharpe_ratio": stats_returns.get("Sharpe Ratio (simple, sample, 252 days)"),
+    "profit_factor": stats_returns.get("Profit Factor (simple)"),
     "long_ratio": stats_general.get("Long Ratio"),
 }
 

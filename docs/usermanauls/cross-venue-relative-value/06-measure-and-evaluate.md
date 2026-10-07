@@ -330,11 +330,11 @@ PnL (total):                    -85.17
 PnL% (total):                   -0.00
 Win Rate:                       0.50
  Returns Statistics
-Profit Factor:                  0.00
-Returns Kurtosis:               NaN
-Returns Skewness:               NaN
-Returns Volatility (252 days):  NaN
-Sharpe Ratio (252 days):        NaN
+Profit Factor (simple):                  0.00
+Returns Kurtosis (simple, sample):               NaN
+Returns Skewness (simple, sample):               NaN
+Returns Volatility (simple, sample, 252 days):  NaN
+Sharpe Ratio (simple, sample, 252 days):        NaN
 ```
 
 What each number means, in plain words:
@@ -348,7 +348,7 @@ What each number means, in plain words:
 | `Expectancy`                                                 | Mean PnL per position, winners and losers together. | Positive.                               | Negative: `(-107.20 + 22.03) / 2 = -42.58`, the exact average of the two legs.  |
 | `PnL (total)`                                                | Sum of realised PnL over closed positions.          | Positive.                               | `-85.17`.                                                                       |
 | `Win Rate`                                                   | Share of positions that made money.                 | High, but meaningless alone.            | `0.50` here, which is one leg winning and one losing.                           |
-| `Profit Factor`                                              | Gross profit divided by gross loss.                 | Above 1.                                | `0.00`, because the only loser's magnitude exceeds the winner's.                |
+| `Profit Factor (simple)`                                     | Gross profit divided by gross loss.                 | Above 1.                                | `0.00`, because the only loser's magnitude exceeds the winner's.                |
 | `Sharpe Ratio`, `Returns Volatility`, `Skewness`, `Kurtosis` | Return-distribution statistics over the sample.     | Computed.                               | `NaN`, because two positions over four minutes cannot support these statistics. |
 
 ## 7. The three most common beginner misreadings
@@ -364,8 +364,8 @@ of `1,000,000` per venue, which rounds to zero per cent at the printed precision
 number is the only one worth reading at this scale, and even then it describes one four-minute
 window in a synthetic fixture. A number that rounds to zero is not evidence of anything.
 
-**Misreading 3: trusting a statistic that the sample cannot support.** `Sharpe Ratio (252 days):
-NaN` and `Returns Volatility (252 days): NaN` are the engine refusing to compute an annualised
+**Misreading 3: trusting a statistic that the sample cannot support.** `Sharpe Ratio (simple, sample, 252 days):
+NaN` and `Returns Volatility (simple, sample, 252 days): NaN` are the engine refusing to compute an annualised
 statistic from a four-minute sample. That is the honest answer, not a bug. The same refusal appears
 in the design record for relative-value screens
 (`docs/design/relative_value_screening.md`, sections 2.2 and 3.2): below a declared minimum the

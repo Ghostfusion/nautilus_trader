@@ -310,8 +310,8 @@ Drawdown" is the important example, because the kernel portfolio's analyzer does
 it is absent from a run's dictionary. The Python bridge `statistic_values` closes that gap without
 computing any metric itself: it feeds the completed run's own `returns_series` into a fresh
 `PortfolioAnalyzer` with the requested native statistic registered, and reads the value back. For
-the sample run in the concept page the engine reports `Sharpe Ratio (252 days)` as
-`-27.2553412003192`, and the bridged `Max Drawdown`, which the run does not report, is
+the sample run in the concept page the engine reports `Sharpe Ratio (simple, sample, 252 days)` as
+`-27.2553412003192`, and the bridged `Max Drawdown (simple)`, which the run does not report, is
 `-0.014306129144533997`.
 
 Periodic attribution uses the performance-period frame: one row per UTC day, ISO week or month,
@@ -345,7 +345,7 @@ luck?".
    a measurement. If you fill a missing drawdown with zero, you will believe a risk that did not
    happen did not exist.
 
-3. **Reading an annualised number as a per-period number.** `Sharpe Ratio (252 days)` is annualised.
+3. **Reading an annualised number as a per-period number.** `Sharpe Ratio (simple, sample, 252 days)` is annualised.
    The correction is per period and refuses annualised input. Mixing them silently divides one by
    the other and inflates or deflates the result by the square root of the compounding factor.
 

@@ -97,7 +97,7 @@ refuses to guess.
 
 - **Annualisation is prohibited.** A Sharpe ratio annualised with `sqrt(252)` is not a per-period
   Sharpe ratio, and a correction defined per period would silently divide it. The built-in
-  `Sharpe Ratio (252 days)` statistic is annualised and tagged `Annualised`
+  `Sharpe Ratio (simple, sample, 252 days)` statistic is annualised and tagged `Annualised`
   (`crates/analysis/src/statistics/sharpe_ratio.rs`, `docs/concepts/optimization.md`). The sample
   declares its frequency, and the annualised declaration is an error; a caller with an annualised
   value must rescale it before the correction.

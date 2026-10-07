@@ -88,3 +88,23 @@ When using `L1_MBP` (the default), order book deltas are ignored by the matching
 subscribe to order book deltas, set the venue `book_type` to `L2_MBP` or `L3_MBO`. This also applies
 to sandbox execution, where the matching engine uses the same `book_type` configuration.
 :::
+
+## Data quality
+
+A venue's reported aggressor side is checked against an independent reconstruction of it, the tick
+rule. The data engine compares a trade's reported side with the tick-rule inference and counts the
+comparisons. `DataQualityCounts.aggressor_agreement_rate()` reports the fraction of compared trades
+whose reported side matched, `(comparisons - disagreements) / comparisons`. The rate is `None`,
+never zero, when nothing was compared: a rate that was never measured is not a measured zero, and a
+direction-dependent metric must not be refused against an absent measurement. The comparison count
+is available separately as `aggressor_comparisons()`.
+
+`DataEngineConfig.aggressor_agreement_floor` declares the minimum rate a direction-dependent metric
+may be computed at. The default `None` declares no floor; a declared value must be a finite rate in
+the unit interval `[0.0, 1.0]`, and a value outside it is refused at construction. When a floor is
+declared and the observed rate is below it, a direction-dependent metric - `Order Flow Imbalance`
+is the built-in one - is refused with `MetricReason.AggressorAgreementBelowFloor` rather than
+printed, and the observed rate and the declared floor are carried in the result's detail. In a
+backtest, the run summary carries the observed rate under the key `aggressor_agreement` whenever a
+trade was compared, and a run that recorded data-quality violations carries a `data_quality`
+entry.

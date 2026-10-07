@@ -11,12 +11,12 @@ rule that governs it.
 A row is one period, and its fields are grouped by what they are rather than presented as one flat
 bag:
 
-| Group                  | Fields                                                                                          |
-| ---------------------- | ----------------------------------------------------------------------------------------------- |
-| Accounting             | Period bounds, starting equity, ending equity, realised PnL, unrealised PnL, commission, fees and slippage. |
-| Trading activity       | Volume, turnover, trade count, winning trades and losing trades.                                 |
-| Exposure               | Open position count, gross exposure and net exposure.                                            |
-| Derived performance    | Net PnL, net return, drawdown and drawdown percentage against the running equity peak.           |
+| Group               | Fields                                                                                                      |
+| ------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Accounting          | Period bounds, starting equity, ending equity, realised PnL, unrealised PnL, commission, fees and slippage. |
+| Trading activity    | Volume, turnover, trade count, winning trades and losing trades.                                            |
+| Exposure            | Open position count, gross exposure and net exposure.                                                       |
+| Derived performance | Net PnL, net return, drawdown and drawdown percentage against the running equity peak.                      |
 
 Monetary fields are exact and multi-currency: a `CurrencyTotals` holds one `Money` per currency
 rather than one number, so a run spanning currencies cannot silently add unlike amounts.
@@ -53,21 +53,49 @@ which is the property a frame that exists only inside a backtester cannot offer.
 
 ## The statistics
 
-Four statistics are views over the frame or the returns series rather than each reporting path
-reconstructing the same numbers:
-
-| Statistic                       | Defined over            |
-| ------------------------------- | ----------------------- |
-| `MaxDrawdownDuration`           | The frame's equity.     |
-| `ExponentiallyWeightedSharpe`   | A returns series, with a configurable halflife. |
-| `TotalTurnover`                 | The frame.              |
-| `TotalCommissions`              | The frame.              |
-
 The statistic framework gains a performance-period input beside returns, realised PnL and positions:
 `PortfolioStatistic::calculate_from_periods`, the `MetricInput::PerformancePeriods` vocabulary entry,
 and `PortfolioAnalyzer::report_period_metrics`. A registered statistic declares its
 `MetricDefinition` as any other does, so it appears in a report with its units, direction and inputs
-like the rest.
+like the rest. A statistic that declares the frame input and is registered with the analyzer
+contributes a row; a metric requested over a frame it does not declare is reported `unavailable`
+with `MetricReason.UnsupportedInput`, and an empty frame is `unavailable` with
+`MetricReason.InsufficientData`.
+
+The built-in statistics defined over the frame, with the row title each renders and the report
+category the row lands in. A period row whose units are `Currency` lands in `stats_general`; every
+other unit lands in `stats_returns`:
+
+| Statistic                             | Row title                                                        | Category |
+| ------------------------------------- | ---------------------------------------------------------------- | -------- |
+| `CostBasisPoints`                     | `Cost (basis points of turnover)`                                | returns  |
+| `BreakevenCost`                       | `Breakeven Cost (basis points of turnover)`                      | returns  |
+| `GrossReturn`                         | `Gross Return`                                                   | returns  |
+| `NetReturn`                           | `Net Return`                                                     | returns  |
+| `TotalTurnover`                       | `Total Turnover`                                                 | general  |
+| `TotalCommissions`                    | `Total Commissions`                                              | general  |
+| `MaxDrawdownDuration`                 | `Max Drawdown Duration (days)`                                   | returns  |
+| `ArithmeticCompoundingImpliedEquity`  | `Arithmetic Compounding Implied Equity (simple, tolerance 0.01)` | general  |
+| `ArithmeticCompoundingRealisedEquity` | `Arithmetic Compounding Realised Equity (simple)`                | general  |
+| `ArithmeticCompoundingRatio`          | `Arithmetic Compounding Ratio (simple, tolerance 0.01)`          | returns  |
+| `ArithmeticCompoundingFlagged`        | `Arithmetic Compounding Flagged (simple, tolerance 0.01)`        | returns  |
+
+The two cost rows measure the frame's trading cost as a rate rather than a drag on its return.
+`Cost (basis points of turnover)` is the frame's commission over its notional turnover, the all-in
+cost rate the frame paid per unit traded, and `Breakeven Cost (basis points of turnover)` is the
+frame's gross PnL over its notional turnover, the cost rate the strategy could have paid and still
+broken even.
+
+The arithmetic-compounding rows compare the terminal equity the frame's arithmetic mean net return
+implies with the terminal equity the frame actually realised. The implied and realised equity rows
+are the two terminals, in money; the ratio is their quotient, and the flag is `1.0` when the ratio is
+further from one than the declared tolerance and `0.0` otherwise. The implied-equity, ratio and flag
+rows carry the tolerance (default `0.01`); the realised-equity row does not, because it is a
+measurement rather than a comparison. A frame that ended flat has a realised terminal of zero, so the
+ratio carries no division; the two equity rows are always present when the frame reduces.
+
+`ExponentiallyWeightedSharpe` is defined over a returns series rather than the frame, with a
+configurable halflife, and renders `Exponentially Weighted Sharpe (simple, population, {annualisation} days, halflife {halflife})`.
 
 **Undefined is not zero.** A statistic that cannot be computed returns the not-available state with
 its reason, never `0.0`, and the objective layer continues to treat a missing metric as an error. A
@@ -78,5 +106,5 @@ The composite performance ratio is deliberately not implemented.
 
 ## Where it lives
 
-`crates/analysis/src/period.rs` holds the record and the reducer; the four statistics are one file
+`crates/analysis/src/period.rs` holds the record and the reducer; the frame statistics are one file
 each under `crates/analysis/src/statistics/`, registered with the rest.

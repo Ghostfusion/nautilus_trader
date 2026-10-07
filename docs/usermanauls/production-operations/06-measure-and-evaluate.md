@@ -221,29 +221,29 @@ PnL (total):                    0.00
 PnL% (total):                   0.00
 Win Rate:                       0.00
  Returns Statistics
-Average Win (Return):           0.00
-Profit Factor:                  NaN
-Returns Kurtosis:               NaN
-Returns Skewness:               NaN
-Returns Volatility (252 days):  NaN
-Risk Return Ratio:              NaN
-Sharpe Ratio (252 days):        NaN
-Sortino Ratio (252 days):       NaN
-Tail Ratio:                     NaN
+Average Win (Return, simple):           0.00
+Profit Factor (simple):                  NaN
+Returns Kurtosis (simple, sample):               NaN
+Returns Skewness (simple, sample):               NaN
+Returns Volatility (simple, sample, 252 days):  NaN
+Risk Return Ratio (simple, sample):              NaN
+Sharpe Ratio (simple, sample, 252 days):        NaN
+Sortino Ratio (simple, population, 252 days):       NaN
+Tail Ratio (simple):                     NaN
  General Statistics
 Long Ratio:                     1
 ```
 
-| Statistic                       | Plain meaning                                 | Rough reading                                      |
-| ------------------------------- | --------------------------------------------- | -------------------------------------------------- |
-| `Win Rate`                      | Share of closed trades that made money.       | 0.4 to 0.6 is common; it says nothing alone.       |
-| `PnL (total)`                   | Money made or lost over the run.              | Must be positive after costs.                      |
-| `Profit Factor`                 | Gross profit divided by gross loss.           | Above 1.0 breaks even; 1.5 or more is comfortable. |
-| `Sharpe Ratio (252 days)`       | Return per unit of wobble, annualized.        | Above 1.0 is good; below 0 is bad.                 |
-| `Sortino Ratio (252 days)`      | Like Sharpe, but only counts downward wobble. | Above 1.5 is good.                                 |
-| `Returns Volatility (252 days)` | How much the return swings.                   | Lower is calmer, not automatically better.         |
-| `Max Drawdown`                  | The worst fall from a peak to a later low.    | Compare it against your pain limit.                |
-| `Long Ratio`                    | Share of positions that were long.            | Near 1 or 0 means the strategy is one-sided.       |
+| Statistic                                       | Plain meaning                                 | Rough reading                                      |
+| ----------------------------------------------- | --------------------------------------------- | -------------------------------------------------- |
+| `Win Rate`                                      | Share of closed trades that made money.       | 0.4 to 0.6 is common; it says nothing alone.       |
+| `PnL (total)`                                   | Money made or lost over the run.              | Must be positive after costs.                      |
+| `Profit Factor (simple)`                        | Gross profit divided by gross loss.           | Above 1.0 breaks even; 1.5 or more is comfortable. |
+| `Sharpe Ratio (simple, sample, 252 days)`       | Return per unit of wobble, annualized.        | Above 1.0 is good; below 0 is bad.                 |
+| `Sortino Ratio (simple, population, 252 days)`  | Like Sharpe, but only counts downward wobble. | Above 1.5 is good.                                 |
+| `Returns Volatility (simple, sample, 252 days)` | How much the return swings.                   | Lower is calmer, not automatically better.         |
+| `Max Drawdown (simple)`                         | The worst fall from a peak to a later low.    | Compare it against your pain limit.                |
+| `Long Ratio`                                    | Share of positions that were long.            | Near 1 or 0 means the strategy is one-sided.       |
 
 ## Part 3: alerts
 

@@ -665,7 +665,7 @@ with pd.option_context("display.max_rows", 100, "display.max_columns", None, "di
 result = engine.get_result()
 print("PnL (total):", result.stats_pnls["USD"]["PnL (total)"])
 print("Win Rate:", result.stats_pnls["USD"]["Win Rate"])
-print("Profit Factor:", result.stats_returns["Profit Factor"])
+print("Profit Factor:", result.stats_returns["Profit Factor (simple)"])
 
 engine.reset()
 engine.dispose()
@@ -698,7 +698,7 @@ USD/JPY.SIM-IntradayRuleStrategy-000-88c167ee-6...  FLAT        0      109.434  
 USD/JPY.SIM-IntradayRuleStrategy-000                FLAT        0      109.565       109.956    38661 JPY        False
 PnL (total): -241.89000000013039
 Win Rate: 0.16666666666666666
-Profit Factor: 0.2029583278243312
+Profit Factor (simple): 0.2029583278243312
 ```
 
 The rule made six round trips, twelve fills, and lost money. One round trip out of six won. The

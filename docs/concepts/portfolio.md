@@ -272,7 +272,9 @@ The result contains:
 - Return statistics from the preferred return series described below.
 - General statistics derived from positions.
 
-The default set includes `WinRate`, `ProfitFactor`, `SharpeRatio`, and `LongRatio`. See the
+The default set includes `WinRate`, `ProfitFactor`, `SharpeRatio`, and `LongRatio`, beside the
+frame statistics (`Cost (basis points of turnover)`, `Breakeven Cost (basis points of turnover)` and
+the arithmetic-compounding rows) and `Order Flow Imbalance (reported aggressor)`. See the
 [Analysis API Reference](/docs/python-api-latest/analysis.html) for all built-in statistic types.
 Pass another built-in type, such as `MaxDrawdown`, to `Portfolio.register_statistic()` to add it to
 `Portfolio.statistics()`, backtest results, and post-run logs. A standalone `PortfolioAnalyzer`
@@ -291,12 +293,13 @@ statistic contributes a value only where it overrides the matching method.
 `PortfolioAnalyzer.get_performance_stats_returns_vs_benchmark()`, which takes the benchmark
 series from the caller.
 
-| Method                                  | Input                                        | Result category          |
-| --------------------------------------- | -------------------------------------------- | ------------------------ |
-| `calculate_from_returns`                | Returns keyed by UNIX nanoseconds            | `returns`                |
-| `calculate_from_realized_pnls`          | Realized PnLs for one currency, oldest first | `pnls`                   |
-| `calculate_from_positions`              | Positions and position snapshots             | `general`                |
-| `calculate_from_returns_with_benchmark` | Strategy returns and benchmark returns       | `PortfolioAnalyzer` only |
+| Method                                  | Input                                        | Result category                               |
+| --------------------------------------- | -------------------------------------------- | --------------------------------------------- |
+| `calculate_from_returns`                | Returns keyed by UNIX nanoseconds            | `returns`                                     |
+| `calculate_from_realized_pnls`          | Realized PnLs for one currency, oldest first | `pnls`                                        |
+| `calculate_from_positions`              | Positions and position snapshots             | `general`                                     |
+| `calculate_from_periods`                | A performance-period frame                   | `returns`, or `general` for a `Currency` unit |
+| `calculate_from_returns_with_benchmark` | Strategy returns and benchmark returns       | `PortfolioAnalyzer` only                      |
 
 ```python
 from nautilus_trader.analysis import PortfolioStatistic
@@ -338,14 +341,14 @@ the data it is given.
 Every statistic declares a *definition* beside its calculation. The definition separates the
 machine-facing identity from the presentation:
 
-| Field       | Meaning                                                                                          |
-| ----------- | ------------------------------------------------------------------------------------------------ |
-| `id`        | Stable identity, e.g. `sharpe_ratio`. It does not carry a parameter.                             |
-| `title`     | Presentation, rendered from the declared parameters, e.g. `Sharpe Ratio (252 days)`.             |
-| `units`     | `RATIO`, `FRACTION` or `CURRENCY`.                                                               |
-| `tags`      | Cross-cutting facets, e.g. `RISK_ADJUSTED`, `DRAWDOWN`, `ANNUALISED`, `BENCHMARK_RELATIVE`.      |
-| `direction` | `MAXIMIZE`, `MINIMIZE`, `TARGET` or `INFORMATIONAL`, with `target` for a `TARGET` direction.     |
-| `inputs`    | The inputs the definition is defined over: `RETURNS`, `BENCHMARK`, `REALIZED_PNLS`, `POSITIONS`. |
+| Field       | Meaning                                                                                                                             |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | Stable identity, e.g. `sharpe_ratio`. It does not carry a parameter.                                                                |
+| `title`     | Presentation, rendered from the declared parameters, e.g. `Sharpe Ratio (simple, sample, 252 days)`.                                |
+| `units`     | `RATIO`, `FRACTION`, `CURRENCY` or `BASIS_POINTS`.                                                                                  |
+| `tags`      | Cross-cutting facets, e.g. `RISK_ADJUSTED`, `DRAWDOWN`, `ANNUALISED`, `BENCHMARK_RELATIVE`.                                         |
+| `direction` | `MAXIMIZE`, `MINIMIZE`, `TARGET` or `INFORMATIONAL`, with `target` for a `TARGET` direction.                                        |
+| `inputs`    | The inputs the definition is defined over: `RETURNS`, `BENCHMARK`, `REALIZED_PNLS`, `POSITIONS`, `PERFORMANCE_PERIODS` or `TRADES`. |
 
 `PortfolioAnalyzer.metric_definitions()` returns the definition of every registered statistic,
 ordered by identity. Because the identity is stable, a result can name the metric that produced a
@@ -395,6 +398,47 @@ Four statuses are distinguished, and every status other than `COMPUTED` carries 
 non-finite input or a degenerate series; `NOT_REGISTERED` means the metric is not in the metric set
 at all. A name-keyed dictionary cannot distinguish the last two from a metric that was simply never
 asked for, so a data defect would look like an applicability rule.
+
+### The bookkeeping basis
+
+A statistic defined over a returns series declares how that series was read, and the declaration is
+rendered in the row title rather than left to a convention a reader is expected to remember. Two
+parameters carry it:
+
+- `compounding` is `simple` or `log`, how the per-period returns were compounded.
+- `divisor` is `sample` or `population`, the divisor a dispersion uses. A statistic that forms no
+  dispersion declares no divisor at all.
+
+Every built-in returns statistic declares `simple` compounding, and the dispersion statistics
+declare `sample` or `population` according to their own estimator, so `Sharpe Ratio (simple, sample, 252 days)` and `Sortino Ratio (simple, population, 252 days)` state different divisors. The
+declaration is part of the definition, so the title carries it: the `sharpe_ratio` definition
+renders `Sharpe Ratio ({compounding}, {divisor}, {annualisation} days)` with `compounding`
+`"simple"` and `divisor` `"sample"`. A statistic defined over returns that declares neither, or
+whose rendered title does not contain the declared value, is a contract failure.
+`crates/analysis/src/analyzer.rs` holds the table of every returns statistic and its basis, and the
+test `test_every_returns_statistic_declares_its_bookkeeping_basis` compares that table against the
+registered statistics in both directions.
+
+### The scoring chain
+
+A statistic may declare a `MetricStage` - `Forecast`, `Decision` or `Account` - naming where it
+belongs in the signal-to-account chain. `PortfolioAnalyzer.metric_stages()` maps each registered
+statistic's rendered name to its declared stage, and the analyzer can be given a declared chain with
+`set_declared_stages([...])`. When a chain is declared, a stage's rows render only if at least one
+registered statistic declares that stage; a declared stage with no metric contributes the row
+`Metric Chain: {stage} stage has no metric` to `stats_general`, where `{stage}` is `forecast`,
+`decision` or `account`. A chain with a missing link is therefore visible rather than silently
+absent. The tearsheet groups the statistics table by the same stages; see
+[Visualization](visualization.md#statistics-by-stage).
+
+### Direction-dependent metrics
+
+`Order Flow Imbalance (reported aggressor)` is the built-in statistic whose sign is a property of
+the venue's reported aggressor side rather than an independent reconstruction, so its definition
+carries the `DirectionDependent` tag. When the analyzer is given an observed aggressor-agreement
+rate and a declared floor, a direction-dependent metric requested below that floor is refused with
+`MetricReason.AggressorAgreementBelowFloor` rather than printed; see
+[Data and venues](backtesting/data-and-venues.md#data-quality) for the rate and the floor.
 
 ## Numerical stability of the research kernels
 

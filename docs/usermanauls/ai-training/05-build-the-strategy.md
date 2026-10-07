@@ -131,8 +131,8 @@ INSTRUMENT = TestInstrumentProvider.btcusdt_binance()
 INSTRUMENT_ID = str(INSTRUMENT.id)
 BAR_TYPE = "BTCUSDT.BINANCE-1-DAY-LAST-EXTERNAL"
 TRADE_SIZE = "1.000000"
-SHARPE = "Sharpe Ratio (252 days)"
-DRAWDOWN = "Max Drawdown"
+SHARPE = "Sharpe Ratio (simple, sample, 252 days)"
+DRAWDOWN = "Max Drawdown (simple)"
 
 _CATALOG_PATH: Path | None = None
 
@@ -450,7 +450,7 @@ assumptions: {"bar_execution": true, "gap_handling": "market_price_beyond_trigge
 result_count 4 failure_count 0
 best parameters: {"bar_type": "BTCUSDT.BINANCE-1-DAY-LAST-EXTERNAL", "fast_ema_period": 5, "instrument_id": "BTCUSDT.BINANCE", "slow_ema_period": 30, "trade_size": "1.000000"}
 best score: 9.075712961025893
-best metric_values: {"Max Drawdown": -0.006376486015939637, "Sharpe Ratio (252 days)": 9.082089447041833}
+best metric_values: {"Max Drawdown (simple)": -0.006376486015939637, "Sharpe Ratio (simple, sample, 252 days)": 9.082089447041833}
 best canonical_digest: blake3:8737ccc8c632650188280d837a0dcfa5bfac248a38d8fadee53932f9f60e860e
 best experiment_digest: sha256:8634e236b1aad0449848ff73209a26ad834c873aabc3165fb62bd9e3c9f24cbb
 ```

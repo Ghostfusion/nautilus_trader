@@ -81,7 +81,7 @@ recorded with `feasible=False` and no fictitious penalty in its score
 A run reports its returns statistics in `BacktestResult.stats_returns`, but that set does not include
 every built-in statistic. The bridge `statistic_values` feeds the completed run's own
 `returns_series` into a fresh `PortfolioAnalyzer` with the requested native statistic registered, and
-reads the value back (`python/nautilus_trader/optimization/metrics.py`). "Max Drawdown" is the
+reads the value back (`python/nautilus_trader/optimization/metrics.py`). "Max Drawdown (simple)" is the
 important example: a run does not report it, and the bridge recomputes it. A metric that cannot be
 computed is an error for the objective, never a zero.
 

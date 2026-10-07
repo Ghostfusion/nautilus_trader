@@ -72,8 +72,8 @@ INSTRUMENT = TestInstrumentProvider.btcusdt_binance()
 INSTRUMENT_ID = str(INSTRUMENT.id)
 BAR_TYPE = "BTCUSDT.BINANCE-1-DAY-LAST-EXTERNAL"
 TRADE_SIZE = "1.000000"
-SHARPE = "Sharpe Ratio (252 days)"
-DRAWDOWN = "Max Drawdown"
+SHARPE = "Sharpe Ratio (simple, sample, 252 days)"
+DRAWDOWN = "Max Drawdown (simple)"
 
 _CATALOG_PATH: Path | None = None
 

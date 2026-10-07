@@ -26,7 +26,7 @@ fills: 14
 positions: 7
 PnL (total): 1877.5699999999488
 Win Rate: 0.8571428571428571
-Profit Factor: nan
+Profit Factor (simple): nan
 ```
 
 Faster averages trade more: fourteen fills instead of twelve. On this data the result is a profit,
@@ -52,7 +52,7 @@ fills: 12
 positions: 6
 PnL (total): -24.180000000051223
 Win Rate: 0.16666666666666666
-Profit Factor: 0.20303355126792264
+Profit Factor (simple): 0.20303355126792264
 ```
 
 The loss is one tenth of the original 241.89 USD, because every price and every fee scales with size.
@@ -187,7 +187,7 @@ fills: 14
 positions: 7
 PnL (total): -83.39000000013039
 Win Rate: 0.14285714285714285
-Profit Factor: 0.7253803862134941
+Profit Factor (simple): 0.7253803862134941
 ```
 
 It does not crash, which is the trap. Before an average is initialized, its value is 0.0, so once the

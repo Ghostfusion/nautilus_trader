@@ -192,6 +192,16 @@ Every field is part of the definition digest, so two datasets assembled under di
 cannot share an identity. Extrema and trend-state labels are not built: they need the dataset
 contract of the earlier review, and neither it nor a stored point-in-time membership exists.
 
+A label's provenance is part of the record. `DatasetDeclaration::new` requires a
+`LabelDefinition`, so a dataset cannot be declared without stating how its labels were produced, and
+the definition is part of the dataset's identity: two datasets whose labels were produced
+differently are different datasets. In the measurement layer (`crates/research`), an admitted record
+carries an optional `label_definition`, and a record whose definition is absent is counted by
+`LabelProvenance.undefined` and is not scored - a coefficient or calibration over labels of unknown
+provenance is refused rather than computed, and the count is carried into the report instead. A
+stream with no undefined labels reports `is_fully_defined` true and an `undefined_share` of `0.0`;
+an empty stream reports an `undefined_share` of `None`, because a share of nothing is not zero.
+
 ## Relative-value declarations
 
 A screen over a universe of related series is a set of trials, and the trials are what the correction
@@ -259,7 +269,7 @@ study = StudyIdentity(
     parameter_space_digest="sha256:...",
     objective_definition=objective_definition_from_terms(objective.terms),
     selection_rule=SelectionRule.RANK_FIRST,
-    metric_set=("Sharpe Ratio (252 days)", "Max Drawdown"),
+    metric_set=("Sharpe Ratio (simple, sample, 252 days)", "Max Drawdown (simple)"),
 )
 trial = trial_identity(study.study_id, report.best().run)
 result = ResearchResult(
@@ -344,9 +354,22 @@ way a metric is. Below a minimum count, or with fewer than two trial estimates, 
 `unavailable` with `insufficient_data`; a variance factor that is not positive is `invalid` with
 `undefined_result`; and a result that is not computed always carries a reason and no value.
 
+The bound is read at both specification extremes, not reported as one figure. The correction is
+computed once per declared trial specification, and `deflated_sharpe_bounds()` returns the
+`most_favourable` and `least_favourable` bounds as a pair, each naming the specification that
+produced it: a bound carries its `extreme`, its `specification` and its `specification_label`
+beside its `value`. A run that declares no specification, or a single one, is refused rather than
+given one figure - `the significance bound could not be checked: the search declared a single
+specification ({label}), and a bound is only a bound once it is read at two extremes` - and a bound
+report carrying one extreme is refused with `a significance bound report must carry both
+specification extremes: a single bound cannot be compared and is refused`. The Rust
+`information_coefficient_bounds()` carries the same pair and refuses the same way. The statistic's
+own row names the specification it was read under, as in
+`Deflated Sharpe Ratio (12 trials, value, window 1000-2000)`.
+
 Three boundaries are enforced rather than documented:
 
-- **An annualised input is refused.** The built-in `Sharpe Ratio (252 days)` statistic is annualised
+- **An annualised input is refused.** The built-in `Sharpe Ratio (simple, sample, 252 days)` statistic is annualised
   and tagged `Annualised`, and a correction defined per period would silently divide it. The sample
   declares its frequency, and the annualised declaration is an error.
 - **The kurtosis convention is non-excess.** The fourth standardized moment is at least 1 for any
@@ -364,7 +387,7 @@ series, so a sweep cannot be corrected from what it currently keeps.
 ## The statistics bridge
 
 A default run reports its returns statistics in `BacktestResult.stats_returns`, but that set is the
-engine's own default and does not include every built-in statistic. "Max Drawdown" is the important
+engine's own default and does not include every built-in statistic. `Max Drawdown (simple)` is the important
 example: the kernel portfolio's analyzer does not register it, so it is absent from a run's
 dictionary.
 
@@ -379,9 +402,9 @@ Values the run already reports are taken from the run; only metrics the run does
 bridged. The bridge is `statistic_values(result, metrics)`.
 
 As evidence, the bridged Sharpe ratio equals the engine's own reported value exactly. For the
-sample run the engine reports `Sharpe Ratio (252 days)` as `-27.2553412003192`, and
+sample run the engine reports `Sharpe Ratio (simple, sample, 252 days)` as `-27.2553412003192`, and
 `bridged_values` recomputes the same float from the run's returns series. The bridged
-`Max Drawdown`, which the run does not report, is `-0.014306129144533997` for that run.
+`Max Drawdown (simple)`, which the run does not report, is `-0.014306129144533997` for that run.
 
 ## Search strategies and the run description
 
@@ -398,6 +421,14 @@ protocol and are deterministic under a seed:
 A run is described by a `RunDescription`: the space digest, the validation scheme, the seed, the
 search strategy, the evolutionary operators and the evaluation cache digest. Its digest identifies
 the run, so two runs are comparable only when their descriptions are.
+
+Each trial's own specification is recorded with its result rather than left to the caller's memory.
+A `TrialSpecification` carries the data window, the universe rule, the weighting, the adjustment
+model and the exclusions; the optimizer captures it per experiment and stores it on
+`ExperimentResult`, and `SearchReport.specification_spread()` reports how many distinct
+specifications the survivors recorded - so a search over three weightings and two windows records
+six. A report whose results carry no specification reports `None`, an unknown spread rather than a
+zero.
 
 The validation scheme is part of the run, not a caller's convention:
 `ValidationScheme.single_split(search, held_out)` declares the searched window and the held-out
@@ -564,12 +595,12 @@ concurrency policy, and an optional persistence directory.
   "window": {"start": null, "end": null},
   "objective": {
     "terms": [
-      {"metric": "Sharpe Ratio (252 days)", "weight": 1.0, "direction": "maximize"},
-      {"metric": "Max Drawdown", "weight": 1.0, "direction": "maximize"}
+      {"metric": "Sharpe Ratio (simple, sample, 252 days)", "weight": 1.0, "direction": "maximize"},
+      {"metric": "Max Drawdown (simple)", "weight": 1.0, "direction": "maximize"}
     ]
   },
   "constraints": [
-    {"metric": "Max Drawdown", "comparison": "at_least", "bound": -0.013}
+    {"metric": "Max Drawdown (simple)", "comparison": "at_least", "bound": -0.013}
   ],
   "stage": {"kind": "optimize"},
   "concurrency": {"max_workers": 1},

@@ -180,6 +180,17 @@ The `stats_table` chart displays performance metrics organized into sections:
 
 This table appears in the top-right position by default.
 
+### Statistics by stage
+
+When the analyzer declares a scoring chain, the statistics table groups its rows by stage rather
+than leaving them only in the PnL, returns and general sections. `Portfolio.metric_stages` maps each
+registered statistic's rendered name to its declared `MetricStage`, and the table emits a
+`Forecast Metrics`, `Decision Metrics` or `Account Metrics` group for each non-empty stage, ahead of
+the remaining sections; a row whose statistic declares no stage, or whose name is not a registered
+statistic, stays in its original section. A stage with no metric is stated by the
+`Metric Chain: {stage} stage has no metric` row rather than by an empty group; see the
+[Portfolio guide](portfolio.md#the-scoring-chain).
+
 ### Equity curve
 
 The `equity` chart plots cumulative returns over the backtest period. When `benchmark_returns`
@@ -469,7 +480,7 @@ from nautilus_trader.analysis import create_tearsheet_from_stats
 
 # Load precomputed data. The structure matches BacktestResult stats fields.
 stats_pnls = {"USD": {"PnL (total)": 1500.0, "Win Rate": 0.55, ...}}  # Per-currency
-stats_returns = {"Sharpe Ratio (252 days)": 1.2, "Max Drawdown": -0.15, ...}
+stats_returns = {"Sharpe Ratio (simple, sample, 252 days)": 1.2, "Max Drawdown (simple)": -0.15, ...}
 stats_general = {"Avg Winner": 100.0, "Avg Loser": -50.0, ...}
 returns = pd.Series(...)  # Daily returns with datetime index
 
@@ -523,7 +534,7 @@ dictionaries directly to `create_tearsheet_from_stats()`:
 
 ```python
 stats_returns = {
-    "Sharpe Ratio (252 days)": 1.2,
+    "Sharpe Ratio (simple, sample, 252 days)": 1.2,
     "Custom Volatility Score": 0.42,
 }
 ```

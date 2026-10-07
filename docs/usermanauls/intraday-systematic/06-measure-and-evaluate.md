@@ -152,25 +152,25 @@ The statistics for the same run, printed directly:
 
 ```text
 stats_pnls: {'USD': {'Avg Winner': 351.59, 'Min Winner': 351.59, 'Avg Loser': -118.69000000000003, 'Max Winner': 351.59, 'PnL% (total)': -0.024189000000013037, 'PnL (total)': -241.89000000013039, 'Win Rate': 0.16666666666666666, 'Max Loser': -199.36, 'Expectancy': -40.31000000000003, 'Min Loser': -68.84}}
-stats_returns: {'Average (Return)': -0.0001209356549090046, 'Sortino Ratio (252 days)': -8.946770580788236, 'Sharpe Ratio (252 days)': -7.437307156740296, 'Risk Return Ratio': -0.46850631335084997, 'Returns Kurtosis': nan, 'Average Loss (Return)': -0.00030346130981806496, 'Tail Ratio': 0.15194988011811428, 'Profit Factor': 0.2029583278243312, 'Returns Volatility (252 days)': 0.004097690789797422, 'Returns Skewness': nan, 'Average Win (Return)': 6.159000000005577e-05}}
+stats_returns: {'Average (Return, simple)': -0.0001209356549090046, 'Sortino Ratio (simple, population, 252 days)': -8.946770580788236, 'Sharpe Ratio (simple, sample, 252 days)': -7.437307156740296, 'Risk Return Ratio (simple, sample)': -0.46850631335084997, 'Returns Kurtosis (simple, sample)': nan, 'Average Loss (Return, simple)': -0.00030346130981806496, 'Tail Ratio (simple)': 0.15194988011811428, 'Profit Factor (simple)': 0.2029583278243312, 'Returns Volatility (simple, sample, 252 days)': 0.004097690789797422, 'Returns Skewness (simple, sample)': nan, 'Average Win (Return, simple)': 6.159000000005577e-05}}
 stats_general: {'Long Ratio': 0.5}
 ```
 
-| Statistic                       | Meaning                                       | A good value looks like                    | A bad value looks like                                   |
-| ------------------------------- | --------------------------------------------- | ------------------------------------------ | -------------------------------------------------------- |
-| `PnL (total)`                   | Money made or lost in the currency            | Positive and larger than costs             | Negative, as here                                        |
-| `PnL% (total)`                  | The same as a fraction of starting balance    | Positive                                   | -0.0242, a 2.4 percent loss                              |
-| `Win Rate`                      | Fraction of closed positions that made money  | Above about 0.4 with a positive expectancy | 0.1667, one in six                                       |
-| `Expectancy`                    | Average money per position                    | Positive                                   | -40.31 USD                                               |
-| `Avg Winner` / `Avg Loser`      | Average size of a winning and losing position | Winner much larger than loser              | Winner 351.59 against loser -118.69, but too few winners |
-| `Profit Factor`                 | Total won divided by total lost               | Above 1                                    | 0.203                                                    |
-| `Sharpe Ratio (252 days)`       | Return per unit of volatility, annualised     | Above about 1                              | -7.44                                                    |
-| `Sortino Ratio (252 days)`      | Like Sharpe but only penalising downside      | Above about 1                              | -8.95                                                    |
-| `Returns Volatility (252 days)` | How much the returns bounce around            | Compared with your target                  | 0.0041                                                   |
-| `Tail Ratio`                    | Right tail size against left tail size        | Above 1                                    | 0.152                                                    |
-| `Long Ratio`                    | Fraction of time spent long                   | Depends on the rule                        | 0.5, a balanced rule                                     |
+| Statistic                                       | Meaning                                       | A good value looks like                    | A bad value looks like                                   |
+| ----------------------------------------------- | --------------------------------------------- | ------------------------------------------ | -------------------------------------------------------- |
+| `PnL (total)`                                   | Money made or lost in the currency            | Positive and larger than costs             | Negative, as here                                        |
+| `PnL% (total)`                                  | The same as a fraction of starting balance    | Positive                                   | -0.0242, a 2.4 percent loss                              |
+| `Win Rate`                                      | Fraction of closed positions that made money  | Above about 0.4 with a positive expectancy | 0.1667, one in six                                       |
+| `Expectancy`                                    | Average money per position                    | Positive                                   | -40.31 USD                                               |
+| `Avg Winner` / `Avg Loser`                      | Average size of a winning and losing position | Winner much larger than loser              | Winner 351.59 against loser -118.69, but too few winners |
+| `Profit Factor (simple)`                        | Total won divided by total lost               | Above 1                                    | 0.203                                                    |
+| `Sharpe Ratio (simple, sample, 252 days)`       | Return per unit of volatility, annualised     | Above about 1                              | -7.44                                                    |
+| `Sortino Ratio (simple, population, 252 days)`  | Like Sharpe but only penalising downside      | Above about 1                              | -8.95                                                    |
+| `Returns Volatility (simple, sample, 252 days)` | How much the returns bounce around            | Compared with your target                  | 0.0041                                                   |
+| `Tail Ratio (simple)`                           | Right tail size against left tail size        | Above 1                                    | 0.152                                                    |
+| `Long Ratio`                                    | Fraction of time spent long                   | Depends on the rule                        | 0.5, a balanced rule                                     |
 
-Two cautions about the table. First, `NaN` is not zero; `Returns Skewness` is `nan` because there
+Two cautions about the table. First, `NaN` is not zero; `Returns Skewness (simple, sample)` is `nan` because there
 are too few returns to compute it, and the engine reports that state rather than inventing a number
 (`docs/concepts/performance_periods.md`). Second, a Sharpe ratio computed from two hours of data
 annualised to 252 days is arithmetic theatre. It is shown here because it is part of the surface,

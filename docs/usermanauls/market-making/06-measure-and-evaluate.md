@@ -256,17 +256,17 @@ stats_pnls:
     Min Winner: nan
     Max Loser: -8421.9
 stats_returns:
-  Average Loss (Return): -0.0024551543498598782
-  Sortino Ratio (252 days): -15.500882570623205
-  Profit Factor: 0.0
-  Returns Volatility (252 days): 0.012174477959753549
-  Returns Kurtosis: nan
-  Sharpe Ratio (252 days): -50.819336829881934
-  Risk Return Ratio: -3.201317310597456
-  Tail Ratio: 0.66834620803012
-  Average (Return): -0.0024551543498598782
-  Average Win (Return): nan
-  Returns Skewness: nan
+  Average Loss (Return, simple): -0.0024551543498598782
+  Sortino Ratio (simple, population, 252 days): -15.500882570623205
+  Profit Factor (simple): 0.0
+  Returns Volatility (simple, sample, 252 days): 0.012174477959753549
+  Returns Kurtosis (simple, sample): nan
+  Sharpe Ratio (simple, sample, 252 days): -50.819336829881934
+  Risk Return Ratio (simple, sample): -3.201317310597456
+  Tail Ratio (simple): 0.66834620803012
+  Average (Return, simple): -0.0024551543498598782
+  Average Win (Return, simple): nan
+  Returns Skewness (simple, sample): nan
 stats_general:
   Long Ratio: 0.43
 ```
@@ -296,24 +296,23 @@ converting, you will think one of them is wrong.
 
 ### Return statistics
 
-| Statistic                       | Meaning                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------ |
-| `Average (Return)`              | Average per-period return.                                               |
-| `Average Win (Return)`          | Average per-period return on winning periods.                            |
-| `Average Loss (Return)`         | Average per-period return on losing periods.                             |
-| `Profit Factor`                 | Gross profit divided by gross loss. `0.0` means no profit at all.        |
-| `Returns Volatility (252 days)` | Annualised standard deviation of returns.                                |
-| `Sharpe Ratio (252 days)`       | Return per unit of volatility; negative here because the strategy loses. |
-| `Sortino Ratio (252 days)`      | Like Sharpe but penalising only downside volatility.                     |
-| `Returns Skewness`              | Asymmetry of the return distribution.                                    |
-| `Returns Kurtosis`              | How fat the tails are; fat tails mean occasional extreme days.           |
-| `Tail Ratio`                    | Right-tail versus left-tail magnitude.                                   |
-| `Risk Return Ratio`             | Return divided by drawdown risk.                                         |
+| Statistic                                       | Meaning                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------ |
+| `Average (Return, simple)`                      | Average per-period return.                                               |
+| `Average Win (Return, simple)`                  | Average per-period return on winning periods.                            |
+| `Average Loss (Return, simple)`                 | Average per-period return on losing periods.                             |
+| `Profit Factor (simple)`                        | Gross profit divided by gross loss. `0.0` means no profit at all.        |
+| `Returns Volatility (simple, sample, 252 days)` | Annualised standard deviation of returns.                                |
+| `Sharpe Ratio (simple, sample, 252 days)`       | Return per unit of volatility; negative here because the strategy loses. |
+| `Sortino Ratio (simple, population, 252 days)`  | Like Sharpe but penalising only downside volatility.                     |
+| `Returns Skewness (simple, sample)`             | Asymmetry of the return distribution.                                    |
+| `Returns Kurtosis (simple, sample)`             | How fat the tails are; fat tails mean occasional extreme days.           |
+| `Tail Ratio (simple)`                           | Right-tail versus left-tail magnitude.                                   |
+| `Risk Return Ratio (simple, sample)`            | Return divided by drawdown risk.                                         |
 
 **What a good value looks like:** `Win Rate` high, `Avg Winner` larger than `Avg Loser`,
-`Profit Factor` above `1.0`, `Sharpe Ratio` positive. **What a bad value looks like:** exactly this
-run: win rate zero, profit factor zero, Sharpe `-50.8`. Do not tune the strategy until `Profit
-Factor` is above `1.0` on data that at least oscillates.
+`Profit Factor (simple)` above `1.0`, `Sharpe Ratio` positive. **What a bad value looks like:** exactly this
+run: win rate zero, profit factor zero, Sharpe `-50.8`. Do not tune the strategy until `Profit Factor (simple)` is above `1.0` on data that at least oscillates.
 
 ### General statistics
 
