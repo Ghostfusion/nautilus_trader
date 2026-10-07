@@ -32,6 +32,7 @@ from nautilus_trader.analysis import BreakevenCost
 from nautilus_trader.analysis import CalmarRatio
 from nautilus_trader.analysis import CorrectionImpactReport
 from nautilus_trader.analysis import CostBasisPoints
+from nautilus_trader.analysis import DetectorReport
 from nautilus_trader.analysis import DownCaptureRatio
 from nautilus_trader.analysis import Expectancy
 from nautilus_trader.analysis import ExpectedShortfall
@@ -142,10 +143,12 @@ BENCHMARK_STATISTICS = [
     (UpCaptureRatio, "Up Capture Ratio"),
 ]
 
-# Statistics that carry the declared outcome metric a correction is measured against, so they are
-# not constructible with no arguments.
+# Statistics that carry the declared outcome metric a correction is measured against, or the
+# confusion matrix a detector report is built from, so they are not constructible with no
+# arguments.
 REPORT_STATISTICS = [
     (CorrectionImpactReport, "Correction Impact"),
+    (DetectorReport, "Detector Report"),
 ]
 
 ALL_STATISTICS = (
@@ -176,10 +179,13 @@ EXPOSED_STATISTICS = sorted(
 
 
 def _construct_exposed_statistic(cls: object) -> object:
-    # Every exposed statistic is constructible with no arguments except the correction-impact
-    # report, which requires the declared outcome metric it reports.
+    # Every exposed statistic is constructible with no arguments except the two reports: the
+    # correction-impact report requires the declared outcome metric it reports, and the detector
+    # report requires the confusion matrix it reads.
     if cls is CorrectionImpactReport:
         return CorrectionImpactReport("sharpe_ratio", 1.0, 0.5)
+    if cls is DetectorReport:
+        return DetectorReport(1, 9, 989, 1)
     return cls()
 
 
@@ -1102,3 +1108,118 @@ def test_analyzer_renders_no_correction_impact_row_when_none_is_set() -> None:
     stats = analyzer.statistics()
 
     assert not any(key.startswith("Correction Impact") for key in stats.returns)
+
+
+def test_detector_report_prints_a_high_accuracy_beside_a_low_base_rate() -> None:
+    """
+    Test detector report prints a high accuracy beside a low base rate.
+    """
+    # 1000 records, 2 truly positive (base rate 0.002). The detector marks 10 positive and gets
+    # one right, so accuracy is 0.99 while nine in ten of its alarms are false.
+    report = DetectorReport(1, 9, 989, 1)
+
+    assert report.true_positives == 1
+    assert report.false_positives == 9
+    assert report.true_negatives == 989
+    assert report.false_negatives == 1
+    assert report.accuracy == pytest.approx(0.99)
+    assert report.base_rate == pytest.approx(0.002)
+    assert report.precision == pytest.approx(0.1)
+    assert report.recall == pytest.approx(0.5)
+    assert report.f1 == pytest.approx(1.0 / 6.0)
+    assert report.false_discovery_rate == pytest.approx(0.9)
+    assert "accuracy 0.99" in repr(report)
+    assert "base rate 0.002" in repr(report)
+    assert "false discovery rate 0.9" in repr(report)
+
+
+def test_detector_report_refuses_an_accuracy_without_a_base_rate() -> None:
+    """
+    Test detector report refuses an accuracy without a base rate.
+    """
+    # The refusal names the missing base rate rather than defaulting one.
+    with pytest.raises(ValueError, match="requires the positive base rate beside its accuracy"):
+        DetectorReport.from_accuracy(0.99)
+
+    with pytest.raises(ValueError, match="requires the confusion matrix"):
+        DetectorReport.from_accuracy(0.99, 0.002)
+
+
+def test_detector_report_refuses_a_mismatched_decision_and_label_count() -> None:
+    """
+    Test detector report refuses a mismatched decision and label count.
+    """
+    with pytest.raises(ValueError, match="one decision and one label per record"):
+        DetectorReport.from_decisions_and_labels([True, False], [True])
+
+
+def test_detector_report_refuses_an_empty_population() -> None:
+    """
+    Test detector report refuses an empty population.
+    """
+    with pytest.raises(ValueError, match="at least one evaluated record"):
+        DetectorReport(0, 0, 0, 0)
+
+
+def test_detector_report_from_decisions_and_labels_reads_the_matrix() -> None:
+    """
+    Test detector report from decisions and labels reads the matrix.
+    """
+    # Every record is marked positive and one is truly positive: the accuracy equals the base
+    # rate, as does the precision, and the recall is 1.0.
+    report = DetectorReport.from_decisions_and_labels(
+        [True] * 10,
+        [True, False, False, False, False, False, False, False, False, False],
+    )
+
+    assert report.true_positives == 1
+    assert report.false_positives == 9
+    assert report.true_negatives == 0
+    assert report.false_negatives == 0
+    assert report.accuracy == pytest.approx(report.base_rate)
+    assert report.precision == pytest.approx(report.base_rate)
+    assert report.recall == pytest.approx(1.0)
+
+
+def test_analyzer_renders_the_detector_accuracy_with_its_base_rate() -> None:
+    """
+    Test analyzer renders the detector accuracy with its base rate.
+    """
+    analyzer = PortfolioAnalyzer()
+    analyzer.set_detector_report(DetectorReport(1, 9, 989, 1))
+
+    stats = analyzer.statistics()
+
+    assert stats.returns["Detector Report: accuracy"] == pytest.approx(0.99)
+    assert stats.returns["Detector Report: base rate"] == pytest.approx(0.002)
+    assert stats.returns["Detector Report: precision"] == pytest.approx(0.1)
+    assert stats.returns["Detector Report: recall"] == pytest.approx(0.5)
+    assert stats.returns["Detector Report: false discovery rate"] == pytest.approx(0.9)
+    assert stats.general["Detector Report: true positives"] == 1.0
+    assert stats.general["Detector Report: false positives"] == 9.0
+    assert stats.general["Detector Report: true negatives"] == 989.0
+    assert stats.general["Detector Report: false negatives"] == 1.0
+
+
+def test_detector_accuracy_and_base_rate_rows_cannot_be_separated() -> None:
+    """
+    Test detector accuracy and base rate rows cannot be separated.
+    """
+    analyzer = PortfolioAnalyzer()
+    analyzer.set_detector_report(DetectorReport(45, 5, 45, 5))
+
+    stats = analyzer.statistics()
+
+    accuracy = "Detector Report: accuracy" in stats.returns
+    base_rate = "Detector Report: base rate" in stats.returns
+
+    assert accuracy
+    assert accuracy == base_rate
+    assert stats.returns["Detector Report: base rate"] == pytest.approx(0.5)
+    assert stats.returns["Detector Report: accuracy"] == pytest.approx(0.9)
+
+    analyzer.set_detector_report(None)
+    stats = analyzer.statistics()
+
+    assert not any(key.startswith("Detector Report") for key in stats.returns)
+    assert not any(key.startswith("Detector Report") for key in stats.general)

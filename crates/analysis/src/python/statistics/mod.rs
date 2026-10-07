@@ -23,6 +23,7 @@ pub mod cagr;
 pub mod calmar_ratio;
 pub mod correction_impact;
 pub mod cost_basis_points;
+pub mod detector_report;
 pub mod down_capture_ratio;
 pub mod expectancy;
 pub mod expected_shortfall;

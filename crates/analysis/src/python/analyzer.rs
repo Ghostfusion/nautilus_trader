@@ -31,7 +31,7 @@ use crate::{
     period::PerformancePeriod,
     python::statistic::statistic_from_pyobject,
     snapshot::PortfolioStatistics,
-    statistics::correction_impact::CorrectionImpactReport,
+    statistics::{correction_impact::CorrectionImpactReport, detector_report::DetectorReport},
 };
 
 #[pymethods]
@@ -149,7 +149,15 @@ impl PortfolioAnalyzer {
     /// When a correction impact has been set with `Self.set_correction_impact`, three rows are
     /// added to `returns`, naming the declared metric and the stream each value came from: the
     /// uncorrected value, the corrected value and their delta. A correction that changed nothing
-    /// renders a delta of exactly zero rather than omitting the row.
+    /// renders a delta of exactly zero rather than omitting the row. With no impact set, no
+    /// correction-impact row is produced.
+    ///
+    /// When a detector report has been set with `Self.set_detector_report`, the accuracy and its
+    /// positive base rate are added to `returns` as one inseparable pair, beside `precision`,
+    /// `recall`, `F1` and the false-discovery rate, and the four counts of the confusion matrix are
+    /// added to `general`. A rate that is undefined is omitted rather than given a plausible value,
+    /// and the accuracy and base rate are always both present or both absent. With no report set,
+    /// no detector row is produced.
     #[pyo3(name = "statistics")]
     fn py_statistics(&self) -> PortfolioStatistics {
         self.statistics()
@@ -348,19 +356,40 @@ impl PortfolioAnalyzer {
     ///
     /// The report is built by the caller that holds both measurements of the declared outcome
     /// metric; the analyzer is a carrier, not a measurer, of it. `None` when no correction was
-    /// applied, in which case no correction-impact row is rendered. When set, the uncorrected
-    /// value, the corrected value and their delta are rendered, each naming the stream it came
-    /// from.
+    /// applied or none declared a metric, in which case no correction-impact row is rendered: an
+    /// absent measurement is not a zero delta. When `Some`, the uncorrected value, the corrected
+    /// value and their delta are rendered, each naming the stream it came from, and the zero delta
+    /// of a correction that changed nothing is rendered rather than omitted.
     #[pyo3(name = "set_correction_impact")]
     fn py_set_correction_impact(&mut self, impact: Option<CorrectionImpactReport>) {
         self.set_correction_impact(impact);
     }
 
-    /// Returns the measured effect of the data-quality correction applied to the run's stream.
+    /// Returns the measured effect of the data-quality correction applied to the run's stream, if
+    /// any.
     #[getter]
     #[pyo3(name = "correction_impact")]
     fn py_correction_impact(&self) -> Option<CorrectionImpactReport> {
         self.correction_impact().cloned()
+    }
+
+    /// Sets the detector's confusion matrix and the rates that read it.
+    ///
+    /// The report is built by the caller that holds the detector's decisions and the ground-truth
+    /// labels; the analyzer is a carrier, not a measurer, of it. `None` when no detector was
+    /// evaluated, in which case no detector-report row is rendered. When `Some`, the accuracy is
+    /// rendered as one inseparable pair with its positive base rate, beside the counts, precision,
+    /// recall, F1 and the false-discovery rate.
+    #[pyo3(name = "set_detector_report")]
+    fn py_set_detector_report(&mut self, report: Option<DetectorReport>) {
+        self.set_detector_report(report);
+    }
+
+    /// Returns the detector's confusion matrix and the rates that read it, if any.
+    #[getter]
+    #[pyo3(name = "detector_report")]
+    fn py_detector_report(&self) -> Option<DetectorReport> {
+        self.detector_report().cloned()
     }
 
     /// Records a position return at a specific timestamp.

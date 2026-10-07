@@ -90,6 +90,7 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::statistics::variance_ratio::VarianceRatio>()?;
     m.add_class::<crate::statistics::rescaled_range::RescaledRange>()?;
     m.add_class::<crate::statistics::correction_impact::CorrectionImpactReport>()?;
+    m.add_class::<crate::statistics::detector_report::DetectorReport>()?;
 
     // Statistics - Frame-based
     m.add_class::<crate::statistics::arithmetic_compounding::ArithmeticCompoundingFlagged>()?;

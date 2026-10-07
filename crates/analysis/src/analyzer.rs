@@ -48,6 +48,7 @@ use crate::{
         breakeven_cost::BreakevenCost,
         correction_impact::CorrectionImpactReport,
         cost_basis_points::CostBasisPoints,
+        detector_report::DetectorReport,
         expectancy::Expectancy,
         gross_return::GrossReturn,
         long_ratio::LongRatio,
@@ -174,6 +175,14 @@ pub struct PortfolioAnalyzer {
     /// the uncorrected value, the corrected value and the delta, each naming the stream it came
     /// from.
     correction_impact: Option<CorrectionImpactReport>,
+    /// The detector's confusion matrix and the rates that read it, if any.
+    ///
+    /// `None` when no detector was evaluated, in which case no detector-report row is rendered.
+    /// Set with [`Self::set_detector_report`] by whoever holds the decisions, the labels and the
+    /// matrix they form, and read only by [`Self::statistics`], which renders the accuracy and its
+    /// positive base rate as one inseparable pair beside the counts, precision, recall, F1 and the
+    /// false-discovery rate.
+    detector_report: Option<DetectorReport>,
 }
 
 impl Default for PortfolioAnalyzer {
@@ -251,6 +260,7 @@ impl PortfolioAnalyzer {
             fill_cause_counts: None,
             market_impact_label: None,
             correction_impact: None,
+            detector_report: None,
         }
     }
 
@@ -297,6 +307,7 @@ impl PortfolioAnalyzer {
         self.fill_cause_counts = None;
         self.market_impact_label = None;
         self.correction_impact = None;
+        self.detector_report = None;
     }
 
     /// Returns all tracked currencies.
@@ -443,6 +454,23 @@ impl PortfolioAnalyzer {
     #[must_use]
     pub fn correction_impact(&self) -> Option<&CorrectionImpactReport> {
         self.correction_impact.as_ref()
+    }
+
+    /// Sets the detector's confusion matrix and the rates that read it.
+    ///
+    /// The report is built by the caller that holds the detector's decisions and the ground-truth
+    /// labels; the analyzer is a carrier, not a measurer, of it. `None` when no detector was
+    /// evaluated, in which case no detector-report row is rendered. When `Some`, the accuracy is
+    /// rendered as one inseparable pair with its positive base rate, beside the counts, precision,
+    /// recall, F1 and the false-discovery rate.
+    pub fn set_detector_report(&mut self, report: Option<DetectorReport>) {
+        self.detector_report = report;
+    }
+
+    /// Returns the detector's confusion matrix and the rates that read it, if any.
+    #[must_use]
+    pub fn detector_report(&self) -> Option<&DetectorReport> {
+        self.detector_report.as_ref()
     }
 
     /// Returns the scoring-chain stage of every registered statistic that declares one.
@@ -609,6 +637,13 @@ impl PortfolioAnalyzer {
     /// uncorrected value, the corrected value and their delta. A correction that changed nothing
     /// renders a delta of exactly zero rather than omitting the row. With no impact set, no
     /// correction-impact row is produced.
+    ///
+    /// When a detector report has been set with [`Self::set_detector_report`], the accuracy and its
+    /// positive base rate are added to `returns` as one inseparable pair, beside `precision`,
+    /// `recall`, `F1` and the false-discovery rate, and the four counts of the confusion matrix are
+    /// added to `general`. A rate that is undefined is omitted rather than given a plausible value,
+    /// and the accuracy and base rate are always both present or both absent. With no report set,
+    /// no detector row is produced.
     #[must_use]
     pub fn statistics(&self) -> PortfolioStatistics {
         let mut pnls = AHashMap::new();
@@ -673,6 +708,44 @@ impl PortfolioAnalyzer {
             returns.insert(
                 format!("Correction Impact: {metric} (delta)"),
                 impact.delta(),
+            );
+        }
+
+        // The accuracy and its base rate are one report: they are inserted together, from the
+        // report's own pair, so the accuracy can never be rendered without the base rate that
+        // interprets it. The remaining rates are added beside them, and the counts land in
+        // `general` because they are counts rather than dimensionless rates.
+        if let Some(report) = &self.detector_report {
+            for (label, value) in report.accuracy_rows() {
+                returns.insert(format!("Detector Report: {label}"), value);
+            }
+
+            for (label, value) in [
+                ("precision", report.precision()),
+                ("recall", report.recall()),
+                ("f1", report.f1()),
+                ("false discovery rate", report.false_discovery_rate()),
+            ] {
+                if let Some(value) = value {
+                    returns.insert(format!("Detector Report: {label}"), value);
+                }
+            }
+
+            general.insert(
+                "Detector Report: true positives".to_string(),
+                report.true_positives() as f64,
+            );
+            general.insert(
+                "Detector Report: false positives".to_string(),
+                report.false_positives() as f64,
+            );
+            general.insert(
+                "Detector Report: true negatives".to_string(),
+                report.true_negatives() as f64,
+            );
+            general.insert(
+                "Detector Report: false negatives".to_string(),
+                report.false_negatives() as f64,
             );
         }
 
@@ -4245,5 +4318,68 @@ mod tests {
         analyzer.reset();
 
         assert!(analyzer.correction_impact().is_none());
+    }
+
+    #[rstest]
+    fn test_detector_report_renders_the_base_rate_beside_a_high_accuracy() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        // 0.99 accuracy on a 0.002 base rate, with precision 0.1 and a 0.9 false-discovery rate.
+        analyzer.set_detector_report(Some(DetectorReport::new(1, 9, 989, 1).unwrap()));
+
+        let stats = analyzer.statistics();
+
+        assert_eq!(stats.returns["Detector Report: accuracy"], 0.99);
+        assert_eq!(stats.returns["Detector Report: base rate"], 0.002);
+        assert_eq!(stats.returns["Detector Report: precision"], 0.1);
+        assert_eq!(stats.returns["Detector Report: recall"], 0.5);
+        assert_eq!(stats.returns["Detector Report: false discovery rate"], 0.9);
+        assert_eq!(stats.general["Detector Report: true positives"], 1.0);
+        assert_eq!(stats.general["Detector Report: false positives"], 9.0);
+        assert_eq!(stats.general["Detector Report: true negatives"], 989.0);
+        assert_eq!(stats.general["Detector Report: false negatives"], 1.0);
+    }
+
+    #[rstest]
+    fn test_detector_accuracy_and_base_rate_rows_cannot_be_separated() {
+        // With a report, both rows are present; with none, neither is. The accuracy row is never
+        // rendered without the base rate that interprets it.
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_detector_report(Some(DetectorReport::new(45, 5, 45, 5).unwrap()));
+
+        let stats = analyzer.statistics();
+        let accuracy = stats.returns.contains_key("Detector Report: accuracy");
+        let base_rate = stats.returns.contains_key("Detector Report: base rate");
+
+        assert!(accuracy);
+        assert_eq!(accuracy, base_rate);
+        assert_eq!(stats.returns["Detector Report: base rate"], 0.5);
+        assert_eq!(stats.returns["Detector Report: accuracy"], 0.9);
+
+        let mut none = PortfolioAnalyzer::default();
+        none.set_detector_report(None);
+        let stats = none.statistics();
+
+        assert!(
+            !stats
+                .returns
+                .keys()
+                .any(|key| key.starts_with("Detector Report"))
+        );
+        assert!(
+            !stats
+                .general
+                .keys()
+                .any(|key| key.starts_with("Detector Report"))
+        );
+    }
+
+    #[rstest]
+    fn test_reset_clears_the_detector_report() {
+        let mut analyzer = PortfolioAnalyzer::default();
+        analyzer.set_detector_report(Some(DetectorReport::new(1, 9, 989, 1).unwrap()));
+
+        analyzer.reset();
+
+        assert!(analyzer.detector_report().is_none());
     }
 }
