@@ -23,18 +23,19 @@ evidence grade is "Disputed", you know that before investing effort. A good tabl
 month". The "where the rules come from" row always links to the library page that states the
 rules, so you can check that the tutorial has not invented them.
 
-## What the four grades mean
+## What the five grades mean
 
-The row called "How well it held up" carries one of four grades. The grade summarises the evidence
+The row called "How well it held up" carries one of five grades. The grade summarises the evidence
 behind the idea. It is not a recommendation, and a high grade is not a promise that the idea makes
 money.
 
-| Grade    | What it means                                                                                                                           |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Strong   | Several independent samples, trading costs included, and the effect still shows up on data that was not used to build it.               |
-| Mixed    | The effect appears in some samples, markets or periods and not others, or it only works if costs are lower than they realistically are. |
-| Weak     | Published once on one sample with no independent replication, or the replication reduced it to nothing.                                 |
-| Disputed | Different credible sources reach opposite conclusions and nobody has settled the disagreement.                                          |
+| Grade         | What it means                                                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Strong        | Several independent samples, trading costs included, and the effect still shows up on data that was not used to build it.               |
+| Mixed         | The effect appears in some samples, markets or periods and not others, or it only works if costs are lower than they realistically are. |
+| Weak          | Published once on one sample with no independent replication, or the replication reduced it to nothing.                                 |
+| Disputed      | Different credible sources reach opposite conclusions and nobody has settled the disagreement.                                          |
+| Open question | A published claim exists for the idea, but this collection found no measurement of the exact rule.                                      |
 
 A good tutorial names what the grade is based on in one clause, so you can see whether it rests on
 a single paper or on many tests. "Strong" describes the evidence, not the strategy's future.

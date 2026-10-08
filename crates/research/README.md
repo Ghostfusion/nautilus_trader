@@ -17,6 +17,8 @@ can build and version datasets without instantiating a node:
 - A point-in-time panel whose membership and feature apertures are checked by construction.
 - The time-series and cross-sectional operator set, with stated conventions.
 - Compiled features and labels, and the measurement of an admitted decision stream.
+- A model-free volatility index computed from one option-chain snapshot, with the strike
+  selection, the strike spacing and the term blend stated so that a level can be reproduced.
 
 ## NautilusTrader
 

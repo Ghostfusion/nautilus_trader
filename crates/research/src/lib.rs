@@ -34,6 +34,9 @@
 //! - [`measurement`]: the measurement of an admitted decision stream, with the three experiments
 //!   of the research-to-execution bridge kept apart, coverage-aware signal quality, confidence
 //!   calibration, the reduction factor's effect, redundancy and regime conditioning.
+//! - [`volatility`]: a model-free volatility index built from one option-chain snapshot, with the
+//!   forward level, the reference strike, the out-of-the-money stripe and the strike spacing
+//!   conventions stated so that a level can be reproduced from the quotes it was taken from.
 //!
 //! The compiled feature and label definitions implement the [`dataset::Feature`] and
 //! [`dataset::Label`] seams, so a dataset declaration consumes only their names and digests. The
@@ -65,6 +68,7 @@ pub mod measurement;
 pub mod membership;
 pub mod operators;
 pub mod panel;
+pub mod volatility;
 
 #[cfg(feature = "python")]
 pub mod python;
@@ -97,3 +101,6 @@ pub use operators::{
     rolling_std,
 };
 pub use panel::{FeatureValue, Panel, PanelError, PanelRow};
+pub use volatility::{
+    OptionChainTerm, StrikeQuote, TermVariance, VolatilityError, term_variance, volatility_index,
+};

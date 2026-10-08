@@ -4,10 +4,10 @@ Date: 2026-10-07. Revision 1.
 
 This file is the authoring contract. Every folder under [quantconnect](quantconnect),
 [backtrader](backtrader), [freqtrade](freqtrade), [fastquant](fastquant),
-[paperswithbacktest](paperswithbacktest) and [project](project) holds one `README.md` written to
-the template below and obeying the rules below. If you are reading the collection rather than
-writing it, [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.md) explains the sections in plain
-words.
+[paperswithbacktest](paperswithbacktest), [quant-trading](quant-trading) and [project](project)
+holds one `README.md` written to the template below and obeying the rules below. If you are
+reading the collection rather than writing it, [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.md)
+explains the sections in plain words.
 
 ## Who the reader is
 
@@ -63,17 +63,18 @@ Seven rows, two columns, header row present. Add no other rows.
 | What you need             | One of: "nothing but this page", "a spreadsheet", "Python and a data file".                                                     |
 | Where the rules come from | The library page that states the rules, as a markdown link.                                                                     |
 | The underlying research   | The paper, book or entry the rules were built from, as a markdown link, or "none, this is a practitioner's rule of thumb".      |
-| How well it held up       | One of the four grades below, plus one clause saying what the grade is based on.                                                |
+| How well it held up       | One of the five grades below, plus one clause saying what the grade is based on.                                                |
 | Also appears in           | The other libraries in this collection that describe the same idea, as links, or "nothing else in this collection".             |
 
 ### Grades for "how well it held up"
 
-| Grade    | Use it when                                                                                                            |
-| -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Strong   | Several independent samples, costs included, and the effect survives out of sample.                                    |
-| Mixed    | The effect appears in some samples, markets or periods and not others, or it needs costs low enough to be unrealistic. |
-| Weak     | Published once, on one sample, with no independent replication, or the replication reduced it to nothing.              |
-| Disputed | Different credible sources reach opposite conclusions, and the disagreement is unresolved.                             |
+| Grade         | Use it when                                                                                                            |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Strong        | Several independent samples, costs included, and the effect survives out of sample.                                    |
+| Mixed         | The effect appears in some samples, markets or periods and not others, or it needs costs low enough to be unrealistic. |
+| Weak          | Published once, on one sample, with no independent replication, or the replication reduced it to nothing.              |
+| Disputed      | Different credible sources reach opposite conclusions, and the disagreement is unresolved.                             |
+| Open question | A published claim exists for the idea, but no measurement of the exact rule was found by this collection.              |
 
 ### Section by section
 
@@ -113,8 +114,10 @@ works"; report what was measured.
 
 **How this project relates to it.** The concrete link into this repository: the file or directory
 that implements the same idea or the measurement that tests it, as a relative markdown link, and
-one sentence on what the reader would see there. If this project implements nothing related, say
-so plainly and point at the closest thing that exists.
+one sentence on what the reader would see there. If this project implements nothing related, say so
+plainly and point at the closest thing that exists. Where the linked file can be run, give the one
+command or call that runs it, so a reader who does read code can execute the rule rather than only
+read about it.
 
 **Where it goes wrong.** The honest failure modes: what makes the signal vanish (crowding, changes
 in rules, a regime that ends), what breaks the measurement (survivorship, look-ahead, costs
@@ -152,6 +155,11 @@ include the identifier here, for example `2107.06194v5`.
    who has never traded.
 8. Keep the reader's arithmetic honest: one unit of currency, consistent rounding, and costs
    included in the worked example.
+9. State the limits of the simulation. A tutorial reports what a source measured, on that source's
+   assumptions, and says where those assumptions are generous. The collection-wide default, stated
+   in [README.md](README.md), is that a fill happens at the quoted price with no slippage, no
+   market impact, and no cost beyond the fee the page names. A source that assumed more, or less,
+   is described as it is.
 
 ## Formatting rules
 

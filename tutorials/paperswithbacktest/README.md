@@ -53,9 +53,9 @@ tutorial. A page written to a different shape would not belong here.
 Just below the title comes the provenance table, a small table of seven rows that says at a glance
 what the tutorial is about. It names what the strategy trades, how often it trades, and what you
 need to follow it. It links to the list row that states the rules and to the paper those rules came
-from, or says plainly that there is no research behind them. It gives one of four grades for how
-well the idea held up, Strong, Mixed, Weak or Disputed, with a clause saying what the grade rests
-on. And it lists the other libraries in this collection that describe the same idea, or says that
+from, or says plainly that there is no research behind them. It gives one of five grades for how
+well the idea held up: Strong, Mixed, Weak, Disputed or Open question, with a clause saying what the
+grade rests on. And it lists the other libraries in this collection that describe the same idea, or says that
 nothing else here does.
 
 [GLOSSARY.md](../GLOSSARY.md) defines the words the tutorial uses, and
