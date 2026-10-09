@@ -4,7 +4,8 @@ Date: 2026-10-07. Revision 1.
 
 This file is the authoring contract. Every folder under [quantconnect](quantconnect),
 [backtrader](backtrader), [freqtrade](freqtrade), [fastquant](fastquant),
-[paperswithbacktest](paperswithbacktest), [quant-trading](quant-trading) and [project](project)
+[paperswithbacktest](paperswithbacktest), [quant-trading](quant-trading),
+[research-process](research-process) and [project](project)
 holds one `README.md` written to the template below and obeying the rules below. If you are
 reading the collection rather than writing it, [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.md)
 explains the sections in plain words.
@@ -122,7 +123,9 @@ read about it.
 **Where it goes wrong.** The honest failure modes: what makes the signal vanish (crowding, changes
 in rules, a regime that ends), what breaks the measurement (survivorship, look-ahead, costs
 ignored, a sample chosen after the fact), and what would have to be true for the whole idea to be
-false. Three to six items, each one a sentence or two.
+false. Where a source claims a capability it does not ship, name the claim and the missing piece
+here, and say in one clause what primitive would be needed to provide it. Three to six items, each
+one a sentence or two.
 
 **Try it yourself.** One concrete exercise the reader can do without money and without code.
 Either a spreadsheet task with explicit column headings, or a paper exercise such as scoring the
@@ -160,6 +163,10 @@ include the identifier here, for example `2107.06194v5`.
    in [README.md](README.md), is that a fill happens at the quoted price with no slippage, no
    market impact, and no cost beyond the fee the page names. A source that assumed more, or less,
    is described as it is.
+10. Say what a source promises and what it does. If a file, a function or a page claims a capability
+    its own code does not provide - an empty module, a stub that raises when called, a validator
+    that only checks that a file opens - the tutorial names the claim and the missing piece, and
+    never describes the promise as if it were the behaviour.
 
 ## Formatting rules
 
