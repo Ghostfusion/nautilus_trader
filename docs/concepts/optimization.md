@@ -384,6 +384,50 @@ check. The correction is also not wired into the emitted result document: the co
 no dataset, and a run record retains its metric values and canonical document rather than its return
 series, so a sweep cannot be corrected from what it currently keeps.
 
+## Permutation testing of a result
+
+The multiple-testing correction answers how high the best of many tries is; it cannot answer whether
+the *order* of the outcomes produced the result. `permutation.py` answers that instead, by keeping
+every observed outcome and discarding only the order: the statistic is recomputed on each
+rearrangement, and the share of rearrangements that did at least as well as the real one is the
+p-value.
+
+Two units of rearrangement are declared, because the null each one speaks about is different:
+
+| Unit                       | What it moves                                            | What the null asserts                                                   |
+| -------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `ShuffleUnit.TRADE_ORDER`  | the realized outcomes themselves                         | any ordering of the outcome multiset was equally available              |
+| `ShuffleUnit.RETURN_BLOCK` | blocks of consecutive returns, order kept within a block | the outcomes are exchangeable once short-horizon structure is preserved |
+
+```python
+result = permutation_test(
+    trade_pnls,
+    statistic=total_return,
+    metric="total return",
+    iterations=1000,
+    seed=7,
+)
+print(result.p_value, result.extreme_count, result.scored, result.refused)
+```
+
+Three boundaries are enforced rather than documented:
+
+- **Prices are never reconstructed.** The implementation this module answers shuffles the four daily
+  prices of a bar independently and rebuilds the bar from them, which produces days whose high is
+  below their close. Here the unit moved is an outcome or a block of outcomes, so a rearranged series
+  is a rearrangement of values that were observed and never a value that was not.
+- **The generator is local.** The seed is carried by the result and the generator is created inside
+  the call, so two runs with the same seed agree and nothing else in the process that draws random
+  numbers can move the answer.
+- **Refusals are counted.** A rearrangement the statistic cannot score is counted in `refused` and
+  excluded from the share, and the count is reported beside the share rather than hidden by it.
+
+The direction of the comparison is declared rather than implied: `TestDirection.LOWER_IS_BETTER`
+counts the other way for a metric that is better when smaller, such as the deepest fall from a peak.
+A test with nothing scorable reports `nan` rather than zero, and `PermutationTestResult.to_record()`
+writes the seed, the counts and the unit as a flat, versioned record. Like the correction, **the
+value is reported, never a gate.**
+
 ## The statistics bridge
 
 A default run reports its returns statistics in `BacktestResult.stats_returns`, but that set is the
@@ -508,6 +552,9 @@ runner and produce the same results, in the same order.
 - `LabelDefinition`, `LabelKind`, `ForwardAggregate`, `AlignmentConvention`, `MissingDataPolicy`,
   `LabelSeries`, `label_series`: the label policies on the target path, their alignment convention
   and the forward reach a leakage policy has to cover.
+- `PermutationTestResult`, `ShuffleUnit`, `TestDirection`, `permutation_test`, `shuffled_orders`,
+  `total_return`, `ratio_of_mean_to_deviation`: the permutation test of a result, the two units it
+  rearranges, and the two statistics it ships so a caller needs no statistic of their own.
 - `ResearchCapabilityCode`, `leakage_capability`, `significance_capability`, `split_capability`,
   `screen_family_capability`, `persistence_capability`, `gapped_range_capability`,
   `history_capability`, `pair_distinguishability_capability`: the research domain's closed refusal

@@ -7,7 +7,7 @@ Date: 2026-10-08. Revision 1.
 | What it trades            | Nothing by itself: it is a test that rebuilds the same price changes in a different order and re-runs the rule on each rebuild                                                                                                                                                                                                                                                                                     |
 | How often it trades       | Not applicable; the test runs the rule once on the real history and once per shuffle, usually a hundred times or more                                                                                                                                                                                                                                                                                              |
 | What you need             | Nothing but this page; the worked example needs only a table of six numbers                                                                                                                                                                                                                                                                                                                                        |
-| Where the rules come from | [The permutation test in the investing-algorithm-framework repository](https://github.com/coding-kitties/investing-algorithm-framework/blob/main/investing_algorithm_framework/infrastructure/services/backtesting/backtest_service.py), which states a version of this procedure and, as this page explains, gets one step of it wrong                                                                            |
+| Where the rules come from | [The permutation test in this repository](../../../python/nautilus_trader/optimization/permutation.py), written to the procedure below, and [the version in the investing-algorithm-framework repository](https://github.com/coding-kitties/investing-algorithm-framework/blob/main/investing_algorithm_framework/infrastructure/services/backtesting/backtest_service.py), which gets one step of it wrong        |
 | The underlying research   | Mroziewicz and Slepaczuk, [A novel approach to trading strategy parameter optimization](https://arxiv.org/abs/2602.10785) (2026), whose third research question is whether the tested rule beats randomly constructed alternatives, answered by bootstrap; Deep, Deep and Lamptey, [Interpretable Hypothesis-Driven Trading](https://arxiv.org/abs/2512.12924) (2025), on reporting the resulting p-value honestly |
 | How well it held up       | Open question: the test is standard in the literature and the two papers above rely on it or on its bootstrap cousin, but this collection found no measurement of the exact rule on a rule of its own, and the version quoted above permutes the four daily prices independently, which produces days that could not have existed                                                                                  |
 | Also appears in           | [Searching settings](../sweeping-settings/README.md), [Held-back data comes in two flavours](../two-kinds-of-out-of-sample/README.md), [Scoring what survived](../scoring-what-survived/README.md), and [How a backtest lies](../../foundations/07_how-a-backtest-lies.md)                                                                                                                                         |
@@ -184,21 +184,38 @@ in its original order while every price has moved, so volume and price no longer
 
 ## How this project relates to it
 
-This repository does not ship this test, which is the reason this page exists: the statistics it
-does ship are single-run measurements, listed under
-[crates/analysis/src/statistics](../../../crates/analysis/src/statistics), and none of them compares
-a run with rearranged copies of itself. The closest thing in the repository is the significance
-report at [significance.py](../../../python/nautilus_trader/optimization/significance.py), which
-adjusts a reported ratio for the number of trials rather than for the order of the prices; the two
-corrections answer different questions and neither replaces the other. The trial count is the
-subject of [Searching settings](../sweeping-settings/README.md), and the two ways of keeping data
-away from the search are in [Held-back data comes in two flavours](../two-kinds-of-out-of-sample/README.md).
+This repository ships the procedure above in
+[permutation.py](../../../python/nautilus_trader/optimization/permutation.py). It rearranges one of
+two units: the realized outcomes of the trades themselves, or blocks of consecutive period returns,
+where a block keeps its internal order so that runs of calm and of turbulence stay together. The
+statistic is supplied by the caller rather than fixed, so the test can be run on a return, on the
+ratio of return to variability, or on the deepest fall from a peak, and the same statistic is
+applied to the real sequence and to every rearrangement. Three choices in it answer the defects
+above: nothing is ever reconstructed from separate price changes, so a rearranged value cannot be
+one that was never observed; the random generator is created inside the call and the seed is
+recorded with the result, so two runs with the same seed agree and nothing else in the process can
+move them; and a rearrangement the statistic cannot score is counted and excluded from the share
+rather than silently dropped. The result also carries the direction rule of step 7, so a
+measurement that is better when smaller is counted the other way, and it can write itself out as a
+flat record naming the seed, the counts and the unit. It is a report and never a gate: nothing in
+the module is consulted by a strategy, an order or a risk check.
 
-What a reader would see in the statistics directory is the set of measurements a shuffle test would
-be run on: the ratio of return to variability, the deepest fall from a peak, the share of winning
-trades. Any of them could serve as the score in the procedure above, which is why the test is best
-described as a way to re-use the measurements a repository already has rather than as a new
-measurement.
+The tests show it working, and they are the one command that runs the rule from the repository's
+`python` directory:
+
+```bash
+python/.venv/Scripts/python.exe -m pytest tests/unit/optimization/test_permutation.py -q
+```
+
+Two neighbours are worth naming, because each answers a different question. The significance report
+at [significance.py](../../../python/nautilus_trader/optimization/significance.py) adjusts a
+reported ratio for the number of trials rather than for the order of the prices; the trial count is
+the subject of [Searching settings](../sweeping-settings/README.md), and the two ways of keeping
+data away from the search are in
+[Held-back data comes in two flavours](../two-kinds-of-out-of-sample/README.md). And the
+measurements the test scores are the single-run ones listed under
+[crates/analysis/src/statistics](../../../crates/analysis/src/statistics): the test is a way to
+re-use the measurements a repository already has, not a new measurement.
 
 ## Where it goes wrong
 

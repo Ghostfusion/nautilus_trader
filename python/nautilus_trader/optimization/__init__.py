@@ -74,6 +74,15 @@ from nautilus_trader.optimization.labels import MissingDataPolicy as MissingData
 from nautilus_trader.optimization.labels import label_series as label_series
 from nautilus_trader.optimization.metrics import statistic_values as statistic_values
 from nautilus_trader.optimization.optimizer import Optimizer as Optimizer
+from nautilus_trader.optimization.permutation import PermutationTestResult as PermutationTestResult
+from nautilus_trader.optimization.permutation import ShuffleUnit as ShuffleUnit
+from nautilus_trader.optimization.permutation import TestDirection as TestDirection
+from nautilus_trader.optimization.permutation import permutation_test as permutation_test
+from nautilus_trader.optimization.permutation import (
+    ratio_of_mean_to_deviation as ratio_of_mean_to_deviation,
+)
+from nautilus_trader.optimization.permutation import shuffled_orders as shuffled_orders
+from nautilus_trader.optimization.permutation import total_return as total_return
 from nautilus_trader.optimization.persistence import Evaluation as Evaluation
 from nautilus_trader.optimization.persistence import EvaluationCache as EvaluationCache
 from nautilus_trader.optimization.persistence import ExperimentStore as ExperimentStore
@@ -179,6 +188,7 @@ __all__ = [
     "OutOfSampleStage",
     "Parameter",
     "ParameterSpace",
+    "PermutationTestResult",
     "PersistenceConvention",
     "PersistenceEstimate",
     "RandomSearch",
@@ -196,6 +206,7 @@ __all__ = [
     "SharpeEstimate",
     "SharpeFrequency",
     "SharpeSample",
+    "ShuffleUnit",
     "SignalWindow",
     "SignificanceReport",
     "SignificanceResult",
@@ -207,6 +218,7 @@ __all__ = [
     "SplitDirection",
     "StatisticalContract",
     "StudyIdentity",
+    "TestDirection",
     "TrainStage",
     "TrialDependence",
     "TrialIdentity",
