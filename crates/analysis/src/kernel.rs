@@ -233,6 +233,16 @@ pub const RESEARCH_KERNELS: &[KernelClassification] = &[
         class: KernelClass::Reduction,
         source: "statistics/total_turnover.rs",
     },
+    KernelClassification {
+        identity: "average_monthly_return",
+        class: KernelClass::Reduction,
+        source: "statistics/average_monthly_return.rs",
+    },
+    KernelClassification {
+        identity: "average_trade_duration",
+        class: KernelClass::Reduction,
+        source: "statistics/average_trade_duration.rs",
+    },
     // Cumulative: a value accumulated along the series.
     KernelClassification {
         identity: "cagr",
@@ -349,6 +359,21 @@ pub const RESEARCH_KERNELS: &[KernelClassification] = &[
         identity: "net_return",
         class: KernelClass::Normalization,
         source: "statistics/net_return.rs",
+    },
+    KernelClassification {
+        identity: "exposure_ratio",
+        class: KernelClass::Normalization,
+        source: "statistics/exposure_ratio.rs",
+    },
+    KernelClassification {
+        identity: "win_loss_ratio",
+        class: KernelClass::Normalization,
+        source: "statistics/win_loss_ratio.rs",
+    },
+    KernelClassification {
+        identity: "winning_month_share",
+        class: KernelClass::Normalization,
+        source: "statistics/winning_month_share.rs",
     },
     // Statistical estimators: a distribution parameter estimated from the series.
     KernelClassification {

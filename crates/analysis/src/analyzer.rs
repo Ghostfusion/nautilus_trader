@@ -45,11 +45,14 @@ use crate::{
             ArithmeticCompoundingFlagged, ArithmeticCompoundingImpliedEquity,
             ArithmeticCompoundingRatio, ArithmeticCompoundingRealisedEquity,
         },
+        average_monthly_return::{AverageMonthlyReturn, MonthOutcome},
+        average_trade_duration::{AverageTradeDuration, TradeOutcome},
         breakeven_cost::BreakevenCost,
         correction_impact::CorrectionImpactReport,
         cost_basis_points::CostBasisPoints,
         detector_report::DetectorReport,
         expectancy::Expectancy,
+        exposure_ratio::ExposureRatio,
         gross_return::GrossReturn,
         long_ratio::LongRatio,
         loser_avg::AvgLoser,
@@ -70,10 +73,12 @@ use crate::{
         tail_ratio::TailRatio,
         total_commissions::TotalCommissions,
         total_turnover::TotalTurnover,
+        win_loss_ratio::WinLossRatio,
         win_rate::WinRate,
         winner_avg::AvgWinner,
         winner_max::MaxWinner,
         winner_min::MinWinner,
+        winning_month_share::WinningMonthShare,
     },
 };
 
@@ -197,6 +202,7 @@ impl Default for PortfolioAnalyzer {
         analyzer.register_statistic(Arc::new(MaxLoser {}));
         analyzer.register_statistic(Arc::new(Expectancy {}));
         analyzer.register_statistic(Arc::new(WinRate {}));
+        analyzer.register_statistic(Arc::new(WinLossRatio {}));
         analyzer.register_statistic(Arc::new(ReturnsVolatility::new(None)));
         analyzer.register_statistic(Arc::new(ReturnsSkewness::new()));
         analyzer.register_statistic(Arc::new(ReturnsKurtosis::new()));
@@ -209,6 +215,16 @@ impl Default for PortfolioAnalyzer {
         analyzer.register_statistic(Arc::new(ProfitFactor {}));
         analyzer.register_statistic(Arc::new(RiskReturnRatio {}));
         analyzer.register_statistic(Arc::new(LongRatio::new(None)));
+        // The holding cost of a trade: the mean duration of every closed trade, and of the winners
+        // and the losers separately, so the time a winning or losing trade is held is read beside
+        // its frequency and size.
+        analyzer.register_statistic(Arc::new(AverageTradeDuration::new(None)));
+        analyzer.register_statistic(Arc::new(AverageTradeDuration::new(Some(
+            TradeOutcome::Winners,
+        ))));
+        analyzer.register_statistic(Arc::new(AverageTradeDuration::new(Some(
+            TradeOutcome::Losers,
+        ))));
         // The cost row: the frame's own cost and return figures, so a report can read what the
         // result cost beside the result itself. The cost rate and the breakeven rate are both
         // quoted per unit of turnover, and the gross and net returns per unit of starting equity,
@@ -219,6 +235,18 @@ impl Default for PortfolioAnalyzer {
         analyzer.register_statistic(Arc::new(NetReturn::new()));
         analyzer.register_statistic(Arc::new(TotalCommissions::new()));
         analyzer.register_statistic(Arc::new(TotalTurnover::new()));
+        // The month frame: the share of months that closed positive and the mean monthly return,
+        // overall and split into the winning and losing months, and the share of periods held as a
+        // sampled proxy for time in market.
+        analyzer.register_statistic(Arc::new(WinningMonthShare {}));
+        analyzer.register_statistic(Arc::new(AverageMonthlyReturn::new(None)));
+        analyzer.register_statistic(Arc::new(AverageMonthlyReturn::new(Some(
+            MonthOutcome::Winning,
+        ))));
+        analyzer.register_statistic(Arc::new(AverageMonthlyReturn::new(Some(
+            MonthOutcome::Losing,
+        ))));
+        analyzer.register_statistic(Arc::new(ExposureRatio {}));
         // The arithmetic-compounding check: the terminal equity the arithmetic mean net return
         // implies, the terminal equity the frame actually realised, their ratio, and a discrete
         // flag when the ratio is further from one than the declared tolerance. The two equity
@@ -3666,7 +3694,7 @@ mod tests {
         let count = ids.len();
         ids.dedup();
         assert_eq!(ids.len(), count);
-        assert_eq!(count, 42);
+        assert_eq!(count, 47);
     }
 
     /// The declared bookkeeping basis of every statistic that is defined over a returns series.

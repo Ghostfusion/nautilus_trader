@@ -65,6 +65,10 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::period::CurrencyTotals>()?;
     m.add_class::<crate::period::PerformancePeriod>()?;
 
+    // Statistics - Outcome vocabularies
+    m.add_class::<crate::statistics::average_monthly_return::MonthOutcome>()?;
+    m.add_class::<crate::statistics::average_trade_duration::TradeOutcome>()?;
+
     // Statistics - Returns-based
     m.add_class::<crate::statistics::cagr::CAGR>()?;
     m.add_class::<crate::statistics::calmar_ratio::CalmarRatio>()?;
@@ -104,6 +108,9 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::statistics::net_return::NetReturn>()?;
     m.add_class::<crate::statistics::total_commissions::TotalCommissions>()?;
     m.add_class::<crate::statistics::total_turnover::TotalTurnover>()?;
+    m.add_class::<crate::statistics::average_monthly_return::AverageMonthlyReturn>()?;
+    m.add_class::<crate::statistics::winning_month_share::WinningMonthShare>()?;
+    m.add_class::<crate::statistics::exposure_ratio::ExposureRatio>()?;
 
     // Statistics - Tape-based
     m.add_class::<crate::statistics::order_flow_imbalance::OrderFlowImbalance>()?;
@@ -114,12 +121,14 @@ pub fn analysis(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::statistics::loser_max::MaxLoser>()?;
     m.add_class::<crate::statistics::loser_min::MinLoser>()?;
     m.add_class::<crate::statistics::win_rate::WinRate>()?;
+    m.add_class::<crate::statistics::win_loss_ratio::WinLossRatio>()?;
     m.add_class::<crate::statistics::winner_avg::AvgWinner>()?;
     m.add_class::<crate::statistics::winner_max::MaxWinner>()?;
     m.add_class::<crate::statistics::winner_min::MinWinner>()?;
 
     // Statistics - Position-based
     m.add_class::<crate::statistics::long_ratio::LongRatio>()?;
+    m.add_class::<crate::statistics::average_trade_duration::AverageTradeDuration>()?;
 
     // Statistics - Benchmark-relative
     m.add_class::<crate::statistics::alpha::Alpha>()?;

@@ -106,6 +106,33 @@ impl PeriodKind {
             Self::Month => "month",
         }
     }
+
+    /// Returns whether the half-open window `[start, end)` is exactly one whole period of this
+    /// kind.
+    ///
+    /// The check is against the calendar boundary the reducer would produce: `start` must sit on a
+    /// boundary and `end` must be the next one. A partial first or last period, which the reducer
+    /// emits when the calendar is started or flushed off a boundary, is therefore not a whole
+    /// period of any kind. A statistic defined over whole periods reads this to refuse a frame it
+    /// cannot reduce rather than reading a partial window as if it were a month.
+    #[must_use]
+    pub(crate) fn is_whole_window(self, start: UnixNanos, end: UnixNanos) -> bool {
+        let start_nanos = start.as_u64();
+
+        self.is_boundary(start_nanos) && end.as_u64() == next_boundary(start_nanos, self)
+    }
+
+    /// Returns whether `nanos` sits exactly on a boundary of this kind.
+    fn is_boundary(self, nanos: u64) -> bool {
+        let day = nanos / NANOS_PER_DAY;
+
+        match self {
+            Self::Day => nanos.is_multiple_of(NANOS_PER_DAY),
+            // Day 0 (1970-01-01) was a Thursday; shifting by three makes Monday the zero index.
+            Self::IsoWeek => nanos.is_multiple_of(NANOS_PER_DAY) && (day + 3).is_multiple_of(7),
+            Self::Month => nanos.is_multiple_of(NANOS_PER_DAY) && civil_from_days(day).2 == 1,
+        }
+    }
 }
 
 impl Display for PeriodKind {

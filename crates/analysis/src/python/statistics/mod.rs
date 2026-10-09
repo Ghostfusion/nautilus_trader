@@ -17,6 +17,8 @@
 
 pub mod alpha;
 pub mod autocorrelation;
+pub mod average_monthly_return;
+pub mod average_trade_duration;
 pub mod beta_ratio;
 pub mod breakeven_cost;
 pub mod cagr;
@@ -28,6 +30,7 @@ pub mod down_capture_ratio;
 pub mod expectancy;
 pub mod expected_shortfall;
 pub mod exponentially_weighted_sharpe;
+pub mod exposure_ratio;
 pub mod gross_return;
 pub mod information_ratio;
 pub mod long_ratio;
@@ -58,10 +61,12 @@ pub mod ulcer_index;
 pub mod up_capture_ratio;
 pub mod value_at_risk;
 pub mod variance_ratio;
+pub mod win_loss_ratio;
 pub mod win_rate;
 pub mod winner_avg;
 pub mod winner_max;
 pub mod winner_min;
+pub mod winning_month_share;
 
 use std::collections::BTreeMap;
 

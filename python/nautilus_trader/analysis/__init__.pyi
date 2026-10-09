@@ -59,6 +59,8 @@ __all__ = [
     "ArithmeticCompoundingRatio",
     "ArithmeticCompoundingRealisedEquity",
     "Autocorrelation",
+    "AverageMonthlyReturn",
+    "AverageTradeDuration",
     "AvgLoser",
     "AvgWinner",
     "BetaRatio",
@@ -74,6 +76,7 @@ __all__ = [
     "Expectancy",
     "ExpectedShortfall",
     "ExponentiallyWeightedSharpe",
+    "ExposureRatio",
     "GrossReturn",
     "InformationRatio",
     "LongRatio",
@@ -93,6 +96,7 @@ __all__ = [
     "MetricUnits",
     "MinLoser",
     "MinWinner",
+    "MonthOutcome",
     "NetReturn",
     "Objective",
     "ObjectiveDirection",
@@ -118,12 +122,15 @@ __all__ = [
     "TotalCommissions",
     "TotalTurnover",
     "TrackingError",
+    "TradeOutcome",
     "TreynorRatio",
     "UlcerIndex",
     "UpCaptureRatio",
     "ValueAtRisk",
     "VarianceRatio",
+    "WinLossRatio",
     "WinRate",
+    "WinningMonthShare",
 ]
 
 @typing.final
@@ -165,6 +172,35 @@ class Autocorrelation:
     ) -> float | None: ...
     def calculate_from_positions(
         self, _positions: typing.Sequence[model.Position]
+    ) -> float | None: ...
+
+@typing.final
+class AverageMonthlyReturn:
+    def __init__(self, outcome: MonthOutcome | None = None) -> None: ...
+    @property
+    def name(self) -> str: ...
+    def calculate_from_returns(self, _returns: typing.Mapping[int, float]) -> float | None: ...
+    def calculate_from_realized_pnls(
+        self, _realized_pnls: typing.Sequence[float]
+    ) -> float | None: ...
+    def calculate_from_positions(
+        self, _positions: typing.Sequence[model.Position]
+    ) -> float | None: ...
+    def calculate_from_periods(
+        self, periods: typing.Sequence[PerformancePeriod]
+    ) -> float | None: ...
+
+@typing.final
+class AverageTradeDuration:
+    def __init__(self, outcome: TradeOutcome | None = None) -> None: ...
+    @property
+    def name(self) -> str: ...
+    def calculate_from_returns(self, _returns: typing.Mapping[int, float]) -> float | None: ...
+    def calculate_from_realized_pnls(
+        self, _realized_pnls: typing.Sequence[float]
+    ) -> float | None: ...
+    def calculate_from_positions(
+        self, positions: typing.Sequence[model.Position]
     ) -> float | None: ...
 
 @typing.final
@@ -401,6 +437,22 @@ class ExponentiallyWeightedSharpe:
     ) -> float | None: ...
     def calculate_from_periods(
         self, _periods: typing.Sequence[PerformancePeriod]
+    ) -> float | None: ...
+
+@typing.final
+class ExposureRatio:
+    def __init__(self) -> None: ...
+    @property
+    def name(self) -> str: ...
+    def calculate_from_returns(self, _returns: typing.Mapping[int, float]) -> float | None: ...
+    def calculate_from_realized_pnls(
+        self, _realized_pnls: typing.Sequence[float]
+    ) -> float | None: ...
+    def calculate_from_positions(
+        self, _positions: typing.Sequence[model.Position]
+    ) -> float | None: ...
+    def calculate_from_periods(
+        self, periods: typing.Sequence[PerformancePeriod]
     ) -> float | None: ...
 
 @typing.final
@@ -993,6 +1045,19 @@ class VarianceRatio:
     ) -> float | None: ...
 
 @typing.final
+class WinLossRatio:
+    def __init__(self) -> None: ...
+    @property
+    def name(self) -> str: ...
+    def calculate_from_returns(self, _returns: typing.Mapping[int, float]) -> float | None: ...
+    def calculate_from_realized_pnls(
+        self, realized_pnls: typing.Sequence[float]
+    ) -> float | None: ...
+    def calculate_from_positions(
+        self, _positions: typing.Sequence[model.Position]
+    ) -> float | None: ...
+
+@typing.final
 class WinRate:
     def __init__(self) -> None: ...
     @property
@@ -1003,6 +1068,22 @@ class WinRate:
     def calculate_from_returns(self, _returns: typing.Mapping[int, float]) -> float | None: ...
     def calculate_from_positions(
         self, _positions: typing.Sequence[model.Position]
+    ) -> float | None: ...
+
+@typing.final
+class WinningMonthShare:
+    def __init__(self) -> None: ...
+    @property
+    def name(self) -> str: ...
+    def calculate_from_returns(self, _returns: typing.Mapping[int, float]) -> float | None: ...
+    def calculate_from_realized_pnls(
+        self, _realized_pnls: typing.Sequence[float]
+    ) -> float | None: ...
+    def calculate_from_positions(
+        self, _positions: typing.Sequence[model.Position]
+    ) -> float | None: ...
+    def calculate_from_periods(
+        self, periods: typing.Sequence[PerformancePeriod]
     ) -> float | None: ...
 
 @typing.final
@@ -1072,6 +1153,12 @@ class MetricUnits(enum.Enum):
     BASIS_POINTS = ...
 
 @typing.final
+class MonthOutcome(enum.Enum):
+    ALL = ...
+    WINNING = ...
+    LOSING = ...
+
+@typing.final
 class ObjectiveDirection(enum.Enum):
     MAXIMIZE = ...
     MINIMIZE = ...
@@ -1081,3 +1168,9 @@ class PeriodKind(enum.Enum):
     DAY = ...
     ISO_WEEK = ...
     MONTH = ...
+
+@typing.final
+class TradeOutcome(enum.Enum):
+    ALL = ...
+    WINNERS = ...
+    LOSERS = ...

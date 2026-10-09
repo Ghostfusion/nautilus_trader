@@ -26,6 +26,8 @@ import nautilus_trader.analysis as analysis_module
 from nautilus_trader.analysis import CAGR
 from nautilus_trader.analysis import Alpha
 from nautilus_trader.analysis import Autocorrelation
+from nautilus_trader.analysis import AverageMonthlyReturn
+from nautilus_trader.analysis import AverageTradeDuration
 from nautilus_trader.analysis import AvgLoser
 from nautilus_trader.analysis import AvgWinner
 from nautilus_trader.analysis import BetaRatio
@@ -38,6 +40,7 @@ from nautilus_trader.analysis import DownCaptureRatio
 from nautilus_trader.analysis import Expectancy
 from nautilus_trader.analysis import ExpectedShortfall
 from nautilus_trader.analysis import ExponentiallyWeightedSharpe
+from nautilus_trader.analysis import ExposureRatio
 from nautilus_trader.analysis import GrossReturn
 from nautilus_trader.analysis import InformationRatio
 from nautilus_trader.analysis import LongRatio
@@ -72,7 +75,9 @@ from nautilus_trader.analysis import UlcerIndex
 from nautilus_trader.analysis import UpCaptureRatio
 from nautilus_trader.analysis import ValueAtRisk
 from nautilus_trader.analysis import VarianceRatio
+from nautilus_trader.analysis import WinLossRatio
 from nautilus_trader.analysis import WinRate
+from nautilus_trader.analysis import WinningMonthShare
 from nautilus_trader.analysis import tearsheet
 from nautilus_trader.model import Currency
 from nautilus_trader.model import CurrencyType
@@ -84,11 +89,14 @@ from tests.unit.model.factories import make_position_fill
 
 
 NO_ARG_STATISTICS = [
+    (AverageMonthlyReturn, "Average Monthly Return"),
+    (AverageTradeDuration, "Average Trade Duration"),
     (AvgLoser, "Avg Loser"),
     (AvgWinner, "Avg Winner"),
     (BreakevenCost, "Breakeven Cost"),
     (CostBasisPoints, "Cost (basis points"),
     (Expectancy, "Expectancy"),
+    (ExposureRatio, "Exposure Ratio"),
     (GrossReturn, "Gross Return"),
     (LongRatio, "Long Ratio"),
     (MaxDrawdown, "Max Drawdown"),
@@ -109,7 +117,9 @@ NO_ARG_STATISTICS = [
     (TotalCommissions, "Total Commissions"),
     (TotalTurnover, "Total Turnover"),
     (UlcerIndex, "Ulcer Index"),
+    (WinLossRatio, "Win/Loss Ratio"),
     (WinRate, "Win Rate"),
+    (WinningMonthShare, "Winning Month Share"),
     (Autocorrelation, "Autocorrelation"),
     (VarianceRatio, "Variance Ratio"),
     (RescaledRange, "Rescaled Range"),

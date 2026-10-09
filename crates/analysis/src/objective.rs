@@ -57,13 +57,14 @@ use ahash::AHashMap;
 use crate::{
     analyzer::Statistic,
     statistics::{
-        alpha::Alpha, beta_ratio::BetaRatio, breakeven_cost::BreakevenCost, cagr::CAGR,
-        calmar_ratio::CalmarRatio, cost_basis_points::CostBasisPoints,
-        down_capture_ratio::DownCaptureRatio, expectancy::Expectancy,
-        expected_shortfall::ExpectedShortfall,
-        exponentially_weighted_sharpe::ExponentiallyWeightedSharpe, gross_return::GrossReturn,
-        information_ratio::InformationRatio, long_ratio::LongRatio, loser_avg::AvgLoser,
-        loser_max::MaxLoser, loser_min::MinLoser, max_drawdown::MaxDrawdown,
+        alpha::Alpha, average_monthly_return::AverageMonthlyReturn,
+        average_trade_duration::AverageTradeDuration, beta_ratio::BetaRatio,
+        breakeven_cost::BreakevenCost, cagr::CAGR, calmar_ratio::CalmarRatio,
+        cost_basis_points::CostBasisPoints, down_capture_ratio::DownCaptureRatio,
+        expectancy::Expectancy, expected_shortfall::ExpectedShortfall,
+        exponentially_weighted_sharpe::ExponentiallyWeightedSharpe, exposure_ratio::ExposureRatio,
+        gross_return::GrossReturn, information_ratio::InformationRatio, long_ratio::LongRatio,
+        loser_avg::AvgLoser, loser_max::MaxLoser, loser_min::MinLoser, max_drawdown::MaxDrawdown,
         max_drawdown_duration::MaxDrawdownDuration, net_return::NetReturn, omega_ratio::OmegaRatio,
         profit_factor::ProfitFactor, returns_avg::ReturnsAverage,
         returns_avg_loss::ReturnsAverageLoss, returns_avg_win::ReturnsAverageWin,
@@ -72,8 +73,9 @@ use crate::{
         sharpe_ratio::SharpeRatio, sortino_ratio::SortinoRatio, tail_ratio::TailRatio,
         total_commissions::TotalCommissions, total_turnover::TotalTurnover,
         tracking_error::TrackingError, treynor_ratio::TreynorRatio, ulcer_index::UlcerIndex,
-        up_capture_ratio::UpCaptureRatio, value_at_risk::ValueAtRisk, win_rate::WinRate,
-        winner_avg::AvgWinner, winner_max::MaxWinner, winner_min::MinWinner,
+        up_capture_ratio::UpCaptureRatio, value_at_risk::ValueAtRisk, win_loss_ratio::WinLossRatio,
+        win_rate::WinRate, winner_avg::AvgWinner, winner_max::MaxWinner, winner_min::MinWinner,
+        winning_month_share::WinningMonthShare,
     },
 };
 
@@ -447,17 +449,22 @@ pub(crate) fn builtin_statistics() -> Vec<Statistic> {
         Arc::new(NetReturn::new()),
         Arc::new(TotalCommissions::new()),
         Arc::new(TotalTurnover::new()),
+        Arc::new(WinningMonthShare {}),
+        Arc::new(AverageMonthlyReturn::new(None)),
+        Arc::new(ExposureRatio {}),
         // PnL-based
         Arc::new(Expectancy {}),
         Arc::new(AvgLoser {}),
         Arc::new(MaxLoser {}),
         Arc::new(MinLoser {}),
         Arc::new(WinRate {}),
+        Arc::new(WinLossRatio {}),
         Arc::new(AvgWinner {}),
         Arc::new(MaxWinner {}),
         Arc::new(MinWinner {}),
         // Position-based
         Arc::new(LongRatio::new(None)),
+        Arc::new(AverageTradeDuration::new(None)),
         // Benchmark-relative
         Arc::new(Alpha::new(None, None)),
         Arc::new(BetaRatio::new()),
@@ -665,6 +672,8 @@ mod tests {
             "Alpha (simple, sample, 252 days)",
             "Average (Return, simple)",
             "Average Loss (Return, simple)",
+            "Average Monthly Return (all)",
+            "Average Trade Duration (all, days)",
             "Average Win (Return, simple)",
             "Avg Loser",
             "Avg Winner",
@@ -677,6 +686,7 @@ mod tests {
             "Expectancy",
             "Expected Shortfall (simple, confidence 0.95)",
             "Exponentially Weighted Sharpe (simple, population, 252 days, halflife 6)",
+            "Exposure Ratio (share of periods held)",
             "Gross Return",
             "Information Ratio (simple, sample, 252 days)",
             "Long Ratio",
@@ -704,6 +714,8 @@ mod tests {
             "Up Capture Ratio (simple, 252 days)",
             "Value at Risk (simple, confidence 0.95)",
             "Win Rate",
+            "Win/Loss Ratio",
+            "Winning Month Share",
         ]
         .into_iter()
         .map(String::from)

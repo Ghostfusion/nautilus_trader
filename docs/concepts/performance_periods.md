@@ -75,10 +75,33 @@ other unit lands in `stats_returns`:
 | `TotalTurnover`                       | `Total Turnover`                                                 | general  |
 | `TotalCommissions`                    | `Total Commissions`                                              | general  |
 | `MaxDrawdownDuration`                 | `Max Drawdown Duration (days)`                                   | returns  |
+| `WinningMonthShare`                   | `Winning Month Share`                                            | returns  |
+| `AverageMonthlyReturn`                | `Average Monthly Return (all)`, and `(winning)`, `(losing)`      | returns  |
+| `ExposureRatio`                       | `Exposure Ratio (share of periods held)`                         | returns  |
 | `ArithmeticCompoundingImpliedEquity`  | `Arithmetic Compounding Implied Equity (simple, tolerance 0.01)` | general  |
 | `ArithmeticCompoundingRealisedEquity` | `Arithmetic Compounding Realised Equity (simple)`                | general  |
 | `ArithmeticCompoundingRatio`          | `Arithmetic Compounding Ratio (simple, tolerance 0.01)`          | returns  |
 | `ArithmeticCompoundingFlagged`        | `Arithmetic Compounding Flagged (simple, tolerance 0.01)`        | returns  |
+
+Three of the rows read a month frame rather than any frame, and each refuses a frame it cannot
+reduce. `Winning Month Share` is the share of months that closed with a positive net return and
+`Average Monthly Return` is the mean monthly return, registered three times over - every month, the
+winning months and the losing months - and both return no value unless every period is a whole
+calendar month, because a share of months cannot be read from a frame of days or weeks. A month whose
+return could not be resolved is excluded from the denominator rather than counted as a loss, so a
+breakeven month is neither winning nor losing.
+
+`Exposure Ratio (share of periods held)` is the share of periods that ended with at least one
+position open. It is a sampled proxy for time in market and not a time-in-market figure: an intraday
+position that opened and closed inside a period is invisible to it, and a true figure would need an
+exposure accumulator in the period reducer, summing held duration within each period. The proxy is
+what the frame's end-of-period exposure supports, and the row's own name says so.
+
+`Average Trade Duration ({outcome}, days)` is defined over closed positions rather than the frame:
+the mean `duration_ns` of the selected closed trades, converted to days, where a winner is a closed
+position with a positive realised PnL and a loser one with a negative, and a breakeven or unresolved
+position is neither. It is registered three times, giving the mean holding time of every closed
+trade and of the winners and the losers separately, and a smaller value is preferred.
 
 The two cost rows measure the frame's trading cost as a rate rather than a drag on its return.
 `Cost (basis points of turnover)` is the frame's commission over its notional turnover, the all-in

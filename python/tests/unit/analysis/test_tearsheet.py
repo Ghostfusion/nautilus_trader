@@ -1197,6 +1197,8 @@ def test_create_tearsheet_end_to_end_real_engine() -> None:
     # rather than being absent.
     assert result.stats_general == {
         "Long Ratio": 1.0,
+        "Average Trade Duration (all, days)": pytest.approx(3.0),
+        "Average Trade Duration (winners, days)": pytest.approx(3.0),
         "Total Commissions": pytest.approx(2.8),
         "Total Turnover": pytest.approx(140050.0),
         "Arithmetic Compounding Implied Equity (simple, tolerance 0.01)": pytest.approx(
