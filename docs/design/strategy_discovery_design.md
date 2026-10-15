@@ -823,18 +823,18 @@ evidence is worse than a refusal: it is a refusal that looks like a result.
 
 ### 8.1 Components
 
-| Component                      | Responsibility                                                    | What it composes                                                            | Placement                                       |
-| ------------------------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------- |
-| Candidate schema and validator | The closed language of Section 9, its bounds, and its refusals    | Nothing; standard library only                                              | `discovery/schema.py`, `discovery/validate.py`  |
-| Feature registry adapter       | Exposes the registered feature definitions a candidate may select | The research crate's panel, features, labels and operators                  | `discovery/features.py`                         |
-| Compiler and interpreter       | Turns a specification into a running strategy, deterministically  | `Strategy`, `submit_signals`, `TargetPipeline`, `TargetReconciler`          | `discovery/compile.py`, `discovery/strategy.py` |
-| Run adapter                    | One backtest per experiment, with identity and failure capture    | `BacktestRunner`, `CanonicalRun`, `Optimizer`, `execute_experiments`        | `discovery/run.py`                              |
-| Ledger                         | Append-only trial inventory, evidence packages, and lineage       | `ExperimentStore`, `digest_of`, `StudyIdentity`, `TrialIdentity`            | `discovery/ledger.py`                           |
-| Gate service                   | Applies the pre-registered policy and returns typed verdicts      | `significance.py`, `splits.py`, `stages.py`, `permutation.py`, `metrics.py` | `discovery/gates.py`, `discovery/policy.py`     |
-| Search                         | Enumerates genomes, proposes mutations, selects Pareto fronts     | `search.py`'s enumeration contract, extended to genomes                     | `discovery/genome.py`, `discovery/evolve.py`    |
-| Agent adapter                  | Obtains structured proposals and explanations from a model        | An injected callable; no vendor dependency                                  | `discovery/agents.py`, `discovery/prompts/`     |
-| Shadow monitor                 | Records live signals and simulated fills without orders           | A live data adapter and the sandbox venue                                   | `discovery/shadow.py`                           |
-| Command line                   | A thin front end over a JSON configuration, as `optimize` is      | The existing `nautilus` command pattern                                     | `discovery/config.py`, `discovery/cli.py`       |
+| Component                      | Responsibility                                                    | What it composes                                                                                                                                                                                           | Placement                                       |
+| ------------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Candidate schema and validator | The closed language of Section 9, its bounds, and its refusals    | Nothing; standard library only                                                                                                                                                                             | `discovery/schema.py`, `discovery/validate.py`  |
+| Feature registry adapter       | Exposes the registered feature definitions a candidate may select | The research crate's panel, its rows and values, and the membership series; the feature compiler, labels, operators and dataset contract have no Python binding, so the registry needs one upstream change | `discovery/features.py`                         |
+| Compiler and interpreter       | Turns a specification into a running strategy, deterministically  | `Strategy`, `submit_signals`, `TargetPipeline`, `TargetReconciler`                                                                                                                                         | `discovery/compile.py`, `discovery/strategy.py` |
+| Run adapter                    | One backtest per experiment, with identity and failure capture    | `BacktestRunner`, `CanonicalRun`, `Optimizer`, `execute_experiments`                                                                                                                                       | `discovery/run.py`                              |
+| Ledger                         | Append-only trial inventory, evidence packages, and lineage       | `ExperimentStore`, `digest_of`, `StudyIdentity`, `TrialIdentity`                                                                                                                                           | `discovery/ledger.py`                           |
+| Gate service                   | Applies the pre-registered policy and returns typed verdicts      | `significance.py`, `splits.py`, `stages.py`, `permutation.py`, `metrics.py`                                                                                                                                | `discovery/gates.py`, `discovery/policy.py`     |
+| Search                         | Enumerates genomes, proposes mutations, selects Pareto fronts     | `search.py`'s enumeration contract, extended to genomes                                                                                                                                                    | `discovery/genome.py`, `discovery/evolve.py`    |
+| Agent adapter                  | Obtains structured proposals and explanations from a model        | An injected callable; no vendor dependency                                                                                                                                                                 | `discovery/agents.py`, `discovery/prompts/`     |
+| Shadow monitor                 | Records live signals and simulated fills without orders           | A live data adapter and the sandbox venue                                                                                                                                                                  | `discovery/shadow.py`                           |
+| Command line                   | A thin front end over a JSON configuration, as `optimize` is      | The existing `nautilus` command pattern                                                                                                                                                                    | `discovery/config.py`, `discovery/cli.py`       |
 
 Placement decision (SD1): a pure-Python subpackage, `python/nautilus_trader/discovery/`, beside
 `optimization/`, `signal_policy/` and `decision_bridge/`, which are the established homes for
@@ -2288,6 +2288,14 @@ milestones rather than expressing a design preference.
    platform use case needs it. The receipt binds the run to its manifest digest, binary identity,
    configuration digest and seed, and reconciliation fails closed when they disagree. M1's inventory
    settles which path is feasible, so the join is designed but not yet demonstrated.
+
+   M1 has now settled which path applies, and it is the Rust-side one. The runner's public interface
+   does not emit a receipt: the canonical run carries an experiment, a canonical digest, the metric
+   values and the canonical bytes, and no seed, binary, configuration or manifest identity, and the
+   artifact store keys results by digest with no receipt type. The seed, binary and configuration
+   binding is therefore one upstream change at the authoritative boundary rather than a research-side
+   invention. Section 14.1 of `docs/design/strategy_discovery_implementation.md` records the decision
+   and its evidence, and criterion 10's recomputation stays blocked until that step exists.
 2. **Per-regime aggregation.** The analysis layer has period frames but no regime dimension, and only
    a regime filter exists in the research crate. Does the gate's regime requirement justify a
    platform addition, or should the discovery layer slice the decision record itself and report the
