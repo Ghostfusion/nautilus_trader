@@ -1088,13 +1088,26 @@ The design enforces the distinction in three places:
    profitability depends on close-to-close settlement; if such a candidate survives the gate, the
    gate is broken.
 
-One point is not settled here, and the revised proposal raises it directly: item 2 is a claim about
-what the engine's configuration can express, and it has not been verified. If a latency model cannot
-defer settlement, because the settlement cycle runs at the close regardless, then the deferral is
-not a configuration the compiler can emit and the settlement schedule itself has to change, which is
-a platform change this design would request rather than make. Section 18 carries the check, and it
-belongs to M2, before a candidate is searched, because a search built on unverified timing semantics
-discovers strategies that are profitable only in the simulator.
+Item 2 was a claim about what the engine's configuration can express, and M2 has since measured it
+rather than reasoned about it, which is what Section 18 question 5 asked for. The claim half holds:
+the latency model defers settlement, the matching engine honours the deferral, and a fill cannot
+settle before the intent's arrival. The other half does not. The decision bridge resolves an
+artifact's availability to the next session's open and stamps the projected signal with it, but its
+submission path holds no clock and no timer, so the order set is submitted where the artifact was
+delivered and the fill precedes the eligibility the bridge itself resolved. And a deferral is a
+deferral in time rather than in price: with bar-only data a released intent settles at the close of
+the first bar at or after its arrival, so a next-session-open eligibility is honoured in time and
+priced at a bar close. A price observed at the eligibility instant requires the snapshot to carry
+market data at that instant, which makes it a data-contract requirement of the run rather than a
+property of the mechanism.
+
+Two findings narrow the design without changing its shape. The settlement schedule does not have to
+change, because the deferral the compiler needs exists. And the engine fills an intent whose
+eligibility has been reached but whose instrument has published nothing since, with the fill landing
+on the last known close at the shutdown drain and no fill event reaching the strategy, so the
+missing-bar case fabricates a fill rather than refusing one. Section 8 of
+`docs/design/strategy_discovery_implementation.md` records the measurement, the two upstream requests
+it produces and the status of criteria 4 and 6.
 
 The planted test is specified as a set of cases rather than a single fixture, and it has to fail
 against the unsafe behaviour before it passes against the safe one.
@@ -1110,6 +1123,19 @@ against the unsafe behaviour before it passes against the safe one.
 
 The last case is the one that catches a data pipeline that repairs what it should reject, and the
 first is the one run against the pre-fix engine to prove the test can fail.
+
+Each case was then run against the engine rather than assumed of it, and the outcomes are recorded
+beside the expectations they were written against. The fixture is
+`python/tests/integration/test_discovery_timing_contract.py`.
+
+| Case                                      | Measured at M2                                                                                                                                                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Closing decision, executing at that close | The run does not refuse it: with no deferral the intent fills at the decision bar's own close, at that bar's own timestamp, and the account moves at that instant. The refusal is the compiler's and belongs to M3 |
+| Next-session eligibility                  | Holds for the latency model, whose fill lands on the first bar at or after the arrival. Fails for the bridge path, whose submission is not scheduled and whose fill precedes the eligibility it resolved           |
+| Delayed availability                      | Holds: a bar is dispatched and stamped at its `ts_init`, so no decision can read it at its event timestamp                                                                                                         |
+| Opening gap                               | Holds: the released intent is priced by the bar that released it, so the fill carries the gap's price rather than the prior close                                                                                  |
+| Missing bar and holiday                   | Fails: a deferred intent with no subsequent market data is filled at the shutdown drain against the last known close, and the fill is not delivered to the strategy                                                |
+| Timestamps out of order                   | Fails: the stream is sorted by `ts_init` before dispatch, and enabling the data engine's sequence validation changes nothing, because it runs after that sort                                                      |
 
 The declared assumptions travel with the result, using the vocabulary the optimization subsystem
 already has for bar ambiguity, intrabar path, trigger precedence, trigger fill and gap handling. A
@@ -2114,6 +2140,11 @@ the opposite of what the proposals assume, and the difference is invisible in a 
 Evidence: the next-bar-open warning in `docs/concepts/backtesting/bar-execution.md`, and the
 close-to-next-session projection already implemented in `python/nautilus_trader/decision_bridge/`.
 
+M2 measured that deferral rather than assuming it, and Section 8.5 records what it holds. The
+compiler emits a latency deferral, a released intent is priced at a bar close unless the snapshot
+carries market data at the eligibility instant, and the bridge projection is not a deferral at all,
+because its submission path holds no clock and no timer.
+
 ### SD5. The ledger is files and digests, not a database
 
 Append-only, digest-keyed files written through the existing experiment store, with a hash-chained
@@ -2246,6 +2277,16 @@ and no later gate can detect a fill at a price that was not yet knowable. Eviden
 default settlement at the bar's close, the absence of a native next-bar-open fill mode, and the case
 table of Section 8.5.
 
+M2 has since produced that evidence, and the mechanism is resolved in favour of the latency model: an
+intent cannot settle before its arrival, and it settles at the first bar at or after it. The bridge
+remains a resolution of availability rather than a deferral of settlement. Two behaviours the table
+forbids were found to happen anyway, and they are separated here because only one of them is the
+compiler's to close. An order set the bridge submits carries a fill that precedes the eligibility the
+bridge itself resolved, which the compiler closes by emitting the latency deferral and never the
+bridge pattern alone. And a deferred intent whose instrument has published nothing since its arrival
+is settled at the shutdown drain against the last known close, which no configuration withholds and
+which is therefore an upstream request rather than a compiler emission.
+
 ### SD16. The run-identity join is a verified receipt, not a binding
 
 The engine's event store stays authoritative for engine-run history, and the research ledger
@@ -2343,6 +2384,22 @@ milestones rather than expressing a design preference.
    mechanisms are tested while both remain candidates, the test observes event ordering and fill
    timestamps rather than the configuration it set, and if neither enforces the contract the
    settlement schedule changes rather than the DSL working around it. This blocks M3.
+
+   M2 has now produced that evidence, and the answer is the latency model, with the refusal half
+   belonging to the compiler. An intent submitted from a bar callback cannot settle before its
+   arrival once a latency model is configured, and it settles at the first bar at or after that
+   arrival, priced at that bar's close. The bridge does not defer: it resolves an artifact's
+   availability to the next session's open and stamps the projected signal with that instant, and its
+   caller submits when it chooses, so a fill can precede the eligibility the bridge resolved.
+   Neither mechanism prices a released intent at its eligibility instant unless the snapshot carries
+   market data there, which makes the snapshot's coverage at that instant a declared data requirement
+   rather than an engine behaviour. The settlement schedule therefore does not have to change, and
+   the upstream request this question anticipated is narrower: the shutdown drain must not settle a
+   deferred intent against a close that predates it, because a fill at a price from before the intent
+   existed is not a fill the simulator can defend. M3 is no longer blocked by this question, and what
+   remains of it is its own work, the compiler refusing a specification that decides at a close and
+   executes at it. The measurement, its fixture and the two requests are recorded in Section 8 of
+   `docs/design/strategy_discovery_implementation.md`.
 
 ## Appendix A. Provenance of this record
 

@@ -127,7 +127,7 @@ The two mean different things and must not be collapsed.
 
 | Status  | Means                                                                                                                      | Example                                                             |
 | ------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Blocked | There is not yet enough implementation or evidence to evaluate the requirement. Nothing is claimed                         | Criterion 6 while dividend cash flows do not exist upstream         |
+| Blocked | There is not yet enough implementation or evidence to evaluate the requirement. Nothing is claimed                         | Criterion 10 while the run receipt of SD16 does not exist           |
 | Failed  | The requirement was evaluated against a real fixture, and the observed behaviour did not meet its pass condition           | A settlement fixture where a fill occurs at an ineligible timestamp |
 | Passed  | The requirement was evaluated against the exact identity in the entry, and the observed behaviour met its expected outcome | The enforced timing contract holding against the same case table    |
 
@@ -350,6 +350,56 @@ Failure path, which is the likely one: if neither the latency model nor the deci
 projection enforces the contract, M2 does not compensate inside the DSL. It produces the trace that
 demonstrates the gap, requests the settlement-schedule change, and stays open. Discovery stays blocked
 for as long as that takes.
+
+M2's exit, and where each condition is met. The milestone ends on the near side of that failure path:
+one of the two candidate mechanisms enforces the contract, so the settlement schedule does not have
+to change, and four smaller findings are named and carried instead. The fixtures are
+`python/tests/integration/test_discovery_timing_contract.py` for `FX-M2-1`, thirteen tests, and
+`python/tests/integration/test_discovery_corporate_action_accounting.py` for `FX-M2-2`, six tests.
+
+| Question                                                      | Answer                                                                                                                                           | Evidence                                                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Can the compiler emit a deferral that the engine honours?     | Yes, the latency model                                                                                                                           | An intent submitted from `on_bar` is held to its arrival and settles at the first bar at or after it, never earlier      |
+| Is the declared eligibility honoured in price as well as time | Only when the snapshot carries market data at that instant                                                                                       | With bar-only data a released intent is priced at a bar close; a quote at the eligibility instant prices it at the quote |
+| Does the decision-bridge projection defer anything?           | No: it resolves eligibility and stamps the signal with it, and its submission path holds no clock                                                | The projected fill precedes the artifact's own resolved eligibility by the whole interval to the next session            |
+| Is a fill fabricated where the case table forbids one?        | Yes: the shutdown drain settles a deferred intent against the last known close and does not notify the strategy                                  | The single-bar case reports a filled order with no market data after the arrival                                         |
+| Is out-of-order input refused?                                | No: the stream is sorted by `ts_init` before dispatch, and the data engine's sequence validation changes nothing because it runs after that sort | The reordered-bar fixtures replay in ascending initialization order, with validation both off and on                     |
+
+Criterion 4 is therefore proved for the mechanism the compiler will emit, and not proved as written.
+The pre-enforcement half fails as the design requires, which is what makes the test discriminating:
+with no deferral the fill carries the decision bar's own timestamp and that bar's own close. The
+enforced half holds for the latency model. Two cases disagree with the table, the bridge path and the
+shutdown drain, and the equality of eligibility in time with eligibility in price depends on the
+snapshot rather than on the engine. The compiler-side half of case A, refusing a specification that
+decides at a close and executes at it, cannot be evaluated before M3 and is carried there.
+
+Criterion 6 does not hold, and its failure is now measured rather than expected. The accounting
+fixture reconciles the value leg, which carries both actions, and cannot reconcile the cash leg: a
+held position moves only by its purchase cost, the distribution it was entitled to is credited to
+nothing, and a round trip across the boundary realises 20,000 where a total-return account of the same
+position carries 19,750. The defect is the absent upstream dividend cash-flow path, which design
+Section 18 question 3 and decision SD12 already name as the equity-readiness prerequisite, and the
+equity-readiness statement stays withheld rather than softened.
+
+Two upstream requests follow, in the shape SD16 prefers, each with a fixture as its evidence. The
+first is the shutdown drain: a deferred intent whose eligibility has been reached but whose
+instrument has published no market data since must not be settled against a stale book, because that
+is a fill at a price from before the intent existed. The second is the dividend cash-flow path that
+criterion 6 needs, which is already a named prerequisite rather than a new discovery.
+
+M2 stays open on those two requests and not on the timing contract, and the M3 blockage is not the
+one SD15 describes. That rule fires when neither mechanism enforces the contract, and one does, so
+the compiler emits a latency deferral and never the bridge pattern alone. The bridge remains useful
+for what it does resolve, an artifact's availability, and its caller owns any waiting rather than the
+projection. What M3 cannot proceed without is the owner's authorisation, which is per milestone, and
+the compiler's refusal half of case A, which is its own work.
+
+One status transition needs naming, because Section 4.2 lists criterion 6 as its example of a blocked
+entry. That example predates a fixture existing. Now that one does and has been run without meeting
+its pass condition, the status is `failed` by the same section's definition, which is an evaluation
+against a real fixture, and the dependency that causes it is recorded as the defect rather than as
+the block. Criterion 4 moves on the same reasoning, and the entries carry their identity, procedure,
+expected and observed results and receipts in Section 15's bundle.
 
 ## 9. M3: core
 
