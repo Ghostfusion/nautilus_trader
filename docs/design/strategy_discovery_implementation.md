@@ -423,6 +423,92 @@ no difference hidden behind an unchanged specification identifier.
 What must not start: search, evolution, or agents. M3 produces an executor, and an executor with no
 admitted search space is used by a hand-written candidate and a fixture, not by a generator.
 
+M3's exit, and where each condition is met. Each workstream landed as its own module in
+`python/nautilus_trader/discovery/`, and each carries the fixture its row names.
+
+| Workstream | Module                                 | Fixture                                                                         |
+| ---------- | -------------------------------------- | ------------------------------------------------------------------------------- |
+| M3.1       | `schema.py`                            | `python/tests/unit/discovery/test_schema.py`                                    |
+| M3.2       | `validate.py`, `compile.py`            | `python/tests/unit/discovery/test_validate.py`, `test_compile.py`               |
+| M3.3       | `features.py`                          | `FX-M3-4`: `python/tests/integration/test_discovery_feature_parity.py`          |
+| M3.4       | `strategy.py`                          | `FX-M3-3`: `python/tests/integration/test_discovery_reference_strategies.py`    |
+| M3.5       | `strategy.py`, the allocation function | `FX-M3-5`: `python/tests/unit/discovery/test_strategy.py`                       |
+| M3.6       | the reference set                      | `FX-M3-3`, the differential fixture above                                       |
+| M3.7       | the whole path                         | `FX-M3-1`: `python/tests/integration/test_discovery_round_trip.py`              |
+| M3.8       | the closed schema                      | `FX-M3-2`: `python/tests/integration/test_discovery_generated_code_refusals.py` |
+
+Two rows of Section 14 that M1 left `partial` are exercised in the composition M3 depends on. Row 1,
+the point-in-time panel, has its availability semantics pinned by `FX-M3-4` rather than left to the
+design. Row 16, the target pipeline, is driven from inside a strategy instance by `FX-M3-3`, which is
+the supported path: the row's open question was whether the pipeline must be drivable outside a
+strategy, and the interpreter shows that it need not be. Neither row's state changes here, because
+what remains missing from them - the internals with no binding, and the feature compiler - is still
+missing.
+
+All five criteria hold, at the identities their bundle entries carry. Criterion 1: the hand-written
+payload compiles; the runner's experiment digest is derived from the plan rather than supplied to it;
+the run returns the engine's own canonical result, `blake3:d0d0d6c8...`, and an evidence package
+whose specification, behavioural, experiment and canonical digests equal the plan's and the run's;
+thirty-two bars produce thirty-two decisions, twenty orders and twenty fills, every fill attributed
+to the decision that produced its order; the metrics are defined numbers, Sharpe
+9.364348220119131 and drawdown `-0.0`, because this candidate trades; and the ledger holds one entry,
+named for the behavioural digest, whose recorded identities all equal the run's, and refuses a
+rewrite. Criterion 3: every code shape is refused at the field that carries it, and one compilation
+runs with every dynamic import recorded and the recording empty. Criterion 19: seven reference
+strategies agree with expectations written down before they were run - the ranking and threshold
+selections, two rebalance decisions across twelve daily periods, a holding-period exit at `S + 2` and
+`S + 4` with none at `S + 1` or `S + 3`, the allocated weights and the strengths derived from them,
+nothing happening at all when no instrument is eligible, and a gap fill twenty units below the stop
+threshold it crossed. Criterion 20: the research and decision-time values agree on value, on both
+timestamps, on unit and on identity, and the warm-up, the availability lag, the absent value and the
+membership boundary are each measured rather than assumed. Criterion 21: every one of the nine
+decisions has a case that fails if its rule is reversed, and three calls over one request produce
+identical targets with the request itself unchanged.
+
+Five findings are carried out of the milestone, and each is recorded rather than repaired silently.
+
+The first is a narrowing of SD14, which the design now states: the platform's only handoff from a
+strategy to the target pipeline is `Strategy.submit_signals`, and a `Target` is not an input to that
+pipeline. A candidate's allocation therefore decides a target weight and realises it as the signal's
+strength, scaled by the portfolio's own position cap, so the declared weight is carried and quantity
+resolution stays the platform's. The allocated `Target` values remain the decision's own record, and
+no second submission path was introduced to carry them.
+
+The second and third are interpreter defects the differential fixtures exposed, both of which would
+have presented themselves as a strategy result rather than as an interpreter fault. The holding-period
+cap was counted in bar events, so a cap of two expired part-way through a period whenever the
+cross-section held more than one instrument; it is now counted in the declared signal frequency's
+decision periods, from the decision that opened the position. And the rebalance period was keyed from
+the strategy clock rather than from the decision's own instant, which is a different quantity and
+would have keyed a live decision by whatever moment its handler ran at. Both fixes are in
+`strategy.py`, both are stated in the design's Section 9.7, and `FX-M3-3` asserts against them.
+
+The fourth is a refusal code with no rule. `HOLDING_PERIOD_BELOW_REBALANCE` is declared in the closed
+refusal vocabulary and the design's semantic stage names the interaction it belongs to, but no stage
+emits it, and the comparison it names is calendar-dependent: a month is not a fixed number of
+decision periods, so the compiler cannot decide it soundly. The interaction is resolved instead by
+the interpreter's own stated rule, that a rebalance does not restart a holding period, and the code
+is left unemitted rather than given a rule that would refuse valid candidates. It is carried to the
+M4 review as a vocabulary question rather than as a defect.
+
+The fifth is a convention rather than a finding, and it is recorded because it is visible in the
+ledger: a metric that is not a finite number is written as its own text, which is what the existing
+experiment store does. A run whose Sharpe ratio is undefined for its sample is a real outcome, and a
+record that could not be serialised would lose the run rather than the value.
+
+One observation is carried as an open question rather than as a finding, because the design does not
+decide it and a fixture must not decide it for the design. A decision is taken per bar event, so a
+cross-section of four daily instruments produces four decisions - and therefore four rebalances under
+a `daily` frequency - in each decision period. Two consequences are visible in the reference fixture:
+the first decision of a period reads that period's value for the instrument whose bar has arrived and
+the previous period's value for the others, and a holding whose cap expires in a period can be
+re-entered later in that same period. Neither is look-ahead, because every value is the latest
+available at its own decision instant, and the second follows from the language's own rules applied
+to the current definition of a rebalance bar. Both change a candidate's realised turnover, so the
+question is carried to the search milestone rather than settled silently here: whether a decision
+period should carry one decision rather than one per bar event, and if so what makes a period's
+cross-section complete.
+
 ## 10. M4: governance
 
 Goal: make the ledger, the counts, the custody rules and the gates trustworthy, and calibrate the gate
@@ -597,12 +683,12 @@ status.
 
 | Criterion | Requirement, in one line                                                  | Fixture   | Milestone | Status  |
 | --------- | ------------------------------------------------------------------------- | --------- | --------- | ------- |
-| 1         | One candidate round-trips through compile, run, evidence and ledger       | `FX-M3-1` | M3        | Blocked |
+| 1         | One candidate round-trips through compile, run, evidence and ledger       | `FX-M3-1` | M3        | Passed  |
 | 2         | Every number recomputes from the ledger and the snapshot                  | `FX-M4-1` | M4        | Blocked |
-| 3         | No candidate can execute generated code                                   | `FX-M3-2` | M3        | Blocked |
-| 4         | No fill before declared eligibility, and the test can fail                | `FX-M2-1` | M2        | Blocked |
+| 3         | No candidate can execute generated code                                   | `FX-M3-2` | M3        | Passed  |
+| 4         | No fill before declared eligibility, and the test can fail                | `FX-M2-1` | M2        | Failed  |
 | 5         | Planted defects are caught by the gates                                   | `FX-M4-2` | M4        | Blocked |
-| 6         | Corporate-action accounting reconciles in value and in cash               | `FX-M2-2` | M2        | Blocked |
+| 6         | Corporate-action accounting reconciles in value and in cash               | `FX-M2-2` | M2        | Failed  |
 | 7         | Inventory complete, four counts separate, illegal transitions refused     | `FX-M4-3` | M4        | Blocked |
 | 8         | Over-budget search refused before the first backtest, with its arithmetic | `FX-M4-4` | M4        | Blocked |
 | 9         | Confirmation set cannot influence selection at campaign level             | `FX-M4-5` | M4        | Blocked |
@@ -615,9 +701,9 @@ status.
 | 16        | The whole search is auditable after the fact                              | `FX-M6-4` | M6        | Blocked |
 | 17        | Selection cannot read locked evaluation data, and lineage labelling holds | `FX-M5-2` | M5        | Blocked |
 | 18        | The ledger protocol holds under interruption, concurrency and repetition  | `FX-M4-8` | M4        | Blocked |
-| 19        | The interpreter matches independently specified strategies                | `FX-M3-3` | M3        | Blocked |
-| 20        | Feature values have parity between research and decision time             | `FX-M3-4` | M3        | Blocked |
-| 21        | Allocation is deterministic with no undocumented fallback                 | `FX-M3-5` | M3        | Blocked |
+| 19        | The interpreter matches independently specified strategies                | `FX-M3-3` | M3        | Passed  |
+| 20        | Feature values have parity between research and decision time             | `FX-M3-4` | M3        | Passed  |
+| 21        | Allocation is deterministic with no undocumented fallback                 | `FX-M3-5` | M3        | Passed  |
 | 22        | Acceptance evidence is a bundle, not an assertion                         | `FX-M1-3` | M1, M6    | Blocked |
 
 Criterion 22 appears against two milestones because it is satisfied twice: the skeleton and its
@@ -632,13 +718,13 @@ tree.
 
 What a reviewer or a maintainer runs, in the order that makes a failure informative.
 
-| Step                       | Command                                                                                                                                                                              | Establishes                                                                                                                                                                                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unit tests for the package | `python/.venv/Scripts/python.exe -m pytest python/tests/unit/discovery -q`                                                                                                           | Module behaviour, schema refusals, compiler stages                                                                                                                                                                                                |
-| Composition fixtures       | `python/.venv/Scripts/python.exe -m pytest python/tests/integration -q -k discovery`                                                                                                 | That each Section 14 row's entry point composes from Python, which is `test_discovery_composition.py`, `test_discovery_engine_composition.py`, `test_discovery_timing_contract.py` and `test_discovery_corporate_action_accounting.py` at present |
-| Bundle validation          | `python/.venv/Scripts/python.exe -m pytest python/tests/acceptance -q -k discovery_bundle`                                                                                           | That the bundle is well formed against its schema and the two documents it is drawn from. `test_discovery_bundle.py` checks structure; identity recomputation and receipt resolution join it at M4 and M6                                         |
-| Reproducibility baseline   | `python/.venv/Scripts/python.exe -m pytest python/tests/integration/test_optimization.py::test_two_runs_of_one_study_produce_the_same_result_digest -q -s`, run twice                | That one study over the bundled data reproduces its result digest, in the run and across processes                                                                                                                                                |
-| Document gates             | `scripts/check-markdown-tables.py`, `markdownlint-cli2 --config .markdownlint.jsonc`, `.pre-commit-hooks/check_docs_conventions.sh`, the character hooks, and the offline link check | That the documents are consistent. Not evidence about behaviour                                                                                                                                                                                   |
+| Step                       | Command                                                                                                                                                                              | Establishes                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Unit tests for the package | `python/.venv/Scripts/python.exe -m pytest python/tests/unit/discovery -q`                                                                                                           | Module behaviour, schema refusals, compiler stages                                                                                                                                                                                                                                                                                                                 |
+| Composition fixtures       | `python/.venv/Scripts/python.exe -m pytest python/tests/integration -q -k discovery`                                                                                                 | That each Section 14 row's entry point composes from Python, which is `test_discovery_composition.py`, `test_discovery_engine_composition.py`, `test_discovery_timing_contract.py`, `test_discovery_corporate_action_accounting.py`, `test_discovery_feature_parity.py`, `test_discovery_generated_code_refusals.py` and `test_discovery_round_trip.py` at present |
+| Bundle validation          | `python/.venv/Scripts/python.exe -m pytest python/tests/acceptance -q -k discovery_bundle`                                                                                           | That the bundle is well formed against its schema and the two documents it is drawn from. `test_discovery_bundle.py` checks structure; identity recomputation and receipt resolution join it at M4 and M6                                                                                                                                                          |
+| Reproducibility baseline   | `python/.venv/Scripts/python.exe -m pytest python/tests/integration/test_optimization.py::test_two_runs_of_one_study_produce_the_same_result_digest -q -s`, run twice                | That one study over the bundled data reproduces its result digest, in the run and across processes                                                                                                                                                                                                                                                                 |
+| Document gates             | `scripts/check-markdown-tables.py`, `markdownlint-cli2 --config .markdownlint.jsonc`, `.pre-commit-hooks/check_docs_conventions.sh`, the character hooks, and the offline link check | That the documents are consistent. Not evidence about behaviour                                                                                                                                                                                                                                                                                                    |
 
 The last row is listed so that it is not mistaken for the others. Document hygiene is a precondition
 for review, and it is not an entry in the bundle.

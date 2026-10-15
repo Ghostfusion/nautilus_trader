@@ -94,6 +94,20 @@ from nautilus_trader.discovery.schema import count_condition_leaves as count_con
 from nautilus_trader.discovery.schema import decimal_of as decimal_of
 from nautilus_trader.discovery.schema import parse_specification as parse_specification
 from nautilus_trader.discovery.schema import scan_for_code_references as scan_for_code_references
+from nautilus_trader.discovery.strategy import AllocationRequest as AllocationRequest
+from nautilus_trader.discovery.strategy import CrossSectionEntry as CrossSectionEntry
+from nautilus_trader.discovery.strategy import CrossSectionRow as CrossSectionRow
+from nautilus_trader.discovery.strategy import DecisionRecord as DecisionRecord
+from nautilus_trader.discovery.strategy import DiscoveryInterpreter as DiscoveryInterpreter
+from nautilus_trader.discovery.strategy import (
+    DiscoveryInterpreterConfig as DiscoveryInterpreterConfig,
+)
+from nautilus_trader.discovery.strategy import FillRecord as FillRecord
+from nautilus_trader.discovery.strategy import InterpreterRunInputs as InterpreterRunInputs
+from nautilus_trader.discovery.strategy import SignalRecord as SignalRecord
+from nautilus_trader.discovery.strategy import allocate_targets as allocate_targets
+from nautilus_trader.discovery.strategy import rebalance_period_key as rebalance_period_key
+from nautilus_trader.discovery.strategy import select_cross_section as select_cross_section
 from nautilus_trader.discovery.validate import ValidationResult as ValidationResult
 from nautilus_trader.discovery.validate import ValidationWarning as ValidationWarning
 from nautilus_trader.discovery.validate import WarningCode as WarningCode
@@ -109,6 +123,7 @@ __all__ = [
     "SPECIFICATION_SCHEMA_ID",
     "SPECIFICATION_SCHEMA_VERSION",
     "WARMUP_UNAVAILABLE",
+    "AllocationRequest",
     "Bound",
     "BoundKind",
     "CompilationResult",
@@ -118,7 +133,12 @@ __all__ = [
     "ConditionAny",
     "ConditionLeaf",
     "ConditionNode",
+    "CrossSectionEntry",
+    "CrossSectionRow",
     "DataBlock",
+    "DecisionRecord",
+    "DiscoveryInterpreter",
+    "DiscoveryInterpreterConfig",
     "DiscoveryLedger",
     "DiscoveryPolicy",
     "EntryBlock",
@@ -134,7 +154,9 @@ __all__ = [
     "FeatureStream",
     "FeatureValueAt",
     "FeaturesBlock",
+    "FillRecord",
     "IdentityBlock",
+    "InterpreterRunInputs",
     "ParsedSpecification",
     "PortfolioBlock",
     "ProvenanceBlock",
@@ -150,11 +172,13 @@ __all__ = [
     "RunIdentity",
     "RunRequest",
     "SelectionBlock",
+    "SignalRecord",
     "Specification",
     "UniverseBlock",
     "ValidationResult",
     "ValidationWarning",
     "WarningCode",
+    "allocate_targets",
     "build_memberships",
     "build_panel",
     "canonical_mapping",
@@ -166,8 +190,10 @@ __all__ = [
     "engine_version",
     "experiment_for",
     "parse_specification",
+    "rebalance_period_key",
     "run_experiment",
     "scan_for_code_references",
+    "select_cross_section",
     "specification_digest_of",
     "validate_specification",
 ]
