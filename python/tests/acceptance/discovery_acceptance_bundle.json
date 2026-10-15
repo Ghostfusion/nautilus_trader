@@ -49,13 +49,13 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 4",
       "fixture": "FX-M2-1",
       "milestone": "M2",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "failed",
+      "identity": "sha256:36657a18ee4e4fed7c3329b0c9ba5e39483c1c09cbc912ea8c6c93cb3a99520e, composed over FX-M2-1, the test module's git object f6f85641f4e441bd9bdfe3bcaf9253aae7c2b677, the engine build, and the in-process fixture data",
+      "test_or_fixture": "python/tests/integration/test_discovery_timing_contract.py, thirteen tests: the recorded lifecycle, the latency deferral and its lower bound, the unrestricted settlement point, the quote release, the shutdown drain, the ordering pair, the delayed availability pair, the opening gap, and the three bridge observations",
+      "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_timing_contract.py -q (13 passed in 1.24 s), over in-process one-minute bars and quotes for AAPL.XNAS, no catalog snapshot, no seed",
+      "expected": "The case table of design Section 8.5 run against both halves: the pre-enforcement half is expected to fail, so the test discriminates, and the enforced half fills no earlier than the declared eligibility",
+      "observed": "The pre-enforcement half fails as expected: with no deferral the fill carries the decision bar's own timestamp and that bar's own close, and the account is debited at that instant. The enforced half holds for the latency model, whose fill is never earlier than the arrival and lands on the first bar at or after it. Two cases disagree with the table and are named here. The bridge mechanism resolves an artifact's eligibility to the next session's open and stamps the signal with it, but its submission path holds no clock, so the order set is submitted at delivery and the fill precedes the declared eligibility by the whole interval to the next session. And a deferred intent with no subsequent market data is filled at shutdown against the last known close, without notifying the strategy, where the table requires that no fill be fabricated. With bar-only data the deferral prices at a bar close rather than at an opening price, so the declared eligibility can be honoured in time but not in price unless the snapshot carries market data at that instant",
+      "receipts": "engine build: nautilus_trader 2.0.0rc6, git_commit d884003c497c, rustc 1.99.0, profile release, precision high; the extension was built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and quotes in process; no run receipt exists, because the research ledger of SD16 is not implemented"
     },
     {
       "criterion": 5,
@@ -77,13 +77,13 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 6",
       "fixture": "FX-M2-2",
       "milestone": "M2",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "failed",
+      "identity": "sha256:13b46b8d05f3df2fcb75cdf83829d8698c5153b5715ccd83f72db1a44035afc3, composed over FX-M2-2, the test module's git object 127290bd5ba789dc23ff9d984bf972110be5ec91, the engine build, and the in-process fixture data",
+      "test_or_fixture": "python/tests/integration/test_discovery_corporate_action_accounting.py, six tests: the adjustment series, the delivery of both action records, the held dividend, the split quantity, the entry and exit around the boundary, and the same accounting without the action data",
+      "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_corporate_action_accounting.py -q (6 passed in 1.08 s), with a zero-slippage fill model and no commission, over in-process bars at the raw prices and split and dividend records announced before they take effect",
+      "expected": "Cash, quantity, position value and account equity reconcile across a dividend, a split, a position held through an ex-date, and positions opened and closed around an action boundary",
+      "observed": "The value leg reconciles and the cash leg does not. The adjustment series carries both actions: a split factor of one quarter and 2.50 per share, adjusting the raw 400.00 to 97.50. The held position's whole cash movement is its 40,000 purchase cost, so the 250 it was entitled to at the ex-date is credited to nothing. The split leaves the quantity at 100 rather than 400, and a round trip opened at 400.00 and closed at 200.00 realises 20,000 where a total-return account of the same position would carry 19,750. Both action records are delivered to the module, and the same run without them produces identical numbers, so the omission is in the accounting rather than in the data. The defect is the absent upstream dividend cash-flow path, which is the equity-readiness prerequisite of decision SD12",
+      "receipts": "engine build: nautilus_trader 2.0.0rc6, git_commit d884003c497c, rustc 1.99.0, profile release, precision high; the extension was built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and action records in process; no run receipt exists, because the research ledger of SD16 is not implemented"
     },
     {
       "criterion": 7,

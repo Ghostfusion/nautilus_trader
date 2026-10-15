@@ -73,6 +73,17 @@ PROVENANCE_FIELDS = (
 )
 ENTRY_FIELDS = SECTION_4_1_FIELDS + PROVENANCE_FIELDS
 
+# The fields an entry can only carry because a fixture ran, as Section 4.1 requires of every one of
+# them: `status` and `criterion` are always present and are not evidence.
+EVIDENCE_FIELDS = (
+    "identity",
+    "test_or_fixture",
+    "procedure",
+    "expected",
+    "observed",
+    "receipts",
+)
+
 # The plan's Section 15 table names fixtures as `FX-M<milestone>-<n>` against one or more milestones
 FIXTURE_PATTERN = re.compile(r"^FX-M\d+-\d+$")
 MILESTONE_PATTERN = re.compile(r"^M\d+(, M\d+)*$")
@@ -282,13 +293,22 @@ def test_every_status_is_in_the_vocabulary_of_section_4_2() -> None:
         assert entry["status"] in STATUS_VOCABULARY, message
 
 
-def test_every_entry_is_blocked_because_nothing_has_run() -> None:
+def test_an_evaluated_entry_carries_its_evidence_and_a_blocked_one_carries_none() -> None:
     """
-    Test the skeleton claims nothing: M6.5 completes these statuses by running the fixtures.
-    """
-    statuses = {entry["status"] for entry in load_bundle()["entries"]}
+    Test the coupling Section 4.2 requires between an entry's status and its evidence.
 
-    assert statuses == {"blocked"}, f"statuses are {sorted(statuses)}"
+    An entry exists because a fixture ran, so a status other than `blocked` carries all six
+    evidence fields, and an entry that has run nothing carries none of them. `Blocked` is the
+    honest status while a fixture does not exist, and it is not a place to record an intention.
+    """
+    for entry in load_bundle()["entries"]:
+        number = entry["criterion"]
+        present = [field for field in EVIDENCE_FIELDS if entry[field] is not None]
+        if entry["status"] == "blocked":
+            assert present == [], f"criterion {number} is blocked yet claims {present}"
+        else:
+            missing = [field for field in EVIDENCE_FIELDS if entry[field] is None]
+            assert missing == [], f"criterion {number} is {entry['status']} yet lacks {missing}"
 
 
 def test_every_entry_names_a_fixture_and_a_milestone() -> None:
