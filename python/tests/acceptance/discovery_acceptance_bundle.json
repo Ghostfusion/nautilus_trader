@@ -35,13 +35,13 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 3",
       "fixture": "FX-M3-2",
       "milestone": "M3",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "passed",
+      "identity": "sha256:eb2fdfe5b3e602a0f7921357d93704985d07490c3af804ff247b18ff970e7567, the digest through optimization.space.digest_of of {\"identity\": \"FX-M3-2|python/tests/integration/test_discovery_generated_code_refusals.py|git-object:242ce4861f09abe8272d4379e6675e989a9de3e2|engine:nautilus_trader 2.0.0rc6, the extension built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit|data:none, the fixture holds no data\"}",
+      "test_or_fixture": "python/tests/integration/test_discovery_generated_code_refusals.py, eight tests: a field naming a module, the module:attribute value form, three expression shapes, three code artefacts, the refusal returned as an outcome, one compilation with every dynamic import recorded, the boundary a bare dotted string sits on, and the plan naming no executor",
+      "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_generated_code_refusals.py -q (8 passed in 0.34 s), over the unit fixture's specification, policy and registry, with no engine run, no catalog snapshot and no seed",
+      "expected": "A specification field that resolves to a module path, a code artefact or an expression is refused by the validator with the refusal recorded, and the compiled artefact is constructed in process and never imported",
+      "observed": "Every code shape is refused at the field that carries it, with the code code_reference_refused: a field named module_path or strategy_path, the module:attribute form in any text field, an eval(...), __import__(...) or subprocess expression, and a callable, a type or a module carried as a value. The refusal is returned in the compiled result's error list rather than raised, and two compilations of one payload produce the same refusal set. One compilation of a legal payload runs with every dynamic import recorded and the recording is empty, so no part of the compiler imports anything; the plan is an instance of nautilus_trader.discovery.compile.CompiledPlan, carries no code object, and holds neither a callable nor a code-shaped key in its plain-data form. The boundary this leaves is stated rather than implied: a bare dotted string in a text field is admissible because nothing resolves it as a path, and the test asserts that boundary instead of claiming a spelling rule it does not enforce",
+      "receipts": "engine build: nautilus_trader 2.0.0rc6, the extension built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars in process; no run receipt exists, because the research ledger of SD16 is not implemented"
     },
     {
       "criterion": 4,
@@ -273,13 +273,13 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 20",
       "fixture": "FX-M3-4",
       "milestone": "M3",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "passed",
+      "identity": "sha256:d77619dde3da1f053e5e2296a64e41b9d680e33ba4c99a7a69b6db5f62b98d82, the digest through optimization.space.digest_of of {\"identity\": \"FX-M3-4|python/tests/integration/test_discovery_feature_parity.py|git-object:d86cf077da599c8c59cb1d262e6e059cca0aad4b|engine:nautilus_trader 2.0.0rc6, the extension built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit|data:twelve in-process daily AAPL.XNAS bars\"}",
+      "test_or_fixture": "python/tests/integration/test_discovery_feature_parity.py, eight tests: the value, both timestamps, units and identity against the research path; the warm-up divergence; the availability lag; membership at the decision instant; the offline panel against the stream; a series shorter than the lookback; the declared skip; and the refused operator",
+      "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_feature_parity.py -q (8 passed in 1.18 s), over twelve in-process daily AAPL.XNAS bars at a venue with a zero maker and taker fee, no catalog snapshot and no seed",
+      "expected": "One fixture computes a feature offline through the research path and evaluates it at decision time through the interpreter, and the two agree on value, observation and availability timestamps, warm-up behaviour, missing-value treatment, units and universe membership",
+      "observed": "The decision-time values agree with the research path on every reading the series produces: the same values, the same observation and availability timestamps, the same price unit label and the same definition digest. Four behaviours beyond agreement are measured rather than assumed. The repository's own indicator reports 0.0 for the four bars before the lookback is satisfied, and the decision-time contract serves nothing there, so a warm-up reading can never be acted on as a value. A definition with a one-day availability lag is served one bar after the bar it describes and carries its own observation instant, so a publication lag is not a look-ahead. Membership is read at the decision instant: an instrument that leaves the universe keeps receiving values while every snapshot after the exit reports it as a non-member. A series shorter than the lookback yields no value and no panel row, so an absent value is absent rather than zero, and the offline panel carries exactly one row per served reading, stamped at the observation it holds, with no row for a warm-up bar",
+      "receipts": "engine build: nautilus_trader 2.0.0rc6, the extension built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars in process; no run receipt exists, because the research ledger of SD16 is not implemented"
     },
     {
       "criterion": 21,

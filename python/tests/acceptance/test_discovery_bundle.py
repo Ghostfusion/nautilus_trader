@@ -13,14 +13,16 @@
 #  limitations under the License.
 # -------------------------------------------------------------------------------------------------
 """
-Validate the M1.2 acceptance-evidence bundle skeleton for strategy discovery.
+Validate the acceptance-evidence bundle for strategy discovery.
 
-`discovery_acceptance_bundle.json` is the skeleton of the evidence bundle that
+`discovery_acceptance_bundle.json` is the evidence bundle that
 `docs/design/strategy_discovery_implementation.md` Section 15 requires: one entry per acceptance
 criterion, each carrying the eight fields of the plan's Section 4.1 with the status vocabulary of
-Section 4.2. Nothing has run, so every entry is `blocked` and its result fields are null. Each
-requirement sentence is quoted verbatim from Section 15 of `docs/design/strategy_discovery_design.md`
-and each fixture and milestone comes from the plan's Section 15 table.
+Section 4.2. An entry exists because a test ran, so a criterion whose fixture has run carries its
+identity, its procedure and its expected and observed results, and a criterion whose fixture does
+not exist yet is `blocked` with those fields empty. Each requirement sentence is quoted verbatim
+from Section 15 of `docs/design/strategy_discovery_design.md` and each fixture and milestone comes
+from the plan's Section 15 table.
 
 The schema is validated by `validate_bundle`, which raises rather than asserting, so the negative
 cases at the end of this module construct a broken bundle in memory and show it is refused.
