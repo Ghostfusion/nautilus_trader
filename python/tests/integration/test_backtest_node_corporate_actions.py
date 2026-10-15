@@ -21,9 +21,9 @@ action series, and appends the actions as data at their effective instants.
 
 These tests run the node against a temporary Parquet catalog holding bars plus a 4:1 split and a
 cash dividend, and observe the prices a strategy receives on `on_bar` and the run's processed
-record count and final boundary. The node does not expose a canonical backtest result (its
-`run()` returns `BacktestResult` objects and only the engine exposes the canonical projection), so
-the adjustment is verified through the node's observable outputs rather than the regression
+record count and final boundary. The node's `run()` returns `BacktestResult` objects and the
+canonical projection is reached through `get_engine_canonical_result(run_config_id)`, so the
+adjustment is verified through the node's observable outputs rather than the regression
 harness. A subscribed strategy observes the actions themselves on `on_corporate_action`, but only
 when the data is loaded with an adjustment: without one the action records are never loaded, so a
 subscriber receives nothing.
