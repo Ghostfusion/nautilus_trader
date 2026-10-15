@@ -714,7 +714,7 @@ mod tests {
             "Up Capture Ratio (simple, 252 days)",
             "Value at Risk (simple, confidence 0.95)",
             "Win Rate",
-            "Win/Loss Ratio",
+            "Win/Loss Ratio (average winner over average loser)",
             "Winning Month Share",
         ]
         .into_iter()

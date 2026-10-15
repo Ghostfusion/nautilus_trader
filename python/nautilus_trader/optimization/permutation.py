@@ -18,9 +18,18 @@ Permutation tests of a backtest result: whether the order of the outcomes was do
 A backtest reports what a rule would have done on one ordering of history. Part of that result comes
 from the rule and part from the ordering: a rule that buys after a rise looks better in a history
 that rose early. A permutation test keeps every observed outcome and throws away only the order it
-arrived in. The statistic is recomputed on each rearrangement, and the share of rearrangements that
-did at least as well as the real one is the p-value. The null the share speaks about is that the
-sequence carries nothing beyond the values in it.
+arrived in. The statistic is recomputed on each rearrangement, and the p-value is the share of them
+that did at least as well as the real one, counted with the real sequence as one of the
+arrangements, so it is `(1 + extreme_count) / (1 + scored)`. Both counts travel with the result, so
+the unadjusted share can be read off, and the smallest value a run of a thousand rearrangements can
+report is about `0.001`: counting without the adjustment would report zero, and a finite number of
+rearrangements cannot establish that a result was impossible by chance. The null the share speaks
+about is that the sequence carries nothing beyond the values in it.
+
+A rearrangement never re-runs the strategy. The trades are the ones the run already produced, so a
+small share is evidence that the ordering was not doing the work, and never a statement that the
+rule has an edge; a test that re-runs the strategy against rearranged prices is a different test.
+The `RETURN_BLOCK` unit rearranges returns and does not rebuild a price series from them.
 
 Two units of rearrangement are supported, and the difference between them is what the null assumes:
 
@@ -125,7 +134,9 @@ class PermutationTestResult:
     refused : int
         How many rearrangements the statistic could not score. They are excluded from the share.
     p_value : float
-        `extreme_count` divided by the scored rearrangements, or NaN when none could be scored.
+        `(1 + extreme_count)` divided by `(1 + scored)`, or NaN when nothing could be scored. The
+        real sequence counts as one arrangement, so the value is never zero and cannot fall below
+        `1 / (1 + scored)`.
     observations : int
         How many outcomes were rearranged. A share from a short sequence is a coarse share, which is
         why the count travels with it.
@@ -355,9 +366,10 @@ def permutation_test(  # noqa: PLR0913 - the test's declared inputs
 
     Notes
     -----
-    The p-value is `extreme_count / scored`, and it is never exactly the probability that the
-    strategy loses money. A p-value of zero means no rearrangement out of the ones drawn did that
-    well, not that none could.
+    The p-value is `(1 + extreme_count) / (1 + scored)`, counting the real sequence as one of the
+    arrangements, so no run of a finite size reports zero. It is never exactly the probability that
+    the strategy loses money, and the smallest share a run of `n` rearrangements can report is
+    `1 / (n + 1)`.
 
     Examples
     --------
@@ -407,7 +419,8 @@ def permutation_test(  # noqa: PLR0913 - the test's declared inputs
             extreme += 1
 
     scored = len(distribution)
-    p_value = extreme / scored if scored else math.nan
+    # The real sequence counts as one arrangement, so a finite run cannot report zero.
+    p_value = (extreme + 1) / (scored + 1) if scored else math.nan
 
     return PermutationTestResult(
         metric=metric,

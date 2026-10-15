@@ -60,7 +60,17 @@ supplies, and records every decision it did not take:
 
 The default precedence is exits before entries before scaling -
 `CLOSE_LONG, CLOSE_SHORT, SCALE_OUT, OPEN_LONG, OPEN_SHORT, SCALE_IN` - so a policy given no
-configuration reduces exposure rather than adding to it.
+configuration reduces exposure rather than adding to it. The ordering is this package's own
+assumption rather than a rule quoted from a specification: the search that settled the decisions
+above found no venue or protocol rule fixing an order between an exit and an entry, only rules that
+rank resting orders by price and time within a book, and vendor documentation of a matching engine
+processing one user's requests for one instrument sequentially in the order they arrived, with
+reduce-only instructions treated like any other order (Deribit, *Order Management - Best
+Practices*). Precedence is therefore declared rather than implied, and it is replaceable:
+`ConflictMode.PRIORITY` and `ConflictMode.STRENGTH` rank by the caller's order instead, and every
+refusal names the rank that beat it. The four gates themselves are this package's design rather
+than a quoted standard, and the search recorded for the precedence found no specification that
+fixes how a conflict between two intentions on one instrument must be resolved.
 
 ## 4. The scored entry decision
 

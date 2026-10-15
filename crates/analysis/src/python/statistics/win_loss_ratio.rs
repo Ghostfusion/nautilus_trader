@@ -30,6 +30,13 @@ impl WinLossRatio {
     /// so a win rate at or below a half cannot be profitable. The ratio is `None` when either side is
     /// empty: a ratio with no losing trade has no denominator, and one with no winning trade has no
     /// numerator. A breakeven or missing PnL is neither a win nor a loss and is excluded from both.
+    ///
+    /// The label is ambiguous in use, so the reported name carries the formula. "Win/loss ratio" also
+    /// names the count ratio, the number of winners over the number of losers, which is a different
+    /// quantity: it is the win rate restated, `wins / losses == p / (1 - p)` for a win rate `p`, and it
+    /// says nothing about the size of a win or a loss. What is reported here is the ratio of averages,
+    /// also published as the payoff ratio. A report that shows only the label cannot be told apart from
+    /// the count ratio, which is why the name states which average is over which.
     #[new]
     fn py_new() -> Self {
         Self {}

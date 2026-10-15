@@ -97,6 +97,28 @@ position that opened and closed inside a period is invisible to it, and a true f
 exposure accumulator in the period reducer, summing held duration within each period. The proxy is
 what the frame's end-of-period exposure supports, and the row's own name says so.
 
+The word is used for a different measurement elsewhere. `quantstats.exposure` reports the percentage
+of periods with a non-zero return, rounded up to the nearest percent, which is an activity count
+within the period rather than a sample of the position at its end; on a frame where positions open
+and close inside periods the two figures diverge, and the sampled one is the lower. That is the
+established convention for the bare name, which is why this row carries the formula in its name
+instead of the name alone.
+
+`Win/Loss Ratio (average winner over average loser)` is over closed positions rather than the frame:
+the mean positive realised PnL of the closed trades over the absolute mean negative one, so the row
+reads how much an average winner is worth against an average loser. A value below one means the
+average loss is larger than the average win; a breakeven PnL is neither a win nor a loss and is
+excluded from both sides; and the row reports nothing when either side is empty, because the ratio
+then has no numerator or no denominator.
+
+Its name carries the formula because the label alone cannot be told apart from a second meaning.
+"Win/loss ratio" is also used for the counts - winners over losers - which is a different quantity
+that is the win rate restated, `wins / losses == p / (1 - p)` for a win rate `p`, and which says
+nothing about the size of a win or a loss. Investopedia's entry for the term defines it that way;
+Finance Dictionary Pro's entry records both uses and states the rule this row follows, that a report
+should show the formula rather than rely on the label; and the average-over-average quantity
+computed here is published as the payoff ratio.
+
 `Average Trade Duration ({outcome}, days)` is defined over closed positions rather than the frame:
 the mean `duration_ns` of the selected closed trades, converted to days, where a winner is a closed
 position with a positive realised PnL and a loser one with a negative, and a breakeven or unresolved

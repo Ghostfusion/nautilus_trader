@@ -76,8 +76,8 @@ from nautilus_trader.analysis import UpCaptureRatio
 from nautilus_trader.analysis import ValueAtRisk
 from nautilus_trader.analysis import VarianceRatio
 from nautilus_trader.analysis import WinLossRatio
-from nautilus_trader.analysis import WinRate
 from nautilus_trader.analysis import WinningMonthShare
+from nautilus_trader.analysis import WinRate
 from nautilus_trader.analysis import tearsheet
 from nautilus_trader.model import Currency
 from nautilus_trader.model import CurrencyType
@@ -117,7 +117,7 @@ NO_ARG_STATISTICS = [
     (TotalCommissions, "Total Commissions"),
     (TotalTurnover, "Total Turnover"),
     (UlcerIndex, "Ulcer Index"),
-    (WinLossRatio, "Win/Loss Ratio"),
+    (WinLossRatio, "Win/Loss Ratio (average winner over average loser)"),
     (WinRate, "Win Rate"),
     (WinningMonthShare, "Winning Month Share"),
     (Autocorrelation, "Autocorrelation"),

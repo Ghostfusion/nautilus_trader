@@ -17,8 +17,8 @@ Tests for the permutation test of a backtest result.
 
 The invariants checked here are the ones a wrong implementation breaks silently: that a rearrangement
 is a rearrangement and never a new value, that a block keeps its internal adjacency, that the p-value
-is the counted share of the runs that were scored, and that the draw does not depend on the global
-random state.
+counts the real sequence as one arrangement and so is never zero, and that the draw does not depend
+on the global random state.
 """
 
 import json
@@ -191,9 +191,9 @@ def test_a_statistic_the_order_cannot_change_scores_one() -> None:
     assert len(result.distribution) == 100
 
 
-def test_the_p_value_is_the_counted_share_of_the_scored_runs() -> None:
+def test_the_p_value_is_the_counted_share_including_the_real_sequence() -> None:
     """
-    Test the share is the counted extreme runs over the runs that were scored, and nothing else.
+    Test the share counts the extreme runs and the real sequence over the runs that were scored.
     """
     result = permutation_test(
         [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -204,8 +204,30 @@ def test_the_p_value_is_the_counted_share_of_the_scored_runs() -> None:
     )
 
     assert result.observed == 6.0
-    assert result.p_value == result.extreme_count / result.scored
-    assert 0 <= result.extreme_count < 50
+    assert result.extreme_count < 50
+    assert result.p_value == (result.extreme_count + 1) / (result.scored + 1)
+
+
+def test_the_best_possible_ordering_still_reports_a_share_above_zero() -> None:
+    """
+    Test the real sequence counts as one arrangement, so no finite run reports certainty.
+    """
+    # No rearrangement can reproduce the real sequence's own statistic, so nothing else scores as
+    # well as it does and the counted share is zero.
+    values = [1.0, 2.0, 3.0]
+
+    result = permutation_test(
+        values,
+        statistic=lambda candidate: 1.0 if candidate is values else 0.0,
+        metric="only the real sequence",
+        iterations=100,
+        seed=11,
+    )
+
+    assert result.extreme_count == 0
+    assert result.refused == 0
+    assert result.scored == 100
+    assert result.p_value == pytest.approx(1 / 101)
 
 
 def test_the_direction_decides_which_runs_count() -> None:
@@ -303,7 +325,7 @@ def test_a_rearrangement_the_statistic_cannot_score_is_counted_and_excluded() ->
     assert result.refused >= 1
     assert result.scored == result.iterations - result.refused
     assert len(result.distribution) == result.scored
-    assert result.p_value == result.extreme_count / result.scored
+    assert result.p_value == (result.extreme_count + 1) / (result.scored + 1)
 
 
 def test_a_test_with_nothing_scorable_reports_no_share() -> None:

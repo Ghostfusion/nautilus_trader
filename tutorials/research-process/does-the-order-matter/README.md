@@ -2,15 +2,15 @@
 
 Date: 2026-10-08. Revision 1.
 
-| Field                     | Value                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| What it trades            | Nothing by itself: it is a test that rebuilds the same price changes in a different order and re-runs the rule on each rebuild                                                                                                                                                                                                                                                                                     |
-| How often it trades       | Not applicable; the test runs the rule once on the real history and once per shuffle, usually a hundred times or more                                                                                                                                                                                                                                                                                              |
-| What you need             | Nothing but this page; the worked example needs only a table of six numbers                                                                                                                                                                                                                                                                                                                                        |
-| Where the rules come from | [The permutation test in this repository](../../../python/nautilus_trader/optimization/permutation.py), written to the procedure below, and [the version in the investing-algorithm-framework repository](https://github.com/coding-kitties/investing-algorithm-framework/blob/main/investing_algorithm_framework/infrastructure/services/backtesting/backtest_service.py), which gets one step of it wrong        |
-| The underlying research   | Mroziewicz and Slepaczuk, [A novel approach to trading strategy parameter optimization](https://arxiv.org/abs/2602.10785) (2026), whose third research question is whether the tested rule beats randomly constructed alternatives, answered by bootstrap; Deep, Deep and Lamptey, [Interpretable Hypothesis-Driven Trading](https://arxiv.org/abs/2512.12924) (2025), on reporting the resulting p-value honestly |
-| How well it held up       | Open question: the test is standard in the literature and the two papers above rely on it or on its bootstrap cousin, but this collection found no measurement of the exact rule on a rule of its own, and the version quoted above permutes the four daily prices independently, which produces days that could not have existed                                                                                  |
-| Also appears in           | [Searching settings](../sweeping-settings/README.md), [Held-back data comes in two flavours](../two-kinds-of-out-of-sample/README.md), [Scoring what survived](../scoring-what-survived/README.md), and [How a backtest lies](../../foundations/07_how-a-backtest-lies.md)                                                                                                                                         |
+| Field                     | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What it trades            | Nothing by itself: it is a test that rebuilds the same price changes in a different order and re-runs the rule on each rebuild                                                                                                                                                                                                                                                                                                                                        |
+| How often it trades       | Not applicable; the test runs the rule once on the real history and once per shuffle, usually a hundred times or more                                                                                                                                                                                                                                                                                                                                                 |
+| What you need             | Nothing but this page; the worked example needs only a table of six numbers                                                                                                                                                                                                                                                                                                                                                                                           |
+| Where the rules come from | [The permutation test in this repository](../../../python/nautilus_trader/optimization/permutation.py), which implements the trade-list half of the procedure below and does not re-run the rule, and [the version in the investing-algorithm-framework repository](https://github.com/coding-kitties/investing-algorithm-framework/blob/main/investing_algorithm_framework/infrastructure/services/backtesting/backtest_service.py), which gets one step of it wrong |
+| The underlying research   | Mroziewicz and Slepaczuk, [A novel approach to trading strategy parameter optimization](https://arxiv.org/abs/2602.10785) (2026), whose third research question is whether the tested rule beats randomly constructed alternatives, answered by bootstrap; Deep, Deep and Lamptey, [Interpretable Hypothesis-Driven Trading](https://arxiv.org/abs/2512.12924) (2025), on reporting the resulting p-value honestly                                                    |
+| How well it held up       | Open question: the test is standard in the literature and the two papers above rely on it or on its bootstrap cousin, but this collection found no measurement of the exact rule on a rule of its own, and the version quoted above permutes the four daily prices independently, which produces days that could not have existed                                                                                                                                     |
+| Also appears in           | [Searching settings](../sweeping-settings/README.md), [Held-back data comes in two flavours](../two-kinds-of-out-of-sample/README.md), [Scoring what survived](../scoring-what-survived/README.md), and [How a backtest lies](../../foundations/07_how-a-backtest-lies.md)                                                                                                                                                                                            |
 
 ## The idea in one paragraph
 
@@ -72,7 +72,10 @@ provenance table makes with prices.
    or the volatility of returns, count the runs that scored at least as badly instead.
 8. Divide that count by the number of shuffled runs. That fraction is the p-value, and it is the
    answer to the question "how often does a world with the same price changes in a different order
-   do this well".
+   do this well". The variant that adds one to the count and one to the number of runs is the safer
+   one, because a finite number of runs cannot establish that the real history was the only outcome
+   that could have done this well. This repository's module uses that variant, and it reports both
+   counts beside the number, so the other form can be read off.
 9. Report it beside the real score, the number of shuffled runs, and the unit you shuffled. A
    p-value reported on its own, with no statement of what was rearranged, cannot be checked.
 
@@ -103,6 +106,9 @@ p = number_of_shuffled_runs_at_least_as_good / number_of_shuffled_runs
 - `number_of_shuffled_runs_at_least_as_good` counts the rebuilt histories whose score was at least
   the real score, or at least as bad for measurements where smaller is better.
 - `number_of_shuffled_runs` is how many rebuilds were made, at least a hundred.
+- This repository's module counts the real history as one of the runs, so its p-value is
+  `(1 + number_of_shuffled_runs_at_least_as_good) / (1 + number_of_shuffled_runs)`, and no run of a
+  hundred can report a value below about 0.01.
 - It means: the share of rearranged worlds that did as well. Small means the order mattered to the
   result. It does not mean the result is profitable.
 
@@ -134,11 +140,13 @@ highest are shown, and the four runs that matter for the count.
 | Remaining 96 runs | Random orders, seeds 45 to 140 | Between -0.60 and 1.80         | 2 of the 96, both near 1.6       |
 
 Four of the hundred shuffled runs scored at least 1.5, so the p-value is 4 divided by 100, which is
-0.04. The reading is that a history with the same day-to-day changes in a different order reaches
-1.5 about four times in a hundred, so the real sequence was unusual. That is a statement about the
-order of the prices. It is not a statement that the rule pays: the fees, the borrowed money and the
-market impact of the real trades have not been counted, and the shuffled worlds contain no real
-trades at all.
+0.04. The module this repository ships counts the real run as one of the hundred and adds one to both
+sides, so for the same counts it reports 5 divided by 101, about 0.0495; the difference is the
+convention, not the arithmetic. The reading is that a history with the same day-to-day changes in a
+different order reaches 1.5 about four times in a hundred, so the real sequence was unusual. That is
+a statement about the order of the prices. It is not a statement that the rule pays: the fees, the
+borrowed money and the market impact of the real trades have not been counted, and the shuffled
+worlds contain no real trades at all.
 
 Now the malformed version, which is what the framework in the provenance table actually does. It
 takes the four daily changes, shuffles each of the four lists on its own, and rebuilds the day with
@@ -184,21 +192,25 @@ in its original order while every price has moved, so volume and price no longer
 
 ## How this project relates to it
 
-This repository ships the procedure above in
+This repository ships the trade-list half of the procedure above in
 [permutation.py](../../../python/nautilus_trader/optimization/permutation.py). It rearranges one of
 two units: the realized outcomes of the trades themselves, or blocks of consecutive period returns,
-where a block keeps its internal order so that runs of calm and of turbulence stay together. The
-statistic is supplied by the caller rather than fixed, so the test can be run on a return, on the
-ratio of return to variability, or on the deepest fall from a peak, and the same statistic is
-applied to the real sequence and to every rearrangement. Three choices in it answer the defects
-above: nothing is ever reconstructed from separate price changes, so a rearranged value cannot be
-one that was never observed; the random generator is created inside the call and the seed is
-recorded with the result, so two runs with the same seed agree and nothing else in the process can
-move them; and a rearrangement the statistic cannot score is counted and excluded from the share
-rather than silently dropped. The result also carries the direction rule of step 7, so a
-measurement that is better when smaller is counted the other way, and it can write itself out as a
-flat record naming the seed, the counts and the unit. It is a report and never a gate: nothing in
-the module is consulted by a strategy, an order or a risk check.
+where a block keeps its internal order so that runs of calm and of turbulence stay together. It does
+not re-run the rule: both units move outcomes a run has already produced, so the module answers
+whether the order of those outcomes was doing the work in that run's own measurements, and the
+stronger test the steps above describe - rebuilding a history and re-running the frozen rule on it -
+needs the rule, the prices and the fills rather than a list of numbers. The statistic is supplied by
+the caller rather than fixed, so the test can be run on a return, on the ratio of return to
+variability, or on the deepest fall from a peak, and the same statistic is applied to the real
+sequence and to every rearrangement. Three choices in it answer the defects above: nothing is ever
+reconstructed from separate price changes, so a rearranged value cannot be one that was never
+observed; the random generator is created inside the call and the seed is recorded with the result,
+so two runs with the same seed agree and nothing else in the process can move them; and a
+rearrangement the statistic cannot score is counted and excluded from the share rather than silently
+dropped. The result also carries the direction rule of step 7, so a measurement that is better when
+smaller is counted the other way, and it can write itself out as a flat record naming the seed, the
+counts and the unit. It is a report and never a gate: nothing in the module is consulted by a
+strategy, an order or a risk check.
 
 The tests show it working, and they are the one command that runs the rule from the repository's
 `python` directory:
@@ -246,7 +258,9 @@ re-use the measurements a repository already has, not a new measurement.
 - One convention question must be settled and stated: some writers report the count divided by the
   number of runs, which can be exactly zero, and others add one to both the count and the number of
   runs so that the answer never reaches zero. Either is defensible; mixing them across studies is
-  not, and a reader cannot tell them apart without the number of runs being reported.
+  not, and a reader cannot tell them apart without the number of runs being reported. This
+  repository's module takes the second form and reports the counts beside the share, so the first
+  form can be recomputed from its result.
 
 ## Try it yourself
 

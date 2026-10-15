@@ -389,8 +389,36 @@ series, so a sweep cannot be corrected from what it currently keeps.
 The multiple-testing correction answers how high the best of many tries is; it cannot answer whether
 the *order* of the outcomes produced the result. `permutation.py` answers that instead, by keeping
 every observed outcome and discarding only the order: the statistic is recomputed on each
-rearrangement, and the share of rearrangements that did at least as well as the real one is the
-p-value.
+rearrangement, and the p-value is the share of rearrangements that did at least as well as the real
+one.
+
+Two conventions had to be settled before the number could be printed, and both are recorded here
+because a p-value reported without them cannot be checked.
+
+- **The real sequence counts as one arrangement.** The reported value is
+  `(1 + extreme_count) / (1 + scored)`, so no run of a finite size reports zero: a thousand
+  rearrangements cannot report better than about `0.001`. Counting without the adjustment is the
+  other published form, and it can return exactly zero, which states that no arrangement could have
+  done as well - a claim a finite number of draws cannot support. The counts travel with the result,
+  so the unadjusted share can be read off. `scipy.stats.permutation_test` (SciPy 1.18.0) takes the
+  same adjusted form, citing Phipson and Smyth, *Permutation P-values Should Never Be Zero* (2010),
+  and Ernst, *Permutation Methods: A Basis for Exact Inference* (2004); the same page states that
+  the convention for two-sided p-values is *not universal*, which is why the direction here is
+  declared by the caller instead of inferred. The unadjusted count over the total is what
+  Build Alpha's description of the Monte Carlo permutation test reports, so both readings of the
+  same counts are in circulation.
+- **The two-sided comparison is by magnitude.** `TestDirection.TWO_SIDED` counts a rearrangement
+  when `abs(value) >= abs(observed)`, which is only meaningful where the statistic is signed and
+  its sign is the direction of the effect. A metric that is better when smaller is counted with
+  `LOWER_IS_BETTER`; leaving that undone is what inflates a p-value against the rule.
+
+The multiple-testing correction remains the right tool for the trial count, and the two are
+complementary rather than alternatives. What this test does **not** answer is whether the *rule*
+contains an edge: a rearrangement here moves outcomes a run has already produced, so nothing is
+re-run against rearranged prices, and that stronger test needs the rule, the prices and the fills
+rather than a list of numbers. Build Alpha's own taxonomy separates the two in the same way, calling
+the trade-list reshuffle a way to see alternate drawdown paths to the same total P&L and reserving
+the Monte Carlo permutation test for the version that re-runs the strategy on rebuilt series.
 
 Two units of rearrangement are declared, because the null each one speaks about is different:
 
@@ -398,6 +426,12 @@ Two units of rearrangement are declared, because the null each one speaks about 
 | -------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `ShuffleUnit.TRADE_ORDER`  | the realized outcomes themselves                         | any ordering of the outcome multiset was equally available              |
 | `ShuffleUnit.RETURN_BLOCK` | blocks of consecutive returns, order kept within a block | the outcomes are exchangeable once short-horizon structure is preserved |
+
+A block rearrangement needs a block size, and the caller supplies it; the block-resampling
+literature provides a rule for choosing it from the data (Politis and White, *Automatic
+Block-Length Selection for the Dependent Bootstrap*, 2004), which this module does not implement
+and does not pretend to. The size states how much structure the null preserves, so it is reported
+with the result rather than defaulted silently.
 
 ```python
 result = permutation_test(

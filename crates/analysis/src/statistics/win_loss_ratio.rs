@@ -30,6 +30,13 @@ use crate::{
 /// so a win rate at or below a half cannot be profitable. The ratio is `None` when either side is
 /// empty: a ratio with no losing trade has no denominator, and one with no winning trade has no
 /// numerator. A breakeven or missing PnL is neither a win nor a loss and is excluded from both.
+///
+/// The label is ambiguous in use, so the reported name carries the formula. "Win/loss ratio" also
+/// names the count ratio, the number of winners over the number of losers, which is a different
+/// quantity: it is the win rate restated, `wins / losses == p / (1 - p)` for a win rate `p`, and it
+/// says nothing about the size of a win or a loss. What is reported here is the ratio of averages,
+/// also published as the payoff ratio. A report that shows only the label cannot be told apart from
+/// the count ratio, which is why the name states which average is over which.
 #[repr(C)]
 #[derive(Debug, Clone)]
 #[cfg_attr(
@@ -44,7 +51,7 @@ pub struct WinLossRatio {}
 
 impl Display for WinLossRatio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Win/Loss Ratio")
+        f.write_str("Win/Loss Ratio (average winner over average loser)")
     }
 }
 
@@ -58,7 +65,7 @@ impl PortfolioStatistic for WinLossRatio {
     fn definition(&self) -> MetricDefinition {
         MetricDefinition::new(
             "win_loss_ratio",
-            "Win/Loss Ratio",
+            "Win/Loss Ratio (average winner over average loser)",
             MetricUnits::Ratio,
             MetricDirection::Maximize,
             [MetricInput::RealizedPnls],
@@ -165,7 +172,10 @@ mod tests {
     #[rstest]
     fn test_name_and_definition() {
         let statistic = WinLossRatio {};
-        assert_eq!(statistic.name(), "Win/Loss Ratio");
+        assert_eq!(
+            statistic.name(),
+            "Win/Loss Ratio (average winner over average loser)"
+        );
 
         let definition = statistic.definition();
         assert_eq!(definition.id(), "win_loss_ratio");
