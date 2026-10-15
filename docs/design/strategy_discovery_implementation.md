@@ -321,6 +321,13 @@ above are recorded with their evidence; and the baseline campaign reproduces.
 What must not start: any candidate language work, any metric work, any agent work. M1 is an inventory
 that produces evidence, not a survey that produces prose.
 
+M1's exit, and where each condition is met. Every row of Section 14 is fixture-proven or marked as
+needing an upstream change, and the states are counted there. The bundle validates and reports every
+criterion blocked, which `python/tests/acceptance/test_discovery_bundle.py` checks, including the
+negative cases that give the check teeth. The four decisions are recorded with their evidence in
+Section 14.1. And the baseline campaign reproduces, in the run and across separate processes. Nothing
+that M1 forbids was started: no candidate language, no metric, no agent.
+
 ## 8. M2: correctness
 
 Goal: prove the two prerequisites that make every later number meaningful. This milestone is the hard
@@ -564,20 +571,24 @@ status.
 | 22        | Acceptance evidence is a bundle, not an assertion                         | `FX-M1-3` | M1, M6    | Blocked |
 
 Criterion 22 appears against two milestones because it is satisfied twice: the skeleton and its
-validator exist at M1, and the completed bundle is verified at M6. `FX-M1-1` and `FX-M1-2` are the
-baseline campaign and the matrix fixtures of M1.
+validator exist at M1, and the completed bundle is verified at M6. `FX-M1-3` is that skeleton and its
+check, `python/tests/acceptance/discovery_acceptance_bundle.json` and
+`python/tests/acceptance/test_discovery_bundle.py`. `FX-M1-1` is the baseline campaign, which is the
+existing repeatability test over the bundled data, and `FX-M1-2` is the composition fixtures, which
+are `test_discovery_composition.py` and `test_discovery_engine_composition.py` in the integration
+tree.
 
 ## 16. Verification plan and commands
 
 What a reviewer or a maintainer runs, in the order that makes a failure informative.
 
-| Step                       | Command                                                                                                                                                                              | Establishes                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Unit tests for the package | `python/.venv/Scripts/python.exe -m pytest python/tests/unit/discovery -q`                                                                                                           | Module behaviour, schema refusals, compiler stages                |
-| Integration fixtures       | `python/.venv/Scripts/python.exe -m pytest python/tests/integration -q -k discovery`                                                                                                 | Composition points, timing, accounting, parity                    |
-| Bundle validation          | `python/.venv/Scripts/python.exe -m pytest python/tests/acceptance -q -k discovery_bundle`                                                                                           | The bundle is well formed, identities recompute, receipts resolve |
-| Reproducibility baseline   | The M1.6 campaign, run twice, with its result digest compared                                                                                                                        | That a run reproduces before anything is claimed of it            |
-| Document gates             | `scripts/check-markdown-tables.py`, `markdownlint-cli2 --config .markdownlint.jsonc`, `.pre-commit-hooks/check_docs_conventions.sh`, the character hooks, and the offline link check | That the documents are consistent. Not evidence about behaviour   |
+| Step                       | Command                                                                                                                                                                              | Establishes                                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit tests for the package | `python/.venv/Scripts/python.exe -m pytest python/tests/unit/discovery -q`                                                                                                           | Module behaviour, schema refusals, compiler stages                                                                                                                                                        |
+| Composition fixtures       | `python/.venv/Scripts/python.exe -m pytest python/tests/integration -q -k discovery`                                                                                                 | That each Section 14 row's entry point composes from Python, which is `test_discovery_composition.py` and `test_discovery_engine_composition.py` at present                                               |
+| Bundle validation          | `python/.venv/Scripts/python.exe -m pytest python/tests/acceptance -q -k discovery_bundle`                                                                                           | That the bundle is well formed against its schema and the two documents it is drawn from. `test_discovery_bundle.py` checks structure; identity recomputation and receipt resolution join it at M4 and M6 |
+| Reproducibility baseline   | `python/.venv/Scripts/python.exe -m pytest python/tests/integration/test_optimization.py::test_two_runs_of_one_study_produce_the_same_result_digest -q -s`, run twice                | That one study over the bundled data reproduces its result digest, in the run and across processes                                                                                                        |
+| Document gates             | `scripts/check-markdown-tables.py`, `markdownlint-cli2 --config .markdownlint.jsonc`, `.pre-commit-hooks/check_docs_conventions.sh`, the character hooks, and the offline link check | That the documents are consistent. Not evidence about behaviour                                                                                                                                           |
 
 The last row is listed so that it is not mistaken for the others. Document hygiene is a precondition
 for review, and it is not an entry in the bundle.
