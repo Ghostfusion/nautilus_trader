@@ -20,17 +20,33 @@ recorded rather than silently resolved. Section 3.1 maps each of its revised dec
 section that dispositions it, and names the requirements it adds and the one point it raises that
 this document does not settle.
 
+A separate review of this document, `purposal/feedback.md`, is treated as the fourth input. It is a
+review rather than a proposal, so it is not restated as requirements: Section 3.2 dispositions each
+of its findings, and the corrections it requires are applied in place.
+
 The companion implementation plan is not written. Section 16 carries the milestones it would
 expand, and Section 18 records what remains open.
 
-Revision note: second revision. The first revision read the two original proposal documents,
+Revision note: third revision. The first revision read the two original proposal documents,
 inventoried what this repository already provides against what they ask for, sourced the validation
 statistics from the primary literature rather than from the proposals' summaries, and decided the
-placement, boundaries, language, ledger, gates, and search. This revision reads the third document
-as the revised proposal and adopts its execution-timing contract (Section 8.5), its compiler
-responsibilities (Section 9.3), its lineage and trial-identity rules (Sections 8.4 and 10.5), its
-conditional admission gate (Section 7.4), and its milestone order (Section 16). Fifteen decisions
-are recorded in Section 17; five questions are left open in Section 18.
+placement, boundaries, language, ledger, gates, and search. The second read
+`purposal/research3.md` as the revised proposal and adopted its execution-timing contract
+(Section 8.5), its compiler responsibilities (Section 9.3), its lineage and trial-identity rules
+(Sections 8.4 and 10.5), its conditional admission gate (Section 7.4), and its milestone order
+(Section 16).
+
+This revision applies the review. It accepted the architecture and blocked implementation on six
+correctness and governance findings: holdout selection at campaign level, trial accounting that
+contradicts itself, an admission gate whose calculation is not yet executable, out-of-sample results
+shared between selection and validation, equity accounting that affects more than distribution
+capture, and a settlement deferral that remains unproven. The corrections land in invariants 6 to 8
+(Section 4), the statistical core (Section 7), the data roles and the ledger protocol (Sections 8.4
+and 8.6), the language and its runtime contracts (Section 9), the search and gate boundaries
+(Sections 10 and 11), the acceptance criteria (Section 15) and the milestones (Section 16). The
+review's answers to the four questions it settles are adopted in Section 18, three of them become
+decisions SD16 to SD18, and five existing decisions are amended. Eighteen decisions are recorded in
+Section 17.
 
 ## 1. Purpose and scope
 
@@ -93,10 +109,12 @@ Five consequences, each of which a later section makes concrete:
 
 ## 2. Method and evidence
 
-Three bodies of evidence were used, in this precedence order: this repository's code, tests, and
-stored artifacts; the primary sources of the statistics the gates rely on; and the three proposal
-documents, which are treated as requirements and not as facts. The third is the revision of the
-first two, and where it supersedes them, it is the requirement this document dispositions.
+Four bodies of evidence were used, in this precedence order: this repository's code, tests, and
+stored artifacts; the primary sources of the statistics the gates rely on; the three proposal
+documents, which are treated as requirements and not as facts; and a review of this document,
+`purposal/feedback.md`, which is treated as a design input whose findings are dispositioned in
+Section 3.2. The third proposal document is the revision of the first two, and where it supersedes
+them, it is the requirement this document dispositions.
 
 The repository was read directly. A capability is called present only where a symbol, test, or
 stored artifact was found; absence claims come from searches that returned nothing, and are
@@ -220,6 +238,47 @@ latency model or the decision-bridge projection from the compiler (Section 8.5),
 claim to have verified which is true. The check is carried in Section 18 and belongs to M2, before
 any candidate is searched.
 
+### 3.2 The design review, and where each of its findings is dispositioned
+
+`purposal/feedback.md` reviewed this document and reached a verdict the design accepts: keep the
+architecture and the separation of authority, and block implementation until six correctness and
+governance issues are resolved. Every finding it raised is dispositioned below. Adopted means the
+document changed; decided means a question this document had left open now has an answer; retained
+means the review confirmed a position and the document states its limits more precisely.
+
+| Finding                                                                    | Disposition                                                                                                                                                                                                   | Where                            |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| P0.1 the holdout can still select among candidates                         | Adopted: holdout custody becomes a campaign-level state machine, an exploratory split is distinguished from a confirmation set, and a replacement candidate needs newly reserved data                         | Sections 4, 11.3; SD7            |
+| P0.2 trial accounting contradicts itself                                   | Adopted: four separate counts replace one ambiguous counter, and a research-family lineage sits above individual campaigns                                                                                    | Sections 4, 8.3, 7.4, 10.5; SD6  |
+| P0.3 the admission calculation is not implementable                        | Adopted: the gate emits a feasibility assessment with its formula, inputs, assumptions, sensitivity and limits, and the inversion is implemented and tested before it is used                                 | Section 7.4; SD10                |
+| P0.4 selection and validation share out-of-sample results                  | Adopted: three data roles, with selection reading development results only                                                                                                                                    | Sections 8.6, 10.3, 11.1         |
+| P0.5 equity accounting affects more than distribution capture              | Adopted: the restriction widens to any equity return that includes distributions, the sequencing contradiction with M2 is removed, and the reconciliation test covers value and cash                          | Sections 11.1, 15, 16; SD12      |
+| P0.6 the settlement deferral remains unproven                              | Retained as a hard gate: unresolved until M2 tests both candidate mechanisms against the planted cases                                                                                                        | Sections 8.5, 16; SD15           |
+| P1.1 the ledger needs a precise definition of immutable                    | Adopted: a single authoritative writer, idempotency keys, registration states, verified receipts, and a stated threat model for the hash chain                                                                | Section 8.4; SD5                 |
+| P1.2 the run-identity join is unresolved                                   | Decided: a minimal verified run receipt from the existing runner, Rust-side verification if it cannot emit one, and no general binding                                                                        | Sections 8.4, 18; SD16           |
+| P1.3 regime aggregation should start as a derived artifact                 | Decided: a discovery-side slice over the authoritative return series with a point-in-time label and its digest, not a kernel API                                                                              | Sections 7.5, 18; SD17           |
+| P1.4 the interchange format should be postponed                            | Decided: repository-native digests for the first release, with an export adapter only when a consumer needs one                                                                                               | Section 18; SD18                 |
+| P1.5 the risk block conflates enforceable controls with evaluation metrics | Adopted: every risk field declares pre-trade, runtime or post-run, and the compiler refuses a field whose enforcement mechanism does not exist                                                                | Section 9.2                      |
+| P1.6 stop rules conflict with the prohibition on intraday logic            | Adopted: exits evaluate on eligible daily closes, an intraday stop is refused, and a gap crossing a threshold uses the declared execution model                                                               | Section 9.2                      |
+| P1.7 the feature runtime contract is missing                               | Adopted: a named feature-value contract, with a parity test between the offline research value and the decision-time value                                                                                    | Sections 8.3, 9.6                |
+| P1.8 the cross-sectional constructor is real new work                      | Adopted: a deterministic allocation function, specified over nine named decisions and tested in the compiler milestone                                                                                        | Section 9.7, 16                  |
+| P1.9 the no-wall-clock invariant is too broad                              | Adopted: the invariant narrows to candidate logic and to unrecorded clock reads                                                                                                                               | Section 4                        |
+| P1.10 the security tests verify imports rather than capabilities           | Adopted: workers run in a clean environment with an allowlist, and the import graph is evidence rather than proof                                                                                             | Section 12                       |
+| the statistical wording in sections 4.1 to 4.6                             | Adopted: a DSR input contract, an explicit rule for missing PBO results, stated permutation assumptions, a narrower refusal rationale for the reality check, Pareto's limits, and a broader calibration suite | Section 7                        |
+| the agent and search comments in sections 5.1 to 5.4                       | Adopted: a replaceable adapter, recorded leakage controls, mechanism-changing operators that carry a new hypothesis, and a search policy that names its own mutable fields                                    | Section 10                       |
+| the inventory comments in section 6                                        | Adopted: a status classification per capability, and an integration verification matrix as M1's deliverable                                                                                                   | Sections 6.1, 16                 |
+| the compiler comments in section 7                                         | Adopted: schema versioning, feature definitions inside the compiled identity, the ambiguity list, differential tests, and two identities                                                                      | Section 9                        |
+| the milestone comments in section 9                                        | Adopted: M1 proves its contracts with fixtures, M2 cannot declare equity readiness, M3 adds parity and allocation tests, M4 finishes the ledger and holdout rules before the gate                             | Section 16                       |
+| the operational comments in sections 10.1 to 10.5                          | Adopted: a formal inventory definition, a reproducibility envelope, a transition table, a cost-fidelity statement, and a stricter statement of what shadow proves                                             | Sections 8.3, 11.4, 11.5, 13, 15 |
+| the answers to the five open questions                                     | Adopted in Section 18: two resolved with a preferred design, one resolved for the first release, and two that stay blocking until M2 produces test evidence                                                   | Section 18                       |
+
+Three things the review did not change, and the document states them as confirmed rather than
+re-argued: strategies remain constrained data compiled by an interpreter; the authority to propose,
+execute, measure and approve stays separated, with agents on neither side of the metric; and no
+primitive already in the repository is reimplemented. The review's closing principle is adopted as
+the ordering rule for Section 16: nothing searches until the simulator's timestamps, portfolio
+accounting, statistical inventory and validation data boundaries are demonstrated to be correct.
+
 ## 4. Architectural invariants
 
 These are acceptance criteria that outrank feature completion. A workstream that delivers a
@@ -240,24 +299,38 @@ component while breaking one is rejected rather than merged with a follow-up.
 5. **Pre-registration outranks discovery.** Thresholds, risk constraints, cost models, benchmarks,
    universes, split layouts and holdout boundaries are fixed and versioned before a campaign runs,
    and the search cannot read or write them.
-6. **The trial inventory is complete.** Failed, invalid, duplicate and abandoned candidates remain
-   in the ledger and count toward the search's multiplicity. There is no reset that improves a
-   significance claim.
-7. **The holdout is touched once per candidate.** Its access is recorded; a candidate that has been
-   evaluated against it is retired whether it passed or failed, and cannot be retuned and
-   re-presented as independent.
+6. **The trial inventory is complete, and multiplicity is counted precisely.** Every proposal,
+   configuration and execution stays in the ledger, including refusals, duplicates, failures and
+   abandoned branches, and no reset improves a significance claim. Completeness is not the same as
+   multiplicity: the count that enters a statistical correction is derived from the inventory under
+   a declared rule and is not assumed equal to the proposal count, the distinct-configuration count
+   or the execution count (Section 10.5). Campaigns that continue one search over the same
+   observations are related by a research-family identity, so a new campaign does not silently
+   restore the statistical budget its predecessor spent (Section 7.4).
+7. **The holdout is a campaign-level resource, not a per-candidate one.** A candidate evaluated
+   against the confirmation set is retired whether it passed or failed. Beyond that, a campaign may
+   not use confirmation results to choose among candidates: one candidate is frozen before the set
+   is opened, it is evaluated once, and if it fails, a replacement requires newly reserved, genuinely
+   unseen data or a separately pre-registered protocol that accounts for the repeated testing. An
+   evaluation whose purpose is to help pick a winner is an exploratory result and is labelled as one
+   (Section 11.3).
 8. **Determinism where it is claimed.** Given the same data snapshot, specification, configuration,
    seed and engine binary, a run reproduces. Every source of randomness is a named model with a
-   seed, and no component reads a wall clock.
+   seed. Candidate logic cannot read the operating-system clock, and a historical replay runs on an
+   injected event clock. The orchestration and shadow infrastructure do observe real time, but only
+   through an explicit clock or data adapter, and what they observe becomes a recorded input rather
+   than hidden state; an agent invocation's timestamp is operational metadata and does not change
+   the result of a replay (Section 11.5).
 9. **Execution authority is absent, not disabled.** The discovery environment contains no broker
    adapter, no credential, and no order-submission path, and a test asserts the absence.
 10. **Nothing enters the kernel.** No crate under `crates/system`, `crates/backtest`,
     `crates/execution`, or `crates/trading` may depend on the discovery layer, and no discovery
     component may alter engine semantics.
 
-Invariants 1, 2 and 9 are the ones that most often erode under schedule pressure, because each has
-a plausible shortcut: recomputing a Sharpe ratio "just for ranking", writing a small bootstrap
-"because the existing one is awkward", and leaving a broker adapter installed "but disabled".
+Invariants 1, 2, 7 and 9 are the ones that most often erode under schedule pressure, because each
+has a plausible shortcut: recomputing a Sharpe ratio "just for ranking", writing a small bootstrap
+"because the existing one is awkward", evaluating three frozen candidates in turn "since the holdout
+is already open", and leaving a broker adapter installed "but disabled".
 
 ## 5. Feature boundaries: discovery, research, engine
 
@@ -327,6 +400,27 @@ the second is a trap that would silently invalidate every result the system prod
 | Signal, target and order vocabulary with sizing and reconciliation                                                                         | `crates/model/src/signal.rs`, `target.rs`, `crates/trading/src/target.rs`, `docs/concepts/target_pipeline.md`             | Opt-in, deterministic, clock-free, and already parity-tested                                                                               |
 | A decision-to-execution projection that already resolves a close-time artifact to the next session                                         | `python/nautilus_trader/decision_bridge/`, `docs/design/tradingagents_decision_bridge_implementation.md`                  | The pattern the discovery layer needs for R2, already implemented for one producer                                                         |
 
+That table answers what exists. It does not answer whether each item can be composed as this design
+needs it, and the review is right that the second question is the one that decides the work. Every
+capability is classified below, and the classification is a claim about evidence rather than about
+availability.
+
+| Status                                 | Capabilities                                                                                                                                                                                                                                                                               | What it means here                                                                                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Usable now, as documented              | Split contracts with purge, embargo and label overlap; walk-forward stages; the deflated Sharpe ratio and trial provenance; parameter search; the digest-keyed artifact store; the concurrency policy; the capability probes; declared execution assumptions; the canonical result digest  | The design composes these through their existing public surfaces, and an integration test exercises the composition rather than assuming it                               |
+| Usable after adapter work              | Point-in-time panels, features, labels, membership and cross-sectional operators; portfolio statistics and period frames; universes and corporate-action records; fill, fee, slippage, impact and latency models; signals, targets and reconciliation; the event store's run manifest      | A thin adapter under `discovery/` maps the design's contracts onto the existing API; the semantics stay with the existing component and are not restated anywhere         |
+| Blocked by a missing capability        | Dividend cash flows to the account; per-regime aggregation; a cross-sectional portfolio constructor; genome-level search; the candidate language and compiler; the unified ledger; the agent layer; the shadow service                                                                     | The design either builds it or excludes the claims that depend on it, and Section 6.2 states which is which                                                               |
+| Must be verified by an executable test | Rust-only measurement primitives reached from Python; the feature path's availability semantics; deferred settlement; cash accounting around corporate actions; idempotent registration across concurrent workers; the run-identity join; the stability of the engine's Python API surface | A symbol or a documentation sentence is not evidence, and each of these can invalidate a result silently, which is why M1 and M2 exit on tests rather than on inventories |
+
+The last row is what the review points at when it says that a feature compiler existing in Rust does
+not prove that a Python strategy interpreter can obtain the same values with the right timing, that a
+target reconciler existing does not prove cross-sectional construction, that a latency model existing
+does not prove deferred settlement, and that a digest-keyed store existing does not prove idempotent
+registration under concurrency. The deliverable that converts a claim in this table into evidence is
+the integration verification matrix in M1 (Section 16): one row per composition point, recording the
+capability needed, the public entry point, what a fixture proves, the semantics still missing, the
+adapter proposed, whether an upstream change is required, and the milestone that blocks on it.
+
 ### 6.2 Absent
 
 Searches that returned nothing, or returned only unrelated hits, establish the following absences.
@@ -354,6 +448,13 @@ Each is either work for this design or a deliberate refusal recorded in Section 
     platform's own D12 keeps portfolio construction optional rather than built.
 12. A shadow service: the mechanism exists, the service does not.
 
+One of those absences is a deliberate product decision rather than a gap to be closed. Fundamental
+data (item 8) is excluded from the first release because using today's fundamentals to construct a
+historical feature introduces a look-ahead path of its own, and the platform cannot yet represent
+publication and availability times, revisions, missing values or historical vintages. The exclusion
+is recorded in SD12, and it is why R1's fundamentals item is unscheduled rather than merely
+missing: it returns when the platform can represent when a number became knowable.
+
 ### 6.3 Where the proposals contradict the engine
 
 These are the corrections that change the design rather than merely shrink it.
@@ -368,6 +469,12 @@ These are the corrections that change the design rather than merely shrink it.
 | `research1.md` section 3: five agent roles, one model, structured outputs.                                                                                                            | There is no agent code in the package at all, and the official sibling project gives an agent one semantic action and no engine authority.                                                                                                                                                                                                     | The agent layer is genuinely new work and is the part with the least repo precedent, which is why Section 10 confines it to proposal and explanation.                                                                                                                                 |
 | `research2.md` section 12: a campaign budget of 500 to 1,000 candidates with four workers.                                                                                            | Nothing contradicts this mechanically; four isolated processes match the concurrency policy that exists.                                                                                                                                                                                                                                       | The budget contradicts the proposal's own statistical gate. See Section 7.4: with five years of daily data the literature's minimum-backtest-length relation allows tens of independent configurations, not hundreds, for a Sharpe ratio worth trusting.                              |
 | `research2.md` section 13: "Automated tests verify that live order submission is unavailable."                                                                                        | No such test exists, and the design of one is not obvious, because the live path and the backtest path share the execution stack.                                                                                                                                                                                                              | Section 12 specifies the test as a dependency-graph and capability assertion, with an explicit statement of what it cannot prove.                                                                                                                                                     |
+
+The adapter this design adds is small by construction, and its scope is translation and
+reconciliation: mapping a validated specification, a frozen policy, a data snapshot and an
+experiment identity onto the existing runner, and checking the returned receipt against the record.
+It owns no simulation semantics, and it introduces no second run identity and no parallel result
+type.
 
 ## 7. The statistical core of the gates
 
@@ -395,6 +502,28 @@ The permutation test in `python/nautilus_trader/optimization/permutation.py` res
 whole trades or in blocks, and reports the counted share including the real sequence, so a result
 that beats every rearrangement cannot report a p-value of exactly zero.
 
+Qualifying the permutation test, because "distribution-free" describes the null-generation scheme
+rather than the data. A permutation test is valid only if the shuffle produces outcomes that are
+exchangeable under the null it claims to test, and shuffling dependent financial returns or trades
+does not acquire that property merely by being nonparametric. Every permutation result therefore
+records the unit that was permuted, the null hypothesis being tested, the dependence structure the
+shuffle is intended to preserve, the reason for the chosen block or trade unit, and whether that
+choice is defensible for a candidate with overlapping holdings or a variable trade frequency. Until
+those are recorded the result is a supplementary diagnostic: it may corroborate a case, and it may
+not override a failed data-integrity, timing, cost or risk gate.
+
+The estimator also needs a stated contract with the trial inventory, and the review is right that it
+does not have one yet. The deflated Sharpe ratio is only as meaningful as the evidence behind it, so
+the gate states, for each candidate, which return series was supplied and at what frequency; which
+configurations are comparable because they share a frequency and an evaluation window; how an
+infrastructure failure that produced no usable return series is handled; how the effective trial
+count is estimated when candidates are correlated, and what happens when that estimate is uncertain;
+and which assumptions the reported bounds vary. Where provenance or comparability is missing, the
+gate returns `INCONCLUSIVE`, which is the honest status for a question the evidence cannot answer.
+A trial count that is too small overstates the best result, and treating every trivial mutation as an
+independent trial overstates the multiplicity, which is why trial identity and effective trial count
+are separate quantities (Section 10.5).
+
 ### 7.2 The probability of backtest overfitting: diagnosis, not gate
 
 The proposals name PBO as a gate. The procedure is implementable here: the repository already
@@ -420,9 +549,16 @@ Three findings argue against making it a gate at first.
    caution from the other direction.
 
 Decision: implement PBO as a reported diagnostic with its logit distribution, not as a gate, and
-only promote it to a gate after the gate itself has been calibrated on planted cases (Section 15).
-A number whose discriminating power has not been measured on this data should not be able to reject
-a candidate.
+promote it only after calibration on this data. A number whose discriminating power has not been
+measured here should not be able to reject a candidate. Two conditions travel with that decision.
+The implementation states how a candidate with missing or non-converged results is handled, because
+the completeness precondition means PBO may not silently drop inconvenient rows or compare candidates
+over incompatible periods: a candidate that cannot be placed on the common index is reported as
+excluded with its reason, rather than omitted. And calibration on planted noise is necessary but not
+sufficient. Rejecting random specifications shows the diagnostic is not indiscriminate; it does not
+show that it can separate a realistic false discovery from a real but weak strategy, so the
+calibration suite of Section 15 also carries positive, leakage, cost, concentration, parameter-spike
+and accounting controls, and reports which controls the diagnostic failed to detect.
 
 ### 7.3 The reality check and the superior-predictive-ability test: refused
 
@@ -439,6 +575,15 @@ length. Two specific findings make them a poor fit here:
   states that recursively estimated parameters are not accommodated, which is precisely what a
   walk-forward search does.
 
+The refusal is narrower than "these tests never apply to a search like this", and the review is right
+to press on that. Whether a walk-forward search violates the tests' assumptions depends on the
+loss-differential series, the data-generating assumptions, the bootstrap design, and whether model
+parameters are estimated recursively. A search that declares none of those is not automatically
+disqualified by them; it is unanalysed. The reason these tests are not implemented in the first
+release is the simpler one: the pre-registered acceptance contract does not require them, and adding
+them would introduce a statistical implementation and a calibration burden without a defined decision
+for them to support.
+
 If a benchmark-relative test is wanted, the honest version is the studentized form with a declared
 block length, and its result must be reported with the block length rather than as a bare p-value.
 The cheaper substitute adopted here is Section 7.5: report the trial count, the dispersion, and the
@@ -452,12 +597,14 @@ log N, so a search over enough configurations will find a large Sharpe ratio in 
 all. The published worked example states that with five years of data, no more than 45 independent
 configurations should be tried.
 
-This connects to a second, harder constraint the proposals do not mention. A weekly-rebalanced
-equity portfolio over five years contains about 260 rebalances, and the effective number of
-independent observations is smaller still once overlapping holdings and correlated names are
-considered, which the proposals themselves flag under "overlapping positions and correlated
-holdings". A campaign that evaluates 1,000 candidates against such a sample has already, by
-construction, spent its statistical power before any candidate is selected.
+This connects to a second, harder constraint the proposals do not mention. A five-year sample of a
+weekly-rebalanced portfolio contains about 260 rebalances, and those observations are dependent, so
+the effective sample for a Sharpe ratio is smaller than the number of bars, of rebalances or of
+trades. The review is right that the rebalance count is not itself the effective sample size: the
+correct number depends on the return series being evaluated and on its dependence structure, which is
+why the gate has to estimate it from the series rather than apply a counting rule. The consequence
+stands either way: a campaign that evaluates 1,000 candidates against a sample of this size has spent
+its statistical power before any candidate is selected.
 
 The pre-campaign admission test follows directly, and inverts the proposals' framing: the campaign's
 candidate budget is an output of the data, not an input to it. Before a campaign runs, the policy
@@ -480,28 +627,58 @@ requires the gate to compute its own ceiling from declared inputs, at least thes
 | Required validation folds, embargo, and the final holdout allocation       | Every fold and every embargoed observation consumes sample that would otherwise count toward the ceiling                     |
 | Acceptance thresholds, the target effect size, and trials already consumed | A stricter threshold needs more power, and earlier campaigns have already spent trials against the same data                 |
 
-The gate returns one of three outcomes, and the middle one matters as much as the other two.
+The gate returns one of three outcomes, and it is a feasibility assessment rather than a promise that
+a given number of configurations is safe.
 
-| Outcome  | Meaning                                                                                        |
-| -------- | ---------------------------------------------------------------------------------------------- |
-| `ADMIT`  | The proposed plan fits the declared statistical protocol and the campaign may open             |
-| `REDUCE` | The search space or the trial allocation must be narrowed before the campaign opens            |
-| `REJECT` | The available data cannot support the proposed search and validation claims, at any allocation |
+| Outcome  | Meaning                                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------------------------ |
+| `ADMIT`  | The proposed plan's claims fit what the declared statistical protocol can support, and the campaign may open |
+| `REDUCE` | The search space or the trial allocation must be narrowed before the campaign opens                          |
+| `REJECT` | The available data cannot support the proposed search and validation claims, at any allocation               |
 
-An admitted search may optimise within its ceiling. It may not raise it, and the three routes the
-revised proposal names are closed by construction: the accounting policy is frozen and digest-pinned
-(SD7), trial identity is derived from the ledger rather than declared by a caller (SD6), and a new
-branch is a new campaign with its own inventory that inherits nothing (Section 11.4). The gate
-answers before the first backtest runs, because the question is whether the sample can support the
-claim, and that question does not need a result.
+Every decision carries its arithmetic rather than a status alone, and the review's list of what the
+gate must emit is adopted as the minimum report:
+
+- The formula and its version, with the identity of the implementation that computed it.
+- Every input with its provenance, distinguishing what came from the data snapshot from what the
+  policy declared.
+- The assumptions, with a sensitivity range for each input that could move the outcome.
+- The raw executed configuration count, and an estimated effective trial count where the method
+  supports estimating one.
+- The sample-size and power limitations the assessment ran into.
+- The reason for the outcome, in terms of those numbers rather than in prose.
+- A statement of which statistical claims the assessment can and cannot support, so a later reader
+  is not left to infer it from a status.
+
+Becoming usable needs more than those fields, and this is the least finished part of the design.
+Before the gate may refuse a campaign it has to define the claim it protects: the return sampling
+frequency used for the Sharpe estimate; the target effect size together with its significance and
+power assumptions; the sample-length definition and how serial dependence is treated; the effective
+trial-count model and its assumptions; the distinction between candidate configurations and
+statistically independent trials; the treatment of validation folds, the confirmation set and data
+already consumed by earlier campaigns; and what happens when these cannot be estimated reliably,
+which is a `REJECT` rather than a guess. The published minimum-backtest-length relation is a
+reference case, not the implementation: if it is used, its inversion is implemented and tested under
+its own assumptions first, and its output is not combined with an independently estimated effective
+sample size and then presented as a hard universal ceiling.
+
+An admitted search may optimise within its ceiling. It may not raise it, and the review's point about
+branch inheritance is adopted in both directions. The accounting policy is frozen and digest-pinned
+(SD7), trial identity and dependence come from the ledger through the existing significance surfaces
+(SD6), and a branch or a follow-on campaign is a new immutable inventory that inherits no artifacts.
+It does not follow that the budget resets: campaigns continuing one search over the same observations
+belong to one research family, and the statistical policy decides whether their trials enter the same
+selection process, so a successor campaign carries what its predecessor spent against the same data
+rather than starting clean (Section 10.5). The gate answers before the first backtest runs, because
+the question is whether the sample can support the claim, and that question does not need a result.
 
 One consequence is worth stating as a rule rather than leaving it implicit: a proposed genome is not
-an independent backtest. The three levels the revised proposal distinguishes are kept separate. A
-candidate proposal has consumed no observations and is not a trial. A compiled configuration is
-identified and past the validator but is not yet a trial. Only an executed experiment that produced
-a result counts toward the ceiling; a proposal that never compiled and a duplicate recognised before
-execution are recorded without counting, and Section 10.5 states that choice openly because a reader
-could reasonably ask for refusals to count.
+an independent backtest, and the four counts of Section 10.5 exist because of it. A proposal has
+consumed no observations and is not a trial. A compiled configuration is identified but is not yet a
+trial. Only an executed experiment counts as an execution, and only a configuration that entered the
+selection process counts as a statistical trial, under a declared rule for failures, duplicates and
+dependence. The count that reaches the deflation reported in Section 7.5 is the statistical count,
+never the proposal count.
 
 This is also the point at which the proposals' own hedging becomes load-bearing. `research2.md`
 states that the Deflated Sharpe Ratio and the probability of backtest overfitting "are useful
@@ -515,24 +692,33 @@ search, not the market.
 For each candidate that reaches the statistical gate, the evidence package contains, computed by
 existing code:
 
-| Reported quantity                                                              | Source                                                                 | Why it is here                                                                               |
-| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Per-period Sharpe ratio, with the frequency declared                           | `per_period_sharpe`, `StatisticalContract`                             | An annualised input is refused at the boundary; the declaration travels with the number      |
-| Return moments: skewness and non-excess kurtosis                               | `return_moments`                                                       | Inputs to the deflation, and a cheap summary of tail shape                                   |
-| Trial count from the recorded inventory, and its declared dependence           | `trial_provenance_from_runs`, `TrialDependence`                        | The multiplicity a result must be read against, derived rather than asserted                 |
-| Cross-trial dispersion of the trial Sharpe ratios                              | The trial inventory                                                    | The scale of the expected maximum                                                            |
-| Deflated Sharpe ratio and its bounds at declared specification extremes        | `deflated_sharpe_ratio`, `deflated_sharpe_bounds`                      | The headline adjusted result, with the sensitivity of the adjustment to the specification    |
-| Minimum backtest length implied by the trial count                             | Computed in the policy, from the published relation                    | States, in years, what the search has spent                                                  |
-| Permutation p-value on the outcome sequence, with the shuffle unit named       | `permutation_test`                                                     | A distribution-free check that does not depend on a normality assumption                     |
-| Information coefficient and its bounds, where the candidate is cross-sectional | `crates/research/src/measurement.rs`, `information_coefficient_bounds` | A signal-level measurement independent of portfolio construction                             |
-| Performance sliced by regime and by period                                     | `PerformancePeriodReducer` and a regime slice over the decision record | The concentration check, and the honest limit that per-regime aggregation does not exist yet |
-| Probability of backtest overfitting, with its logit distribution               | New, but built on existing per-trial series                            | Diagnostic only, per Section 7.2                                                             |
+| Reported quantity                                                              | Source                                                                 | Why it is here                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Per-period Sharpe ratio, with the frequency declared                           | `per_period_sharpe`, `StatisticalContract`                             | An annualised input is refused at the boundary; the declaration travels with the number                                                                                                                                                                                                                                              |
+| Return moments: skewness and non-excess kurtosis                               | `return_moments`                                                       | Inputs to the deflation, and a cheap summary of tail shape                                                                                                                                                                                                                                                                           |
+| Trial count from the recorded inventory, and its declared dependence           | `trial_provenance_from_runs`, `TrialDependence`                        | The multiplicity a result must be read against, derived rather than asserted                                                                                                                                                                                                                                                         |
+| Cross-trial dispersion of the trial Sharpe ratios                              | The trial inventory                                                    | The scale of the expected maximum                                                                                                                                                                                                                                                                                                    |
+| Deflated Sharpe ratio and its bounds at declared specification extremes        | `deflated_sharpe_ratio`, `deflated_sharpe_bounds`                      | The headline adjusted result, with the sensitivity of the adjustment to the specification                                                                                                                                                                                                                                            |
+| Minimum backtest length implied by the trial count                             | Computed in the policy, from the published relation                    | States, in years, what the search has spent                                                                                                                                                                                                                                                                                          |
+| Permutation p-value on the outcome sequence, with the shuffle unit named       | `permutation_test`                                                     | A supplementary diagnostic whose validity depends on the shuffle scheme it declares, not a claim of distribution-freedom (Section 7.1)                                                                                                                                                                                               |
+| Information coefficient and its bounds, where the candidate is cross-sectional | `crates/research/src/measurement.rs`, `information_coefficient_bounds` | A signal-level measurement independent of portfolio construction                                                                                                                                                                                                                                                                     |
+| Performance sliced by regime and by period                                     | `PerformancePeriodReducer` and a regime slice over the decision record | The concentration check. Period frames come from the analysis crate; the regime slice is built in discovery over the authoritative return series with a registered point-in-time label, its definition digest stored beside the result, and the slice reported as a diagnostic rather than as additional independent evidence (SD17) |
+| Probability of backtest overfitting, with its logit distribution               | New, but built on existing per-trial series                            | Diagnostic only, per Section 7.2                                                                                                                                                                                                                                                                                                     |
 
 Nothing in this table is a composite score. The proposals ask for multiple objectives and explicitly
 warn against collapsing them into one opaque number whose weights the agent could manipulate. The
 design agrees, and carries it further: the objectives are reported side by side, with Pareto
 dominance deciding what survives evolution, and the gate deciding what may advance. Weights, where
 they exist at all, live in the pre-registered policy where an agent cannot reach them.
+
+Two clarifications the review requires. Pareto selection makes trade-offs visible and preserves
+diversity; it does not correct for multiple testing, protect a confirmation set, or establish an
+edge, and no part of the design may present it as doing any of those things. And the objective list
+must be exact rather than evocative: "net risk-adjusted return" is ambiguous enough to become a
+composite in disguise, so each objective is named as a specific metric with its sampling convention
+stated, the same discipline the reported quantities above follow. Whether an objective is computed on
+development data or on locked evaluation data decides whether selection may see it at all
+(Section 8.6).
 
 ### 7.6 What could not be verified
 
@@ -618,19 +804,39 @@ stored inputs.
 
 ### 8.3 Data contracts
 
-| Contract                | Contents                                                                                                                                                       | Identity                                                                    |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Candidate specification | Family, hypothesis, universe, data, features, entry, exit, portfolio, rebalance, risk, evaluation, provenance                                                  | Digest of canonical JSON, plus the schema version                           |
-| Compiled candidate      | The specification, the compiler version, the engine and crate versions, the resolved configuration                                                             | Digest of the specification and compiler version together                   |
-| Experiment record       | Candidate digest, data snapshot digest, split contract digest, seed, engine version, status, artifact locations                                                | The existing trial identity, so a trial is identified as a trial already is |
-| Evidence package        | Every reported quantity with the contract it was computed under, the gate verdicts, the trial inventory reference, and the provenance of any agent involvement | Digest over the package's content                                           |
-| Promotion record        | Policy version, gate outcomes, the human decision and its timestamp                                                                                            | Digest, plus the policy digest it was judged under                          |
-| Trial record            | One row per executed experiment, including failures                                                                                                            | Digest; duplicates recorded but counted once for multiplicity               |
+| Contract                | Contents                                                                                                                                                                                         | Identity                                                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Candidate specification | Family, hypothesis, universe, data, features, entry, exit, portfolio, rebalance, risk, evaluation, provenance                                                                                    | Digest of canonical JSON, plus the schema version                                                                                          |
+| Compiled candidate      | The specification, the compiler version, the resolved feature definitions with their producer versions, the engine and crate versions, the resolved configuration, and the execution assumptions | The behavioural identity: a digest over those resolved inputs, deliberately distinct from the specification digest (SD3)                   |
+| Execution receipt       | The engine run identity, the canonical manifest digest, the binary or build identity, the configuration digest, the seed, and an artifact reference                                              | Issued by the runner and verified against the authoritative manifest, so the ledger references engine history instead of copying it (SD16) |
+| Experiment record       | Candidate digest, data snapshot digest, split contract digest, seed, engine version, status, artifact locations                                                                                  | The existing trial identity, so a trial is identified as a trial already is                                                                |
+| Evidence package        | Every reported quantity with the contract it was computed under, the gate verdicts, the trial inventory reference, and the provenance of any agent involvement                                   | Digest over the package's content                                                                                                          |
+| Promotion record        | Policy version, gate outcomes, the human decision and its timestamp                                                                                                                              | Digest, plus the policy digest it was judged under                                                                                         |
+| Trial record            | One row per executed experiment, including failures                                                                                                                                              | Digest; duplicates recorded but counted once for multiplicity                                                                              |
 
 Every contract follows rules the repository already applies: corrections are new records that cite
 the record they supersede rather than edits; a number names the contract it was computed under, as
 `StatisticalContract` already requires; and identity is content, so two runs that produced the same
 specification are comparable by digest without reading either run.
+
+Two contracts are not in the table because they are counts rather than artifacts, and the review is
+right that they have to be defined precisely rather than inferred (Section 10.5). The ledger
+maintains `proposal_attempt_count` over every proposal including refusals,
+`unique_configuration_count` over distinct configurations under the pre-registered equivalence rule,
+`executed_experiment_count` over actual backtest executions including failures and timeouts, and
+`statistical_trial_count` over the configurations that entered the selection process, under a
+declared rule for failures, duplicates and dependence. The last is the input to the deflation and is
+never assumed equal to any of the other three.
+
+The reproducibility envelope is a contract as well, and it is what "every number recomputes" means
+operationally (Section 15). A recomputation needs the raw or normalised input snapshot and its
+digest; the point-in-time feature definitions and their versions; the specification and the compiled
+plan; the engine binary or build identity and its configuration; the seed and every stochastic model
+parameter; the cost, fill, latency and corporate-action policies; the split and confirmation-set
+definitions; the analysis implementation and statistical contract versions; and any external
+artifact the output depends on. A digest proves an artifact's identity, not its availability, so
+every reference the envelope names must resolve to content that was retained and verified, and the
+evidence package is not complete until it does.
 
 ### 8.4 The ledger, and why it is not a database
 
@@ -670,17 +876,48 @@ applies to its own artifacts.
 
 Four properties are required of that layer, and three of them are not designed in any detail here.
 
-| Property                               | Why it is required                                                                                          | State                                                                                                                                     |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| A deterministic input manifest         | Two runs with the same manifest must be recognisable as the same experiment without reading either result   | Identity exists (`StudyIdentity`, `TrialIdentity`, `TrialProvenance`); the manifest joining an engine run to a research artifact does not |
-| Parent-child lineage                   | A mutated candidate's ancestry is part of its evidence, and an orphan cannot be interpreted                 | Specified for candidates (Section 10.3), not yet specified as a stored relation                                                           |
-| Idempotent submission and registration | A resubmitted job and a duplicated result must be recognised rather than counted twice                      | Not designed; it is what would make the duplicate rule of Section 10.5 mechanical rather than procedural                                  |
-| Reconciliation between the two stores  | An engine run manifest and the research artifact describing the same run must be checked against each other | Not designed; it is the join's only defence against the two stores drifting apart                                                         |
+| Property                               | Why it is required                                                                                          | State                                                                                                                                                                |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A deterministic input manifest         | Two runs with the same manifest must be recognisable as the same experiment without reading either result   | Identity exists (`StudyIdentity`, `TrialIdentity`, `TrialProvenance`); the manifest joining one engine run to one research artifact is built from the receipt (SD16) |
+| Parent-child lineage                   | A mutated candidate's ancestry is part of its evidence, and an orphan cannot be interpreted                 | Specified for candidates (Section 10.3), and stored as a relation in the campaign record                                                                             |
+| Idempotent submission and registration | A resubmitted job and a duplicated result must be recognised rather than counted twice                      | Specified below as the registration protocol, and an acceptance requirement of the ledger (Section 15)                                                               |
+| Reconciliation between the two stores  | An engine run manifest and the research artifact describing the same run must be checked against each other | Specified below; it fails closed, and its test alters the seed, binary identity or configuration digest on the research side and requires the check to fail          |
 
 The reconciliation check is the one that earns the layer its place, because it is the check that
 would catch a research record citing a run that never happened, or a run whose binary, configuration
 or seed differs from the artifact that claims it. It is also the check that pays for itself slowly:
 it does nothing until the two stores disagree, and then it is the only thing that notices.
+
+The registration protocol is specified here rather than left to implementation, because
+"append-only", "hash-chained" and "concurrent" are three claims that have to be reconciled before any
+of them can be relied on.
+
+- **One authoritative writer.** The orchestrator owns every append to a campaign's trial inventory.
+  Workers write immutable result artifacts to their own locations and return a receipt; they never
+  append to the authoritative chain. That is what makes append-only true of the inventory rather
+  than merely true of a file format.
+- **A stable idempotency key.** Each job carries a key derived from its declared inputs, so a
+  resubmission is recognisable without comparing results.
+- **Registration is a state transition.** Pending, running, completed, failed and
+  registration-reconciled are explicit states, each with one permitted writer and one required set
+  of evidence on entry.
+- **Nothing is counted before it verifies.** A result enters the inventory only once its artifact
+  exists, its digest verifies, and its run identity reconciles against the receipt. An unverified
+  result is recorded and not counted.
+- **An interrupted registration is replayable.** Recovery repeats the registration step against the
+  same idempotency key and yields one statistical trial rather than two.
+- **A duplicate execution is a distinct execution event.** It keeps the canonical configuration
+  identity, so the execution count and the configuration count differ by design rather than by
+  accident.
+
+What the hash chain is, and is not: it makes a deletion, an insertion or a reordering detectable when
+a record is verified against a checkpoint held elsewhere, and it offers nothing against an actor who
+holds write access and recomputes the chain from the start. The design therefore relies on it to
+detect accidental or partial damage, and on the writer protocol, the digest discipline of the stores,
+and a checkpoint outside the write path for anything stronger. Section 12 draws the boundary in the
+same terms: a local control, not a security guarantee. Those statements are the acceptance
+requirements for the ledger protocol, and neither idempotency nor reconciliation is optional detail
+to be deferred.
 
 The honest limitation: the event store has no Python binding, so today a research record can cite a
 run identity and its manifest hashes only if the runner surfaces them. If a stronger join is
@@ -781,6 +1018,36 @@ already has for bar ambiguity, intrabar path, trigger precedence, trigger fill a
 number whose timing assumptions are missing is not evidence, which is the rule
 `optimization/assumptions.py` already states for its own domain.
 
+### 8.6 Data roles: development, locked validation, and confirmation
+
+A walk-forward split does not by itself make a result independent of a search that repeatedly
+observes and optimises it, and the review is right that this design left that boundary implicit. The
+gates can only mean what they claim if the search cannot see the data they judge with, so three roles
+are defined and every result in the ledger carries one.
+
+| Role               | Who may read it                                                        | What it is for                                                                                         |
+| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Development        | The search, the agents, and the gate service                           | Candidate generation, mutation and recombination, and the selection that decides which genomes survive |
+| Locked validation  | The validation service, after the candidate or candidate set is frozen | The walk-forward gate, and the statistical assessment of a frozen configuration                        |
+| Final confirmation | The validator entry point, once per campaign, for one frozen candidate | The single holdout evaluation a promotion decision may cite as independent evidence                    |
+
+The rule that makes the classification meaningful is about feedback rather than about access lists: a
+result whose value influenced the next mutation is development data, whatever split it came from. An
+out-of-sample fold that the evolutionary loop observes and optimises against is development data in
+all but name, and it cannot afterwards be presented as independent evidence for the winner.
+
+Two consequences are binding. Evolutionary selection, including the Pareto objectives of
+Section 10.3, reads development results only, and locked validation and confirmation results are
+produced only after the candidate set is frozen. And a candidate may still be evaluated across
+several folds inside development, which is a nested walk-forward design; what may not be ambiguous is
+which inner results are search-visible and which outer results stay untouched until the search they
+judge has finished.
+
+The mechanism is a declared role on every result rather than a convention, so the ledger records it
+and the gate refuses a result whose role does not match the stage that asked for it. The test that
+makes this observable is specified in Section 15: a search is deliberately tuned to maximise a noisy
+development metric, and the locked validation metric must never be readable by the selection step.
+
 ## 9. The candidate language and compiler
 
 ### 9.1 Why a candidate is data
@@ -804,26 +1071,44 @@ records this as unproven rather than established.
 The language is closed. Each block below is validated before anything executes, with the bounds
 stated in the pre-registered policy rather than in the candidate.
 
-| Block      | Allowed content                                                                                                     | Bound or refusal                                                                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Identity   | Family name, hypothesis statement, mechanism, falsification statement                                               | Family must be a member of the declared set; the three statements are required, free text, and recorded verbatim                       |
-| Universe   | Asset classes, membership policy, price and dollar-volume floors, exclusions                                        | Membership policy must be point-in-time; floors are bounded by policy; unknown asset classes refused                                   |
-| Data       | Signal frequency, decision time, execution eligibility, corporate-action treatment                                  | Decision time and eligibility are required; only declared values are accepted; adjustment treatment must be one the catalog can honour |
-| Features   | References to registered feature definitions with declared lookbacks and skips                                      | A feature must exist in the registry; lookbacks are bounded; a candidate may not define a new feature                                  |
-| Selection  | Cross-sectional rank, absolute threshold, or no selection, with the ranking feature and a percentile or count bound | Percentiles bounded; the ranking feature must be registered; ties must have a declared rule                                            |
-| Entry      | Direction and conditions over registered features with bounded comparison operators                                 | Long only in the first release; operator set closed; condition count capped                                                            |
-| Exit       | Holding-period cap, rank-based exit, stop and target in price terms, explicit flatten rules                         | Caps bounded; stop semantics must declare whether they are evaluated intraday or at a close, and are refused otherwise                 |
-| Portfolio  | Position count cap, weighting method, per-position and per-sector caps, cash policy                                 | Weighting must be one of the declared methods; caps bounded by the risk policy and never above it                                      |
-| Rebalance  | Frequency and timing relative to the decision time                                                                  | Frequency from a declared set; timing must be consistent with execution eligibility                                                    |
-| Risk       | Position and portfolio loss limits, gap stress requirement                                                          | Every risk limit is intersected with, never substituted for, the engine's own risk configuration                                       |
-| Evaluation | Benchmark reference, cost model reference, validation policy reference                                              | References must resolve to frozen, digest-pinned objects; an inline threshold is refused                                               |
-| Provenance | Parent candidate identifiers, generator identity, seed                                                              | Parents must exist in the ledger; the generator is recorded, never trusted                                                             |
+| Block      | Allowed content                                                                                                     | Bound or refusal                                                                                                                                                                                                                                                   |
+| ---------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Identity   | Family name, hypothesis statement, mechanism, falsification statement                                               | Family must be a member of the declared set; the three statements are required, free text, and recorded verbatim                                                                                                                                                   |
+| Universe   | Asset classes, membership policy, price and dollar-volume floors, exclusions                                        | Membership policy must be point-in-time; floors are bounded by policy; unknown asset classes refused                                                                                                                                                               |
+| Data       | Signal frequency, decision time, execution eligibility, corporate-action treatment                                  | Decision time and eligibility are required; only declared values are accepted; adjustment treatment must be one the catalog can honour                                                                                                                             |
+| Features   | References to registered feature definitions with declared lookbacks and skips                                      | A feature must exist in the registry; lookbacks are bounded; a candidate may not define a new feature                                                                                                                                                              |
+| Selection  | Cross-sectional rank, absolute threshold, or no selection, with the ranking feature and a percentile or count bound | Percentiles bounded; the ranking feature must be registered; ties must have a declared rule                                                                                                                                                                        |
+| Entry      | Direction and conditions over registered features with bounded comparison operators                                 | Long only in the first release; operator set closed; condition count capped                                                                                                                                                                                        |
+| Exit       | Holding-period cap, rank-based exit, stop and target evaluated on an eligible close, explicit flatten rules         | Caps bounded; an exit that requires knowing the intraday path of a daily bar is refused, and a threshold crossed by an opening gap is handled by the declared execution model rather than assumed to fill at the threshold                                         |
+| Portfolio  | Position count cap, weighting method, per-position and per-sector caps, cash policy                                 | Weighting must be one of the declared methods; caps bounded by the risk policy and never above it                                                                                                                                                                  |
+| Rebalance  | Frequency and timing relative to the decision time                                                                  | Frequency from a declared set; timing must be consistent with execution eligibility                                                                                                                                                                                |
+| Risk       | Pre-trade constraints, runtime controls and post-run acceptance limits, each labelled as such                       | Every risk field declares which of the three categories it belongs to; the compiler refuses a field whose promised enforcement mechanism does not exist, and every runtime control is intersected with, never substituted for, the engine's own risk configuration |
+| Evaluation | Benchmark reference, cost model reference, validation policy reference                                              | References must resolve to frozen, digest-pinned objects; an inline threshold is refused                                                                                                                                                                           |
+| Provenance | Parent candidate identifiers, generator identity, seed                                                              | Parents must exist in the ledger; the generator is recorded, never trusted                                                                                                                                                                                         |
 
 Two refusals deserve naming because they are what makes the language safe rather than merely
 narrow. A candidate cannot state an absolute significance threshold, a benchmark return, or a cost
 assumption, because those live in the policy where the search cannot reach them. And a candidate
 cannot define a feature, because a feature defined by the thing being tested is a degree of freedom
 that the trial inventory would not see.
+
+A third refusal follows from the review and deserves its own paragraph, because it is the one most
+likely to create false assurance. The risk block is split by when a control acts, not by the name of
+the quantity.
+
+| Category                  | Examples                                                                          | What it means here                                                                                                                         |
+| ------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Pre-trade constraint      | Position weight cap, gross exposure cap, sector concentration cap, portfolio size | Enforced before targets are emitted or orders are reconciled, by the allocation function of Section 9.7                                    |
+| Runtime risk control      | Stop, flatten, reduce exposure, halt new entries                                  | Event-driven behaviour with a declared evaluation time and precedence, applied at an eligible close unless a declared model says otherwise |
+| Post-run acceptance limit | Maximum drawdown, tail loss, turnover, realised cost                              | Evaluated by the gate once the observations exist: a candidate acceptance criterion, never a promise that the limit cannot be breached     |
+
+A field named `max_portfolio_drawdown` does not control drawdown. The repository measures drawdown
+after a run, so a limit on it is a gate condition, and a specification presenting it as a runtime
+control is refused. The same asymmetry applies to stops: a stop is not a guaranteed loss ceiling,
+because a gap can cross it and the fill that follows is the fill model's. Section 9.5 already refuses
+intraday intrabar logic in the first release, so stop semantics are close-evaluated ones, and what
+happens to a threshold the market gaps past is described by the execution-assumptions vocabulary of
+`optimization/assumptions.py` rather than by a second set of fill assumptions invented here.
 
 ### 9.3 Compilation
 
@@ -832,11 +1117,21 @@ they make its contract checkable rather than implied. A compilation is a pipelin
 is a set of refusals.
 
 1. **Schema validation.** Are the specification's fields, types, operators and parameter values well
-   formed, and inside the bounds the policy declares?
-2. **Feature resolution.** Does every referenced feature exist in the registry, and are its producer
-   and its availability timestamp known, so that stage 4 has something to check against?
-3. **Semantic validation.** Are ranking, tie-breaking, missing-value handling, rebalance, exit and
-   portfolio constraints unambiguous, with no rule that silently takes precedence over another?
+   formed, and inside the bounds the policy declares? The schema is versioned, and a specification
+   written against an older version is migrated explicitly or refused: it never silently acquires
+   different behaviour because the interpreter later changed what a field means.
+2. **Feature resolution.** Does every referenced feature exist in the registry, and are its producer,
+   its definition digest and its availability timestamp known, so stage 4 has something to check
+   against? The resolved definitions and their versions become part of the compiled artifact's
+   behavioural identity (SD3), so a candidate referring to a feature whose definition later changes
+   its return convention is not the same candidate.
+3. **Semantic validation.** Are the interactions between blocks unambiguous? The list is explicit
+   because each pair has a plausible silent precedence: entry against exit, holding-period cap
+   against rebalance frequency, position caps against portfolio caps, missing data against ranking
+   eligibility, risk caps against target weights, rebalance against existing positions, corporate
+   actions against outstanding targets, and stop or target rules against what a daily bar can
+   establish. An interaction the language does not resolve is refused, rather than resolved by
+   whichever code path happens to run first.
 4. **Temporal validation.** Can every input be known at the declared decision time, and is every
    simulated fill eligible only after that time?
 5. **Trusted compilation.** Translate an accepted specification into the restricted executor
@@ -877,6 +1172,15 @@ behaviour that was tested. What it costs: an interpreter is a single point of fa
 candidate, so its own test coverage has to be strong enough that a candidate's failure can never be
 attributed to it (Section 15).
 
+That coverage is specified rather than asserted, because one defect in the interpreter affects every
+candidate and presents itself as a strategy result. The reference set is a group of hand-written
+strategies whose behaviour is independently specified as a fixture: a ranking strategy, a threshold
+strategy, a holding-period exit, a rebalance schedule, a target allocation, a strategy with no
+eligible instruments, and a strategy that encounters a split or an opening gap. For each, the
+interpreted strategy's signals, targets, timing and results are compared against the fixture. A test
+showing that a candidate compiled and completed is not evidence about the interpreter, and neither is
+the compiler's own error vocabulary.
+
 ### 9.4 Bounds, complexity, and duplicates
 
 - Parameter bounds come from the policy, per parameter, as inclusive ranges or enumerated choices.
@@ -888,6 +1192,12 @@ attributed to it (Section 15).
   equivalent condition list is recognised as the same candidate. A duplicate is recorded and does
   not consume a trial, which is a definitional choice with a bias consequence that Section 10.5
   states openly.
+- Two identities are kept, and neither substitutes for the other: the *specification* identity, a
+  canonical digest of what was submitted, and the *behavioural* identity, a digest of the compiled
+  plan including the resolved feature definitions, the policy, the engine version and the execution
+  assumptions. Equivalence between candidates is decided by a pre-registered semantic rule and never
+  by observed performance: two different strategies can produce identical returns on a finite sample,
+  and merging them on that basis would erase a trial that happened.
 
 ### 9.5 What the language cannot express
 
@@ -896,6 +1206,63 @@ source than the declared snapshot, no shorting in the first release, no options,
 intrabar logic, no fundamental or news input, no distribution capture, and no discretionary rule. A
 hypothesis that needs one of these is refused with the missing capability named, which is a more
 useful outcome than a candidate that quietly approximates it.
+
+### 9.6 The feature-value contract
+
+Candidates select features; something has to deliver each value to the running strategy at the moment
+it became knowable, and the review is right that this contract was missing. It matters because a
+precomputed panel and a streaming strategy can disagree about warm-up, missing values, symbol
+membership and cross-sectional ranking, and a disagreement of that kind is a look-ahead that no
+downstream gate can see.
+
+A registered feature therefore carries the following, and the compiler resolves it before anything
+executes.
+
+| Field                            | What it fixes                                                                                                  |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Feature id and definition digest | The identity of the definition, not of its name, so a changed convention cannot masquerade as the same feature |
+| Inputs and lookback              | The series the value is computed from, the lookback length, and the skip rule                                  |
+| Observation timestamp            | The time the value describes                                                                                   |
+| Availability timestamp           | The earliest time the value may be used, including any publication or restatement lag                          |
+| Warm-up and missing values       | What happens before the lookback is satisfied, and what a run does with an absent value                        |
+| Membership version               | The universe membership state at the decision time, not at the time of analysis                                |
+| Value type, units and range      | Sign, scale and any domain restriction, so a scaling error fails at the boundary rather than in a result       |
+
+The delivery mechanism is the simplest one that can prove parity, and this design does not add a
+Python binding for every research primitive by default: the first task of M3 is to determine whether
+the existing public Python surfaces suffice, and a binding is added only where an inventory row
+proves they do not.
+
+Parity is tested rather than assumed. One fixture computes a feature offline through the research
+path and evaluates the same feature at decision time through the interpreter, and the two values,
+their availability timestamps and their universe membership must agree. Without that test, a research
+finding and a strategy result can differ while each looks correct on its own.
+
+### 9.7 The allocation contract
+
+Turning cross-sectional rankings into target weights is new functionality, and the review is right
+that it is not wiring. The existing target pipeline reconciles targets and applies risk caps; it does
+not construct a portfolio. The allocation function is therefore specified and tested in the compiler
+milestone, and the platform keeps what it already owns: quantity resolution, order reconciliation,
+rounding, netting and runtime risk enforcement (SD14).
+
+Nine decisions have to be stated before it can be deterministic, and each belongs to the
+pre-registered policy or the candidate specification rather than to an implementation detail.
+
+| Decision                                                                                  | Where it is fixed                                                                                      |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| How a rank becomes a weight: equal, rank-proportional, or the candidate's declared scheme | Weighting method field                                                                                 |
+| How ties are broken                                                                       | Selection block, with a declared rule                                                                  |
+| How missing or ineligible symbols are treated                                             | Selection block; a symbol without an eligible feature value is not eligible to be selected             |
+| What happens when eligible instruments number fewer than the requested portfolio size     | Policy; the run does not stretch to fill the count                                                     |
+| Whether cash is left idle or reallocated when a position cannot be filled                 | Cash policy field                                                                                      |
+| How sector caps and position caps interact when both bind                                 | Policy; the binding order is declared rather than emergent                                             |
+| How a target is reconciled when a held position leaves the selected set                   | Rebalance and exit blocks; the reconciler emits the orders the declared rules imply                    |
+| Whether a partial or failed fill changes the next rebalance's allocation                  | Declared; the default is that allocation is recomputed from the current position and the new selection |
+| How delisted, halted and no-longer-eligible instruments are handled                       | Universe and rebalance blocks; an ineligible holding is flattened by the declared rule, not dropped    |
+
+The function is deterministic: the same selection, weights, positions and policy produce the same
+targets, and its differential test is the target-allocation fixture of Section 9.3.
 
 ## 10. Search: agents, evolution, and accounting
 
@@ -932,6 +1299,30 @@ deterministic across a provider version or a sampling configuration, so a run's 
 claim covers the compiled candidate and its backtest, and the agent invocation is reproduced by
 replaying its recorded response, not by calling the model again.
 
+The adapter is a replaceable research interface, and that is a requirement rather than a preference:
+a campaign has to stay reproducible when the provider disappears, the model version changes, or its
+sampling behaviour changes. Replaying the recorded response is the mechanism; recalling the model is
+never a substitute, which is why the invocation record is evidence and a live call is not.
+
+The model's training window is a provenance risk this design cannot detect from returns, and the
+review is right that mechanism-first hypotheses and withholding future data are mitigations rather
+than guarantees. The controls are therefore recorded rather than argued:
+
+- The model and version, with its declared or known knowledge cutoff where one is available.
+- The date the hypothesis was generated, and the market period the resulting candidate is evaluated
+  over.
+- The requirement that a hypothesis state an economic mechanism and a falsification condition, which
+  is recorded as evidence about the reasoning and is not treated as proof that the idea is
+  independent of memorized outcomes.
+- The prompt's information set, which excludes ticker-specific historical outcomes beyond what the
+  hypothesis is being asked to reason about, and excludes the confirmation set entirely.
+- A standing classification: results over periods the model could plausibly know are marked as more
+  vulnerable to hypothesis contamination than results over periods after its cutoff.
+
+A candidate that performs well only over historical periods the model may already know is reported as
+such. It is not evidence that the model discovered a generalizable edge, and no gate in this design
+can convert it into one.
+
 ### 10.3 The genome and its operators
 
 A candidate is a genome with a family, a feature selection with lookbacks, selection and entry
@@ -940,16 +1331,27 @@ constraints. Mutation operates on genes within bounds; recombination exchanges c
 between parents of the same family, since crossing a momentum entry with a mean-reversion exit
 produces a specification with no mechanism behind it.
 
+Three degrees of freedom are distinguished and recorded separately in lineage and in search analysis,
+because they are not the same kind of change: a parameter mutation inside one hypothesis, a
+structural mutation that changes the logic while the mechanism stands, and a family change that
+replaces the mechanism. Any mutation or recombination that changes the economic mechanism produces a
+new hypothesis and a new falsification statement, because the previous pair describes something that
+is no longer being tested.
+
 The existing search module already states the contract this extension must preserve: a search
 strategy enumerates parameter sets and never runs a backtest and never sees a result, and it is
 deterministic under its seed. Extending that to genomes keeps the module pure, keeps the driver
 responsible for execution, and means the evolutionary search can be tested without an engine.
 
-Selection is Pareto over the reported objectives rather than a weighted sum: net risk-adjusted
-return, out-of-sample stability, drawdown and tail risk, benchmark-relative return, turnover, and
-complexity, with the tradeoffs visible. Diversity is preserved by family, so a population cannot
-collapse into near-identical variants of one idea, which is also what the published discovery
-systems do with their island populations.
+Selection is Pareto over the reported objectives rather than a weighted sum, and it reads development
+results only (Section 8.6). The objectives are named as specific metrics with their sampling
+conventions rather than as summary phrases: the risk-adjusted return of the development fold at a
+stated frequency, its dispersion across development folds, drawdown and tail loss over the
+development window, return relative to the registered benchmark over the same window, turnover under
+the policy's cost model, and a complexity measure. Diversity is preserved by family, so a population
+cannot collapse into near-identical variants of one idea, which is also what the published discovery
+systems do with their island populations. What Pareto selection does not do is stated in Section 7.5:
+it does not correct multiplicity, protect the confirmation set, or establish an edge.
 
 ### 10.4 What the search may not touch
 
@@ -967,19 +1369,44 @@ criteria may not, and nothing in the loop can write them.
 
 ### 10.5 Trial accounting
 
-The multiplicity that a significance claim must be read against is the number of executed
-experiments, and it is assembled from the ledger rather than declared by a caller:
+The review's central finding about the ledger is that a single counter cannot carry all the meanings
+this document gave it. Four quantities are maintained separately, and the statistical one is derived
+rather than assumed.
 
-- Every candidate that compiled and ran produces a trial record, whether it succeeded, failed
-  economically, errored, or timed out.
-- A duplicate that was recognised before execution is recorded as a duplicate and counted once.
-- A proposal that never compiled is recorded as a refusal and is not a trial, because it produced no
-  Sharpe ratio and so cannot inflate the maximum that the deflation corrects for. That is a
-  definitional choice, and it is stated here rather than buried, because a reader could reasonably
-  ask for refusals to count.
-- A campaign's trial count includes experiments run in earlier generations and in abandoned
-  branches. There is no operation that resets it, and the inventory is hash-chained so that one
-  cannot be performed by editing a file.
+| Quantity                     | What it counts                                                                                                                            | What it is for                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `proposal_attempt_count`     | Every proposal, from an agent or an operator, including those that never compiled                                                         | Auditing search behaviour and generator failure rates, where a refusal is a result rather than an error |
+| `unique_configuration_count` | Distinct configurations under the pre-registered equivalence rule                                                                         | Measuring how much of the search space was actually covered                                             |
+| `executed_experiment_count`  | Every actual backtest execution, including failures, timeouts and duplicates                                                              | Reconstructing compute usage and execution history                                                      |
+| `statistical_trial_count`    | The configurations that entered the relevant statistical selection process, under a declared rule for failures, duplicates and dependence | Supplying the multiplicity that the deflated Sharpe ratio and the admission assessment consume          |
+
+The statistical count is never assumed equal to any of the other three, and the rules mapping between
+them are stated rather than implied:
+
+- Every executed configuration produces an execution event, whether it succeeded, failed
+  economically, errored or timed out. A duplicate execution is a real execution and stays in the
+  execution history even though it is not a new configuration.
+- A configuration that ran and failed economically stays in the statistical inventory, because its
+  return series is part of the maximum that the deflation corrects for.
+- A worker crash or timeout produced no usable return series. The conservative rule is that the
+  attempt stays in the execution count, is recorded as a failure in the statistical inventory, and
+  is never given a fabricated or imputed return. A campaign whose failure rate leaves the statistical
+  count uncertain is `INCONCLUSIVE` on that ground alone (Section 7.1).
+- A duplicate recognised before execution is recorded once as a configuration and once as an
+  execution, and contributes one statistical trial.
+- A proposal that never compiled is recorded as a refusal and is not a statistical trial, because it
+  produced no return series and cannot inflate the maximum. That is a definitional choice, stated
+  here rather than buried, because a reader could reasonably ask for refusals to count.
+- A campaign's counts include experiments run in earlier generations and in abandoned branches.
+  There is no operation that resets them, and the inventory is hash-chained so that one cannot be
+  performed by editing a file.
+
+Campaigns that continue one search over the same observations belong to one research family, which is
+a lineage identity above the campaign identity (Section 8.4). Each campaign keeps its own immutable
+inventory, and the statistical policy decides whether the family's trials enter one selection
+process, so a successor campaign inherits what its predecessor spent against the same data rather
+than resetting the budget. That is the review's correction to the earlier claim that a branch
+inherits nothing: it inherits no artifacts, and it does not inherit a clean budget either.
 
 One failure mode digest detection does not cover, and the revised proposal names it: a single
 economic configuration must not become several independent trials because it was rerun, renamed,
@@ -1007,6 +1434,15 @@ turnover far above the cost policy's comfort, and use it to parameterise the nex
 exploration. It may not carry forward a change to any frozen object, and the diagnosis is itself a
 recorded, versioned artifact, so a reader can see what the search believed about itself.
 
+The review asks for the mutable set to be named rather than bounded by example, and it is. The search
+policy may change its prompts, its mutation and recombination operators, its exploration and
+exploitation balance, and the allocation of effort across families and stages. It may not change the
+allowed feature set, any parameter bound, the evaluation window, the split layout, the cost model,
+the benchmark, the risk policy, or the allocation of the confirmation set, all of which are frozen
+objects under Section 10.4. Every generation records its own search-policy digest alongside the
+campaign's, so the ledger can answer both why a candidate was proposed and which search policy
+selected it.
+
 ### 10.7 What the prior art supports, and what it does not
 
 | Claim                                                                                                  | Verdict                            | Basis                                                                                                                                                                                                                                                                                                                               |
@@ -1024,7 +1460,9 @@ this design can detect that from the returns. The mitigations available are proc
 adopted: hypotheses must state a mechanism and required features rather than a remembered outcome,
 the model is given the feature registry and the ledger's evidence rather than raw future data, and
 the candidate's information set is the declared snapshot, which is enforced at G0 independently of
-where the idea came from.
+where the idea came from. The controls are recorded in Section 10.2, and they carry one operational
+consequence: a result over a period the model could plausibly know is labelled as more vulnerable to
+hypothesis contamination than one over a period after its cutoff.
 
 ## 11. Validation, promotion, and shadow
 
@@ -1033,19 +1471,32 @@ where the idea came from.
 The gates run in order and each is a conjunction. None is compensable by a later gate's strength,
 and an agent may explain a failure but cannot waive one.
 
-| Gate                            | Question                                                                        | Mechanism                                                                                                                                                                                                                                             | Failure status                        |
-| ------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| G0 data integrity               | Was the candidate entitled to the information it used, at the time it used it?  | Point-in-time membership, corporate-action reconciliation against the declared adjustment and cash path, declared per-feature availability and warm-up, the price-series statement the run declares, and the planted timing case table of Section 8.5 | `INVALID`                             |
-| G1 economic viability           | Does it survive its own costs and beat a registered baseline?                   | The fee, spread, slippage and market-impact configuration from the cost policy; benchmark comparison; a simple baseline in the same universe                                                                                                          | `REJECTED` or `INCONCLUSIVE`          |
-| G2 walk-forward                 | Does it persist out of sample across time?                                      | The split contract with purge, embargo and label overlap, and the walk-forward stages                                                                                                                                                                 | `REJECTED` or `INCONCLUSIVE`          |
-| G3 statistical credibility      | Is the result distinguishable from the best of a search this size?              | deflated Sharpe ratio with trial provenance, dispersion and bounds; the permutation test on the outcome sequence; information-coefficient bounds where the candidate is cross-sectional; the minimum-backtest-length admission test                   | `INCONCLUSIVE` or `REJECTED`          |
-| G4 robustness and risk          | Does it depend on a lucky name, period, or parameter value?                     | Parameter-neighbourhood re-evaluation, cost stress, regime and period slices, sector and position concentration, overnight-gap stress, drawdown and tail risk                                                                                         | `REJECTED`                            |
-| G5 holdout and shadow readiness | Does it hold on data the search never saw, and is the frozen artifact complete? | One recorded holdout evaluation, a frozen specification, a complete evidence package, and a human decision                                                                                                                                            | `VALIDATION_PENDING` or `QUARANTINED` |
+| Gate                            | Question                                                                        | Mechanism                                                                                                                                                                                                                                                                                    | Failure status                        |
+| ------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| G0 data integrity               | Was the candidate entitled to the information it used, at the time it used it?  | Point-in-time membership, corporate-action reconciliation against the declared adjustment and cash path, declared per-feature availability and warm-up, the price-series statement the run declares, and the planted timing case table of Section 8.5                                        | `INVALID`                             |
+| G1 economic viability           | Does it survive its own costs and beat a registered baseline?                   | The fee, spread, slippage and market-impact configuration from the cost policy; benchmark comparison; a simple baseline in the same universe; and, for an equity or ETF candidate whose return includes distributions, the cash-accounting prerequisite below                                | `REJECTED` or `INCONCLUSIVE`          |
+| G2 walk-forward                 | Does it persist out of sample across time?                                      | The split contract with purge, embargo and label overlap, and the walk-forward stages, evaluated over locked validation data against a frozen configuration                                                                                                                                  | `REJECTED` or `INCONCLUSIVE`          |
+| G3 statistical credibility      | Is the result distinguishable from the best of a search this size?              | deflated Sharpe ratio with trial provenance, dispersion and bounds; the statistical trial count of Section 10.5; the permutation test on the outcome sequence as a supplementary diagnostic; information-coefficient bounds where the candidate is cross-sectional; the admission assessment | `INCONCLUSIVE` or `REJECTED`          |
+| G4 robustness and risk          | Does it depend on a lucky name, period, or parameter value?                     | Parameter-neighbourhood re-evaluation, cost stress, regime and period slices, sector and position concentration, overnight-gap stress, drawdown and tail risk                                                                                                                                | `REJECTED`                            |
+| G5 holdout and shadow readiness | Does it hold on data the search never saw, and is the frozen artifact complete? | One recorded holdout evaluation, a frozen specification, a complete evidence package, and a human decision                                                                                                                                                                                   | `VALIDATION_PENDING` or `QUARANTINED` |
 
 The statuses are chosen so that `INCONCLUSIVE` is available and respectable. A candidate that fails
 G3 because the search simply lacked the observations to say anything is not the same as one that
 failed economically, and conflating the two is how a system talks itself into an edge it has not
 shown.
+
+Two boundary rules govern how the gates read, not only what they compute. Every gate result records
+the data role its inputs came from (Section 8.6): G2 and G3 consume locked validation data against a
+frozen configuration, and a result whose role shows it was search-visible is not admissible as
+validation evidence, whatever its value. And correct corporate-action accounting is a prerequisite
+for a credible equity or ETF performance claim rather than a restriction on one strategy family. A
+long-only position held across an ex-dividend date is affected even when nobody set out to capture
+the distribution, so an equity or ETF candidate whose return includes distributions may not pass G1
+while the cash path is undemonstrated; the review's point is exactly that not targeting dividends is
+not the same as being unaffected by them. Until the upstream capability lands, the acceptable claims
+are those made on synthetic fixtures or on an instrument subset whose accounting is known to be
+correct, and neither may be presented as validation of ordinary US equity or ETF performance
+(Section 18, SD12).
 
 ### 11.2 The pre-registered policy
 
@@ -1060,18 +1511,38 @@ A policy is published with its digest before the campaign opens. A campaign whos
 reported against a policy edited afterwards is invalid, and the ledger makes that checkable,
 because the policy digest is recorded on every trial.
 
-### 11.3 Holdout custody
+### 11.3 Holdout custody and the confirmation state machine
 
 On a single workstation with a single operator, custody cannot be a security boundary and the design
-does not pretend otherwise. What is enforceable: the holdout is stored outside the working catalog
-root, the discovery workers are not given its path, the only code that can read it is the validator
-entry point, and every access is recorded with the experiment that requested it. What is
+does not pretend otherwise. What is enforceable: the confirmation set is stored outside the working
+catalog root, discovery workers are not given its path, the only code that can read it is the
+validator entry point, and every access is recorded with the experiment that requested it. What is
 procedural: the operator not passing the path to a search process.
 
-What is detectable: a candidate whose search-phase specification, provenance chain, or parameter
-bounds show the holdout's summary statistics is quarantined. The practical rule is the one the
-proposals state and it is followed exactly: a candidate that has been evaluated against the holdout
-is retired whether it passed or failed, and cannot be retuned and re-presented as independent.
+What is detectable: a candidate whose search-phase specification, provenance chain or parameter
+bounds carry the confirmation set's summary statistics is quarantined.
+
+The per-candidate rule the proposals state is necessary and not sufficient. Retiring a candidate that
+has been evaluated does not undo the information released by evaluating several of them, because a
+reader who has seen three confirmation results and picked the best has used the confirmation set to
+select, whatever the ledger says about each individual retirement. Custody is therefore a
+campaign-level state machine rather than a per-candidate rule.
+
+| State                  | Permitted                                                                                                                            | Refused                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| Searching              | Generation, mutation, recombination and selection over development results, and evaluation over locked validation data (Section 8.6) | Any read of the confirmation set                                                         |
+| Frozen                 | One candidate is designated the campaign's confirmation candidate, with its specification, policy and evidence frozen                | Further mutation of that candidate, and any change to the policy it will be judged under |
+| Confirming             | One evaluation of the frozen candidate against the confirmation set, recorded with its access                                        | A second candidate from the same campaign entering this state                            |
+| Confirmed or withdrawn | The evaluation is reported as confirmation evidence for that candidate, or the candidate is retired                                  | Reusing the same confirmation data to claim independent confirmation for a replacement   |
+| Exploratory reuse      | A replacement candidate may be evaluated on the same data only if the result is labelled exploratory, and the label travels with it  | Presenting that result as independent confirmation                                       |
+
+Three consequences follow. A campaign can produce one confirmation result it may cite as independent.
+If that candidate fails and another is wanted, the honest options are newly reserved, genuinely
+unseen data, or a separately pre-registered protocol that accounts for the repeated testing; and a
+new search branch does not restore access to the same confirmation data, because a branch inherits
+its family's confirmation history rather than a fresh copy of the data. And an evaluation performed
+to help choose a winner is exploratory by construction, which is the review's point expressed as a
+rule rather than as a caution.
 
 ### 11.4 Candidate lifecycle
 
@@ -1081,9 +1552,32 @@ the gates and the runtime produce. Transitions are recorded, not mutated, and a 
 a new child that inherits nothing: not the parent's evidence, not its status, and not its place in a
 queue.
 
+A transition table makes the vocabulary operational rather than decorative, and the review is right
+that it was missing. For each transition it states who may perform it, what must exist beforehand,
+whether a failure is retryable, and what a retry creates.
+
+| Transition                           | Performed by                     | Evidence required beforehand                                                                           | Retry behaviour                                                                                                |
+| ------------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `PROPOSED` to `COMPILED`             | The compiler                     | A specification passing the five stages of Section 9.3, with its specification and behavioural digests | A refusal returns the candidate to `PROPOSED` with the refusal recorded; it is a proposal attempt, not a trial |
+| `COMPILED` to `BACKTESTED`           | The run adapter                  | A registered execution with a verified receipt (Section 8.4)                                           | A retry after a crash is a new execution attempt against the same configuration, not a new candidate           |
+| `BACKTESTED` to `VALIDATION_PENDING` | The gate service                 | The evidence package, with its data role declared (Section 8.6)                                        | Not retryable without new evidence                                                                             |
+| `VALIDATION_PENDING` to `VALIDATED`  | The gate service, then a human   | Every gate passed, one confirmation evaluation recorded, a complete frozen artifact                    | A policy or data change invalidates it: the candidate is re-judged under the new policy                        |
+| `VALIDATED` to `SHADOW`              | The operator                     | A human decision recorded with its timestamp                                                           | Not automatic and not retryable as a right                                                                     |
+| any to `QUARANTINED`                 | The gate service                 | Evidence of confirmation-set leakage or of an accounting defect                                        | Terminal for that specification                                                                                |
+| any to `RETIRED`                     | The operator or the gate service | A confirmation evaluation, a superseding candidate, or an abandoned branch                             | Terminal; a successor is a new candidate                                                                       |
+
+`INVALID`, `FAILED`, `REJECTED` and `INCONCLUSIVE` are outcomes rather than resting states: each
+records why, and each leaves the candidate where it was for a purpose this table names.
+`QUARANTINED` and `RETIRED` differ in cause rather than in consequence, since quarantine follows
+evidence of a defect in the candidate's information set while retirement follows a decision about its
+future, and both are terminal for that specification.
+
 `VALIDATED` means one thing only: a specification passed one versioned policy over one data snapshot
 on the date recorded. It is not a claim about the future and it authorises nothing except a shadow
-evaluation, after a human has decided.
+evaluation, after a human has decided. A later policy change does not erase the recorded verdict,
+which stands in the ledger under the policy digest it was judged under, and it does mean the
+candidate is no longer current: what a promotion decision may cite is a verdict under the live
+policy.
 
 ### 11.5 Shadow evaluation
 
@@ -1095,9 +1589,18 @@ fill, the modelled cost, and the reason for any non-fill, so the discrepancy bet
 assumption and the market's behaviour is visible rather than summarised.
 
 A minimum observation count is set by the strategy's trade frequency before the period starts, not
-after, and a shadow result is labelled simulated wherever it is shown. The honest limit: a shadow
-period of a few weeks over a weekly strategy yields a handful of independent observations, so its
-purpose is to detect operational divergence, not to confirm an edge.
+after, a shadow result is labelled simulated wherever it is shown, and the report states the count it
+reached. The review's stricter statement of what shadow proves is adopted: historical validation
+evaluates behaviour on the declared historical data and assumptions; shadow validation evaluates
+whether signals, timing, data delivery and simulated execution behave as expected on live inputs; and
+neither on its own establishes future profitability. Meeting a pre-registered observation count is a
+precondition for reading a shadow report, not evidence of an edge.
+
+The report carries the numbers that make divergence diagnosable rather than summarised: the count of
+eligible decisions and of missing observations, each signal discrepancy with its magnitude, the
+simulated non-fills with the reason for each, and the difference between modelled and observed costs.
+A shadow period of a few weeks over a weekly strategy yields a handful of independent observations,
+which is why the purpose here is operational divergence rather than confirmation.
 
 ## 12. Security and the execution boundary
 
@@ -1126,6 +1629,25 @@ Four tests make the boundary observable rather than asserted:
    that the configuration loader refuses a credential in a policy file.
 4. A negative test that a candidate attempting to name an execution venue is refused by the
    validator, with the refusal recorded.
+
+Those four tests are necessary and not sufficient, and the review is right that an import-graph check
+is evidence rather than proof: dynamic imports, indirect callbacks and a shared execution stack can
+all evade a check made over module names. The stronger control is a capability boundary expressed as
+the shape of the environment rather than as an inspection of the code.
+
+- Discovery workers run in an environment with an explicit capability allowlist, not in the
+  operator's working environment.
+- No broker or live execution adapter is installed there, so an import naming one fails for want of
+  the package.
+- No credential-bearing configuration file is mounted and no credential variable is set, so a
+  submission path that survived has nothing to authenticate with.
+- Only the sandbox venue is exposed to a strategy worker.
+- The orchestrator and the result-registration process carry no execution capability at all, which is
+  the same separation Section 8.4 states for the append protocol.
+
+The dependency assertion over the resolved module set remains useful as a regression check, and the
+negative submission test of item 4 remains the direct one. Neither is presented here as proof that
+order submission is impossible.
 
 What these tests cannot prove is stated plainly: they cannot prevent an operator from installing an
 adapter and running the discovery code with it, and they cannot make a machine with the operator's
@@ -1156,6 +1678,16 @@ its features are computed once per data snapshot and reused across candidates, t
 stores results by digest so an identical tree is not recomputed, and per-run cost is measured in the
 calibration campaign before a budget is set (Section 15).
 
+Cost fidelity is a separate question from cost inclusion, and the review requires it to be stated.
+Every cost component is classified in the policy as calibrated to observed market data, or as an
+assumption or approximation carrying a stress range. Fees and spreads come from published schedules
+and observed quotes; slippage and impact are modelled, and a linear impact model is useful for
+comparing candidates while remaining an approximation that does not hold across every liquidity
+regime or order size. The classification travels into the evidence package, and the search cannot
+choose a more favourable cost model for a particular candidate, because the cost model is a frozen
+object of Section 10.4 rather than a candidate field. A candidate whose result depends on the
+optimistic end of a stress range is reported that way instead of being described as cost-aware.
+
 This is also where Section 7.4 bites again. The campaign budget must satisfy the admission test, and
 the admission test will usually be far below a thousand candidates. The design therefore expects the
 first campaigns to be small, and to be judged on whether the machinery is trustworthy rather than on
@@ -1171,7 +1703,9 @@ what it found.
 | Parameter and specification mining     | The search explores degrees of freedom the data cannot support         | Pre-registered bounds, complexity caps, the admission test, the trial inventory                                                                               | A campaign can still spend its budget unwisely, and will then be inconclusive rather than wrong                                                                    |
 | Model knowledge-window leakage         | The model knows market outcomes from its training period               | Mechanism-first hypotheses, the declared information boundary enforced at G0, recorded prompts                                                                | Undetectable in the returns themselves; it is a reasoning provenance risk, not a statistical one                                                                   |
 | Incomplete trial accounting            | A crashed, duplicated, or abandoned experiment missing from the count  | Ledger-derived counts, hash-chained inventory, failures recorded as trials                                                                                    | An experiment run outside the ledger is invisible, so the ledger must be the only path to the engine                                                               |
-| Holdout contamination                  | Reusing a holdout across candidates                                    | Recorded access, retire-on-evaluation, quarantine on evidence of leakage                                                                                      | Procedural on a single workstation                                                                                                                                 |
+| Holdout contamination                  | Reusing a holdout across candidates                                    | Recorded access, the campaign-level confirmation state machine, exploratory labelling, and quarantine on evidence of leakage (Section 11.3)                   | Procedural on a single workstation                                                                                                                                 |
+| Holdout used for selection             | Several confirmation results seen, the best one reported               | One confirmation candidate per campaign, a replacement needing newly reserved data, and an exploratory label that travels with a reused result                | An operator can still start a fresh campaign against the same data, and no local control can detect that intent                                                    |
+| Trial count inconsistent               | Several plausible definitions of a trial in one system                 | Four separate counts with stated mapping rules, all derived from the ledger (Section 10.5)                                                                    | The mapping rules are a convention the implementation must keep, and a misimplementation is invisible in a result                                                  |
 | PBO used as an unvalidated gate        | Weak discrimination for this data and a demanding precondition         | Diagnostic only until calibrated on planted cases (SD8)                                                                                                       | If promoted too early it would reject good candidates and admit bad ones                                                                                           |
 | A passing gate read as an edge         | Gates bound the search's self-deception, they do not create returns    | Explicit status vocabulary including inconclusive, and reporting that separates evidence from expectation                                                     | Unavoidable: this is a measurement system, not a forecasting one                                                                                                   |
 | Agent stack as maintenance debt        | Prompts, adapters and orchestration rot faster than deterministic code | Agents confined to proposal and explanation, with every message versioned and validated; agent code is tooling, deletable without touching research or engine | Prompt and model drift changes what the search explores                                                                                                            |
@@ -1184,7 +1718,10 @@ The acceptance criteria below are observable and falsifiable. Each names the mec
 checkable, and every one of them can be run before any agent exists except those that need a shadow
 period. The list merges this document's own criteria with the revised proposal's definition of done
 (Section 3.1), which supplies seven of them; its remaining items extend a criterion below or are
-covered by an invariant.
+covered by an invariant. Five further criteria, numbered 17 to 21, are added by the review and are
+the tests it names explicitly: selection isolation, the ledger protocol, interpreter parity, feature
+parity, and allocation determinism. The numbering is a reading order rather than a priority order, and
+the exit conditions of Section 16 name the criteria each milestone owes.
 
 1. **One candidate round-trips.** A hand-written specification compiles, runs, produces an evidence
    package, and appears in the ledger, with no manual edit at any step. Mechanism: an acceptance
@@ -1208,38 +1745,61 @@ covered by an invariant.
    settlement fails G0. A cost-blind candidate fails G1. A single-name candidate fails G4. A
    parameter-spike candidate fails G4's neighbourhood test. Mechanism: fixtures with known answers,
    wired as gate calibration cases.
-6. **Corporate-action accounting reconciles.** Dividend, split and total-return accounting reconcile
-   against the ledger without omission and without double counting, and a candidate whose return
-   depends on distribution capture is refused rather than misstated. Mechanism: a reconciliation
-   test over a fixture containing a dividend and a split inside its window, cross-checked against the
-   adjustment arithmetic. Until dividend cash flows exist upstream, this criterion is expected to
-   fail, and the failure is itself the evidence of the gap that Section 18 records.
-7. **Every tested configuration is in the inventory.** Every executed configuration appears exactly
-   once in the immutable inventory, including failures, recognised duplicates and abandoned
-   branches, and the trial count the gate used is derived from that inventory rather than supplied
-   by a caller. Mechanism: a ledger-derived count compared against the executed set, over a campaign
-   containing a deliberate duplicate, a deliberate crash and a deliberate refusal.
-8. **An over-budget search is refused before the first backtest.** A plan exceeding the ceiling
-   implied by its sample is refused at admission, with the ceiling and the inputs it was computed
-   from reported. Mechanism: a fixture campaign whose requested budget exceeds its computed ceiling,
-   a `REDUCE` case that narrows and proceeds, and a `REJECT` case on data that cannot support the
-   claim at any allocation.
-9. **Holdout data cannot influence selection.** No mutation, parameter bound, threshold or selection
-   decision is derived from holdout data, and every access is recorded against the experiment that
-   made it. Mechanism: the holdout path absent from worker environments, an access log, and a
-   quarantine fixture whose parameters carry a holdout statistic.
+6. **Corporate-action accounting reconciles in value and in cash.** Dividend, split and total-return
+   accounting reconcile against the ledger without omission and without double counting, and an
+   equity or ETF candidate whose return includes distributions is refused rather than misstated,
+   whether or not it targets them. Mechanism: a reconciliation fixture containing a dividend, a
+   split, a position held through an ex-dividend date, and positions opened and closed around a
+   corporate-action boundary, comparing account equity and cash rather than two adjusted price
+   series. Until dividend cash flows exist upstream this criterion cannot pass, and it is a
+   prerequisite for a credible equity performance claim rather than a property of one exempted
+   strategy family (Section 11.1).
+7. **Every executed configuration is in the inventory, and the four counts are separate.** Each
+   executed configuration appears in the immutable inventory together with its executions and its
+   attempts, including failures, recognised duplicates and abandoned branches; the four counts of
+   Section 10.5 are reported separately with their mapping rules; and a lifecycle transition the
+   table of Section 11.4 does not permit is refused. Mechanism: a campaign containing a deliberate
+   duplicate, a deliberate crash and a deliberate refusal, with each count compared against the
+   executed set and the registered configurations, and an attempted illegal transition as a negative
+   case.
+8. **An over-budget search is refused before the first backtest, with its arithmetic.** A plan
+   exceeding what its sample can support is refused at admission, and the assessment reports the
+   formula and its version, every input with its provenance, the assumptions with sensitivity
+   ranges, the executed configuration count, an estimated effective trial count where the method
+   supports one, the power limitations, and the claims it can and cannot support. Mechanism: a
+   fixture campaign whose requested budget exceeds its ceiling, a `REDUCE` case that narrows and
+   proceeds, a `REJECT` case on data that cannot support the claim at any allocation, and a check
+   that a plan whose inputs cannot be estimated is rejected rather than admitted on defaults.
+9. **The confirmation set cannot influence selection, at campaign level.** No mutation, parameter
+   bound, threshold or selection decision is derived from confirmation data; every access is recorded
+   against the experiment that made it; and the state machine of Section 11.3 is enforced rather than
+   described. Mechanism: five negative cases over the confirmation set, being a second candidate from
+   one campaign, a mutation after a confirmation evaluation, a winner selected from several
+   confirmation results, a new branch expecting fresh access to the same data, and a reused
+   evaluation presented without its exploratory label; plus the set's path absent from worker
+   environments and a quarantine fixture whose parameters carry a confirmation statistic.
 10. **Every number recomputes.** The evidence package's quantities are recomputed from the ledger and
     the data snapshot alone, and the digests match. Mechanism: a recomputation test that reads the
-    ledger rather than the run.
-11. **The gate is calibrated, not assumed.** The planted noise set, generated by searching over
-    random specifications with no edge, is rejected at the pre-registered rate, and the gate's
-    false-accept and false-reject behaviour is reported. This is the test that decides whether PBO is
-    promoted from diagnostic to gate, and whether the thresholds are sane.
+    ledger rather than the run, over the whole reproducibility envelope of Section 8.3; every
+    reference the envelope names must resolve to retained, verified content, not merely to a digest,
+    and the test fails if any input it needs is no longer available.
+11. **The gate is calibrated, not assumed.** The calibration suite is broader than a planted noise
+    set, because rejecting random specifications does not show that a diagnostic can separate a
+    realistic false discovery from a real but weak strategy. It contains null controls, positive
+    controls carrying a deliberately inserted edge, leakage controls that can only succeed by reading
+    future information, cost controls whose apparent edge disappears after realistic costs,
+    concentration controls depending on one name, one period or one sector, parameter-spike controls
+    that work at a single value, and accounting controls containing dividends, splits, gaps and
+    missing data. The report states which controls each diagnostic detected and which it failed to
+    detect, the false-accept and false-reject behaviour at the pre-registered thresholds, and whether
+    PBO is promoted from diagnostic to gate. Thresholds are versioned and justified, and are not
+    tuned against the confirmation set.
 12. **The execution boundary is tested.** Adding a live adapter to the discovery import graph fails
     the dependency assertion, a candidate naming an execution venue is refused, and no broker
-    credential, live adapter or order-submission path is present in either the discovery environment
-    or the shadow environment. Mechanism: the four boundary tests of Section 12 plus an environment
-    assertion run over both entry points.
+    credential, live adapter or order-submission path is present in the discovery environment or the
+    shadow environment. Mechanism: the four boundary tests of Section 12, an environment assertion
+    run over both entry points, and a capability check that a worker environment contains only
+    allowlisted packages and that a submission attempt would have nothing to authenticate with.
 13. **Replay and shadow share one temporal contract.** A frozen candidate in shadow records the same
     declared field set and the same pair of timestamps as its backtest, so a shadow fill can be
     compared with the replay's expectation directly. Mechanism: the recorded decision and eligibility
@@ -1247,12 +1807,42 @@ covered by an invariant.
 14. **A campaign can be inconclusive and say why.** A campaign against data with insufficient power
     ends with an inconclusive verdict, a stated reason, and a trial inventory, rather than a
     best-of-N result presented as a finding.
-15. **Shadow divergence is measurable.** A frozen candidate's shadow signals match the backtest's
-    expected signal times modulo the data source's timing, and any mismatch is reported with its
-    cause.
+15. **Shadow divergence is measurable and is reported as divergence.** A frozen candidate's shadow
+    signals match the backtest's expected signal times modulo the data source's timing, and the report
+    carries the eligible-decision count, the missing observations, each signal discrepancy, the
+    simulated non-fills with their reasons, and the difference between modelled and observed costs.
+    Neither a passing shadow period nor a met observation count is presented as evidence of an edge.
 16. **The whole search is auditable after the fact.** A reader with the ledger, the policy digest and
     the engine version can reconstruct which candidates existed, which ran, which were judged, under
     which policy, and why each was rejected.
+17. **Selection cannot read locked evaluation data.** An evolutionary loop tuned to maximise a
+    deliberately noisy development metric never receives the locked validation or confirmation
+    result, and the role of every result is recorded. Mechanism: a search fixture with a noisy
+    development metric and an instrumented validator that fails the test if a locked result reaches
+    the selection step, plus an audit of the data roles recorded on the results.
+18. **The ledger protocol holds under interruption and repetition.** A result is not counted before
+    its artifact exists, its digest verifies and its run identity reconciles; an interrupted
+    registration replays to one statistical trial; a duplicate submission registers once; and
+    reconciliation fails closed. Mechanism: fixtures that kill the process between execution and
+    registration, that resubmit a job, and that alter the seed, binary identity or configuration
+    digest on the research side of a receipt, each of which must produce the specified outcome rather
+    than an exception.
+19. **The interpreter matches independently specified strategies.** For each reference strategy of
+    Section 9.3, being a ranking strategy, a threshold strategy, a holding-period exit, a rebalance
+    schedule, a target allocation, a strategy with no eligible instruments, and one encountering a
+    split or an opening gap, the interpreted strategy's signals, targets, timing and results match
+    the fixture. Mechanism: differential tests against hand-written fixtures, so that a defect in the
+    interpreter cannot present itself as a strategy result.
+20. **Feature values have parity between research and decision time.** One fixture computes a feature
+    offline through the research path and evaluates it at decision time through the interpreter, and
+    the two values, their availability timestamps and their universe membership agree. Mechanism:
+    the parity test of Section 9.6, over features with warm-up, missing values and a membership
+    change.
+21. **Allocation is deterministic.** The same selection, weights, positions and policy produce the
+    same targets, and each of the nine allocation decisions of Section 9.7 is exercised, including
+    the cases where caps bind against each other, where eligible instruments are fewer than the
+    requested portfolio size, and where a held position leaves the selected set. Mechanism: the
+    target-allocation fixtures, run twice for identity and once per declared rule.
 
 ## 16. Recommended order
 
@@ -1267,19 +1857,24 @@ the compiler that depends on it, the ledger before the search it has to account 
 last of all. The phase labels in the workstream column remain this document's own, so that a
 cross-reference elsewhere still reads the way it did.
 
-| Milestone      | Workstreams                                    | Contents                                                                                                                                                                                                                                                                                                                                              | Exit condition                                                                                                                                                         |
-| -------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M1 Foundation  | SD-0 Contract                                  | The policy document and its digest discipline, the refusal vocabulary, the candidate schema and its validator, identity for studies and trials, and the inventory the revised proposal asks for first: the APIs, hashes, data contracts and lifecycles of the research, split, significance, event-store and persistence modules this design composes | A baseline of known reproducible experiments exists, and every composition point this design names is confirmed against the fork's actual contract rather than assumed |
-| M2 Correctness | SD-0.5 Execution timing (new in this revision) | Deferred settlement and execution eligibility, the planted timing case table of Section 8.5, the corporate-action accounting tests, and the event-ordering invariants                                                                                                                                                                                 | Acceptance 4 and 6 hold, the pre-enforcement fixtures are recorded as failing, and the settlement mechanism is verified rather than assumed (Section 18)               |
-| M3 Core        | SD-1 Language and compiler                     | The validator's bounds and caps, the compiler's five responsibilities and its structured result, the interpreter, the feature adapter, and a hand-written candidate family                                                                                                                                                                            | Acceptance 1 and 3 hold: a hand-written candidate round-trips through the whole path, and no specification can name code                                               |
-| M4 Governance  | SD-2 Ledger, SD-3 Gates                        | Trial inventory with a hash chain, evidence packages, lineage, idempotent registration, the reconciliation check, the derived index, the recomputation test, the gate service, the pre-registered thresholds, the arm's-length holdout path, the admission gate, and the planted-case calibration that measures false accepts and false rejects       | Acceptance 2, 7, 8, 9, 10 and 11 hold, including a deliberate duplicate and a deliberate crash                                                                         |
-| M5 Discovery   | SD-4 Search, SD-5 Agents                       | Genome representation, bounded mutation and recombination, deduplication, Pareto selection, the admission test, the campaign budget, the agent adapter, the five roles, prompt versioning, invocation records, the structured-output validator, and the search-policy diagnosis                                                                       | Acceptance 5 and 14 hold, and no agent can reach a metric, a threshold, the holdout or an engine handle                                                                |
-| M6 Validation  | SD-6 Shadow                                    | The live-data signal monitor, simulated fills, drift reporting, the observation-count rule, and the end-to-end acceptance run                                                                                                                                                                                                                         | Acceptance 12, 13, 15 and 16 hold, with broker connectivity and live order submission absent throughout                                                                |
+| Milestone      | Workstreams                                                                                | Contents                                                                                                                                                                                                                                                                                                                              | Exit condition                                                                                                                                                                                                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| M1 Foundation  | SD-0 Contract                                                                              | The policy document and its digest discipline, the refusal vocabulary, the candidate schema and its validator, identity for studies and trials, the inventory of APIs, hashes, data contracts and lifecycles this design composes, and the integration verification matrix of Section 6.1                                             | Every composition point the design names has a matrix row with a fixture that proves it, plus the run-identity decision, the feature-access decision and the four count definitions of Section 10.5; no assumption is promoted to a verified capability because a symbol exists            |
+| M2 Correctness | SD-0.5 Execution timing and accounting (new in the second revision, extended by the third) | Deferred settlement and execution eligibility, the planted timing case table of Section 8.5, the corporate-action accounting tests of Section 15 criterion 6, and the event-ordering invariants                                                                                                                                       | Criteria 4 and 6 hold, the pre-enforcement fixtures are recorded as failing, and the settlement mechanism is verified rather than assumed. If the upstream settlement or dividend capability is required, M2 does not declare equity or ETF readiness; synthetic work continues separately |
+| M3 Core        | SD-1 Language and compiler                                                                 | The validator's bounds and caps, the compiler's five responsibilities and its structured result, the interpreter, the feature-value contract of Section 9.6, the allocation function of Section 9.7, and a hand-written candidate family                                                                                              | Criteria 1, 3, 19, 20 and 21 hold. The compiler does not advance a candidate towards credible performance reporting while its temporal and accounting prerequisites are unmet                                                                                                              |
+| M4 Governance  | SD-2 Ledger, SD-3 Gates                                                                    | Trial inventory with a hash chain and the registration protocol, evidence packages, lineage, the derived index, the recomputation test, the four counts, campaign and research-family lineage, the confirmation state machine, the gate service, the pre-registered thresholds, the admission assessment and its calibration protocol | Criteria 2, 7, 8, 9, 10, 11 and 18 hold, including a deliberate duplicate, a deliberate crash, an interrupted registration, a tampered receipt and a refused illegal transition. The admission gate is not complete until its formula and assumptions are testable                         |
+| M5 Discovery   | SD-4 Search, SD-5 Agents                                                                   | Genome representation, bounded mutation and recombination, deduplication, Pareto selection over named development metrics, the admission test, the campaign budget, the agent adapter, the five roles, prompt versioning, invocation records, the structured-output validator, the leakage controls, and the search-policy diagnosis  | Criteria 5, 14 and 17 hold, and the search cannot read locked validation or confirmation results, cannot change a pre-registered policy object, and cannot reach a metric, a threshold or an engine handle                                                                                 |
+| M6 Validation  | SD-6 Shadow                                                                                | The live-data signal monitor, simulated fills, drift reporting, the observation-count rule, and the end-to-end acceptance run                                                                                                                                                                                                         | Criteria 12, 13, 15 and 16 hold, over a complete evidence package with a locked candidate, the correct accounting model and identical temporal semantics between replay and shadow, with broker connectivity and live order submission absent throughout                                   |
 
 M2 is the first hard acceptance gate, which is the revised proposal's most consequential sequencing
-change: M3 does not begin until the timing contract is enforced and its planted cases pass, because
-a language built on unverified timing semantics compiles candidates that are profitable only in the
-simulator. The rest of the order is unchanged from the first revision.
+change and also the review's own ordering rule: M3 does not begin until the timing contract is
+enforced and its planted cases pass, because a language built on unverified timing semantics compiles
+candidates that are profitable only in the simulator. The review's summary of the whole order is
+adopted as the reading of this table: prove execution timing and accounting semantics; specify the
+feature, strategy and portfolio contracts; build and test the compiler against reference strategies;
+complete ledger identity, trial accounting, confirmation custody and admission governance; calibrate
+the gates on known positive, negative and leakage controls; and only then enable the agents and the
+search, with shadow monitoring last and execution capability absent throughout.
 
 Three dependencies outside this list matter. The equity semantics the proposals assume, point-in-time
 membership, corporate-action handling and market time, are the platform's own committed workstreams
@@ -1296,9 +1891,10 @@ verification, which is M1's exit condition rather than a caveat.
 
 ## 17. Decisions
 
-Fifteen decisions, each binding for the design that follows this document. They are numbered locally
-rather than continuing the platform's decision sequence, because they govern a new subsystem. SD15 is
-the one this revision added; SD3 and SD10 are the two it amended.
+Eighteen decisions, each binding for the design that follows this document. They are numbered locally
+rather than continuing the platform's decision sequence, because they govern a new subsystem. SD16 to
+SD18 come from the review's answers to the questions this document had left open, and SD3, SD5, SD6,
+SD7, SD10, SD12 and SD15 are amended by it.
 
 ### SD1. Placement and dependency budget
 
@@ -1324,7 +1920,11 @@ A candidate is a validated, hashed specification. The compiled form is a single 
 configured from that specification and injected as a live object, not generated code and not an
 import path. Compilation is the five-stage pipeline of Section 9.3, and it returns a structured
 result carrying errors, warnings, resolved feature versions and both digests, so a refusal is an
-auditable outcome rather than an obstacle to route around. Reason: the executed artifact must be the
+auditable outcome rather than an obstacle to route around. Two identities are kept and neither
+substitutes for the other: the specification digest of what was submitted, and the behavioural digest
+of the compiled plan including the resolved feature definitions, the policy, the engine version and
+the execution assumptions, with equivalence decided by a pre-registered semantic rule rather than by
+matching returns. Reason: the executed artifact must be the
 thing that was hashed, and the engine's importable-strategy path executes arbitrary module code.
 Evidence: `BacktestNode::add_strategy` and `BacktestEngine::add_strategy` accept a strategy instance;
 `ImportableStrategyConfig` resolves by module path.
@@ -1342,25 +1942,45 @@ close-to-next-session projection already implemented in `python/nautilus_trader/
 
 Append-only, digest-keyed files written through the existing experiment store, with a hash-chained
 trial inventory, and a derived index that is disposable. The engine's event store keeps the engine's
-own run history and is referenced, not copied. Reason: no SQL backend exists in this repository, a
-database would be a second source of truth, and the research store already implements the digest
-discipline.
+own run history and is referenced, not copied. One authoritative writer, the orchestrator, owns every
+append; workers return receipts rather than appending; every job carries an idempotency key derived
+from its declared inputs; registration is an explicit state transition; and nothing is counted before
+its artifact exists, its digest verifies and its run identity reconciles. The chain detects damage
+against a checkpoint held outside the write path, and is not claimed to protect against an actor who
+holds write access. Reason: no SQL backend exists in this repository, a database would be a second
+source of truth, the research store already implements the digest discipline, and the review is right
+that append-only, hash-chained and concurrent are claims that have to be reconciled with each other
+before any of them can be relied on. Evidence: the protocol in Section 8.4, and criteria 7 and 18 in
+Section 15.
 
-### SD6. Multiplicity comes from the ledger
+### SD6. Multiplicity comes from the ledger, through four separate counts
 
-Significance is reported against the count of executed trials derived from the inventory, with its
-declared dependence, never against a caller-supplied number. Failures count. Recognised duplicates
-count once. Compiled-out proposals are recorded as refusals and are not trials, and that choice is
-stated. Reason: the deflated Sharpe ratio is meaningless without the search that produced the
-maximum, and the existing provenance helper already derives the count from runs.
+Four quantities are maintained and never conflated: proposal attempts including refusals, distinct
+configurations under the pre-registered equivalence rule, executed experiments including failures,
+timeouts and duplicates, and statistical trials, which are the configurations that entered the
+selection process under a declared rule for failures, duplicates and dependence. Significance is
+reported against the statistical count with its declared dependence, never against a number a caller
+supplies. Failures stay in the statistical inventory; a crash or a timeout is recorded as a failure
+and is never given an imputed return; a recognised duplicate registers once as a configuration and
+once as an execution; and a proposal that never compiled is a refusal rather than a trial. Campaigns
+continuing one search over the same observations share a research-family identity, and the policy
+decides whether their trials enter one selection process. Reason: the review found a single counter
+carrying several incompatible meanings, and the deflated Sharpe ratio is meaningless without the
+search that produced the maximum. Evidence: Section 10.5, and the existing provenance helper that
+derives a count from recorded runs.
 
-### SD7. Gates are conjunctions, and the policy is frozen
+### SD7. Gates are conjunctions, the policy is frozen, and confirmation is campaign-level
 
-Thresholds, risk limits, costs, benchmark, universe, splits and holdout boundary are versioned and
-digest-pinned before a campaign; the search cannot read or write them; changing one starts a new
-campaign and leaves the old record standing; and no composite score exists whose weights an agent
-could move. Reason: the proposals' own warning, and the platform's precedent of declared contracts
-with digests.
+Thresholds, risk limits, costs, benchmark, universe, splits and the confirmation boundary are
+versioned and digest-pinned before a campaign; the search cannot read or write them; changing one
+starts a new campaign and leaves the old record standing; and no composite score exists whose weights
+an agent could move. Data has three roles, and selection reads development results only. The
+confirmation set is opened once per campaign for one frozen candidate; a replacement needs newly
+reserved, genuinely unseen data or a separately pre-registered protocol; and an evaluation made to
+help choose a winner is labelled exploratory rather than independent. Reason: the proposals' own
+warning, the platform's precedent of declared contracts with digests, and the review's finding that
+retiring each evaluated candidate does not undo a selection made across several of them. Evidence:
+the state machine of Section 11.3, the data roles of Section 8.6, and criterion 9 of Section 15.
 
 ### SD8. The probability of backtest overfitting is a diagnostic until calibrated
 
@@ -1378,31 +1998,43 @@ studentized test with a declared block length is the form, reported with that le
 
 ### SD10. The campaign budget is an output, not an input
 
-Before a campaign opens, the policy computes the maximum trial count its sample and target effect can
-support, from the six declared inputs of Section 7.4 and the published minimum-backtest-length
-relation, and the gate returns `ADMIT`, `REDUCE` or `REJECT`. A campaign may not raise its ceiling by
-changing the policy, relabelling trials, or opening a branch, and a proposed genome is not an
-independent backtest: only an executed experiment counts toward it. Reason: with a weekly-rebalanced
-equity sample of a few years the ceiling is tens of independent configurations, and a
-thousand-candidate campaign has spent its power before selecting anything. Evidence: the published
-worked example, that with five years of data no more than 45 independent configurations should be
-tried, which the revised proposal correctly insists is conditional on the assumptions behind it
-rather than a universal cap.
+Before a campaign opens, the gate produces a statistical feasibility assessment from the inputs of
+Section 7.4: the formula and its version, every input with its provenance, the assumptions and their
+sensitivity ranges, the executed configuration count, an estimated effective trial count where the
+method supports estimating one, the power limitations, and a statement of which claims the assessment
+can and cannot support. It returns `ADMIT`, `REDUCE` or `REJECT`, and an input that cannot be
+estimated produces a `REJECT` rather than a default. A campaign may not raise its ceiling by changing
+the policy, relabelling trials or opening a branch; a successor campaign against the same
+observations inherits what its family spent; and a proposed genome is not an independent backtest.
+Reason: the five-year, 45-configuration example is a reference case whose inversion has to be
+implemented and tested under its own assumptions, rather than combined with an independently
+estimated effective sample size to produce a universal ceiling. Evidence: Section 7.4, and criterion
+8 of Section 15.
 
 ### SD11. Agents propose and explain; they compute nothing
 
-No agent computes a performance number, sets a threshold, reads the holdout, or holds a credential.
+No agent computes a performance number, sets a threshold, reads the confirmation set, or holds a
+credential.
 Every invocation records the model, prompt version, sampling configuration, input hash, response
 hash and validation outcome, and structured output passes the same validator the language uses. A
 failed response is a recorded failure. Reason: the platform's own authority separation, and an
 official sibling project that grants an agent one semantic action and no engine authority.
 
-### SD12. First-release scope
+### SD12. First-release scope, and the equity accounting prerequisite
 
 Long only, daily signals, weekly or slower rebalance, equities and ETFs, no shorting, no options, no
-intraday logic, no fundamentals, and no family whose return depends on distribution capture. Reason:
-each excluded item needs either data the repository does not have, a valuation path it does not
-implement, or an intrabar accuracy that bar data cannot provide.
+intraday logic, no fundamentals, and no stop or target that needs the intraday path of a daily bar.
+Correct corporate-action accounting is a prerequisite for a credible equity or ETF performance claim
+rather than an exclusion of one strategy family: a long-only position held across an ex-dividend date
+is affected whether or not anyone set out to capture the distribution, so a candidate whose return
+includes distributions may not pass G1 while the cash path is undemonstrated, and not targeting
+dividends is not the same as being unaffected by them. Until that capability lands, the acceptable
+claims are those made on synthetic fixtures or on an instrument subset whose accounting is known to be
+correct, and neither is presented as validation of ordinary US equity or ETF performance. Fundamental
+data is excluded as an intentional product decision rather than merely as a missing capability,
+because constructing a historical feature from today's fundamentals introduces a look-ahead path of
+its own. Reason: each excluded item needs either data the repository does not have, a valuation path
+it does not implement, or an intrabar accuracy that bar data cannot provide.
 
 ### SD13. Shadow mode is a sandbox venue with live data
 
@@ -1425,30 +2057,95 @@ rather than built. Evidence: `TargetValue`, `TargetReconciler` and `docs/concept
 The deferral of settlement is a hard acceptance gate rather than a configuration the compiler is
 assumed to be able to emit. M2 proves that an intent cannot fill before its declared eligibility
 time, that the planted cases fail against the unsafe behaviour first, and that the mechanism the
-compiler emits is the mechanism the engine honours. If it is not, the deferral requires a platform
-change, which this design requests rather than works around. Reason: the revised proposal is right
-that a search built on unverified timing semantics optimises the simulator, and no later gate can
-detect a fill at a price that was not yet knowable. Evidence: the engine's default settlement at the
-bar's close, the absence of a native next-bar-open fill mode, and the case table of Section 8.5.
+compiler emits is the mechanism the engine honours. Both candidate mechanisms are tested while both
+remain candidates, the latency model and the decision-bridge projection, and the test observes the
+actual event ordering and fill timestamps rather than the configuration values it set. If neither
+enforces the contract, the settlement schedule is what changes, and no DSL field, warning or
+post-run filter is an acceptable substitute for it. The mechanism therefore remains unresolved until
+M2 produces test evidence rather than a design statement, which is also open question 5. Reason: the
+revised proposal is right that a search built on unverified timing semantics optimises the simulator,
+and no later gate can detect a fill at a price that was not yet knowable. Evidence: the engine's
+default settlement at the bar's close, the absence of a native next-bar-open fill mode, and the case
+table of Section 8.5.
 
-## 18. Remaining open questions
+### SD16. The run-identity join is a verified receipt, not a binding
 
-Five, none of which blocks M1 to M4.
+The engine's event store stays authoritative for engine-run history, and the research ledger
+references it through a receipt emitted by the runner: the run identity, the canonical manifest
+digest, the binary or build identity, the configuration digest, the seed, and an artifact reference.
+Reconciliation verifies the receipt against the manifest and fails closed. If the existing runner
+cannot emit a receipt through its public interface, a narrow Rust-side verification step emits one
+for Python to consume, and a general-purpose binding is added only if another platform use case needs
+it. Reason: the review's preferred design, and this design's rule that a research record references
+engine history rather than copying it. Evidence: Section 8.4, and the tampered-receipt fixture of
+criterion 18.
+
+### SD17. Regime analysis is a derived research artifact
+
+Regime slicing is built in the discovery layer over the authoritative portfolio-return series, using
+a registered regime label whose definition digest is stored beside the result and whose value is
+knowable at the decision time. It is not added to the kernel, and the slices are diagnostics: they
+explain when a candidate succeeded or failed, and they do not manufacture independent observations
+from overlapping slices of one return series. Reason: the review's recommendation, and the platform's
+rule that a research need does not become a kernel API until several components need the same
+semantics. Evidence: the analysis crate has period frames and no regime dimension, and
+`crates/research/src/measurement.rs` has a regime filter only.
+
+### SD18. No external lineage format in the first release
+
+Identity stays repository-native: canonical digests over versioned internal manifests, which is the
+contract the reproducibility envelope of Section 8.3 depends on. An export adapter for an external
+model such as OpenLineage is added only when a concrete consumer requires one, and it is a derived
+view rather than a second identity system. Reason: adopting an interchange format does not make a
+store immutable or a run reproducible, and it would add a dependency to a package that declares none.
+Evidence: the envelope in Section 8.3, and the review's disposition of question 4.
+
+## 18. Open questions
+
+These five questions were left open by the second revision. The review answered four of them and kept
+two blocked on test evidence, and the answers are adopted here; the questions stay listed so that a
+reader can see what is settled outright, what is settled for the first release only, and what is not
+settled at all. Two of them, the equity accounting prerequisite and the settlement mechanism, block
+milestones rather than expressing a design preference.
 
 1. **The run-identity join.** A research record should cite the engine run it evaluated. The event
    store has no Python binding, so today that citation is possible only where the runner surfaces the
    run identity. Does the join justify a binding, which is a platform feature, or a Rust-side
    verification step that consumes the research record?
+
+   Answer (SD16): the minimal verified run receipt, with Rust-side verification if the existing
+   runner cannot emit one through its public interface, and a general Python binding only if another
+   platform use case needs it. The receipt binds the run to its manifest digest, binary identity,
+   configuration digest and seed, and reconciliation fails closed when they disagree. M1's inventory
+   settles which path is feasible, so the join is designed but not yet demonstrated.
 2. **Per-regime aggregation.** The analysis layer has period frames but no regime dimension, and only
    a regime filter exists in the research crate. Does the gate's regime requirement justify a
    platform addition, or should the discovery layer slice the decision record itself and report the
    slice as its own artifact?
+
+   Answer (SD17): a derived discovery artifact over the authoritative portfolio-return series, using
+   a registered regime label whose definition digest is stored beside the result and whose value is
+   knowable at the decision time. No kernel addition, unless several components come to need the same
+   semantics. The slices are diagnostics, not independent observations.
 3. **Dividends as cash.** Crediting dividends is the largest valuation gap a discovery campaign over
-   equities would meet. It is a platform capability, and until it lands, distribution-sensitive
-   families are excluded rather than approximated.
+   equities would meet, and it affects any long-only position held across an ex-dividend date, not
+   only a family that sets out to capture distributions. It is a platform capability, and until it
+   lands the acceptable claims are those made on synthetic fixtures or on an instrument subset whose
+   accounting is known to be correct.
+
+   Answer (SD12, and blocking): close the upstream gap before claiming credible equity or ETF
+   performance. Cash entitlement at the ex-date, the credit itself, splits, symbol changes,
+   delistings and valuation around corporate actions are implemented and tested against deterministic
+   fixtures, and the reconciliation compares account equity and cash rather than two adjusted price
+   series. Until then the equity-readiness statement of M2 is withheld rather than softened.
 4. **Interchange format.** Should the ledger export an external lineage model such as OpenLineage,
    which would cost a dependency and a mapping, or is the repository's digest identity sufficient for
    the scale this design targets?
+
+   Answer (SD18): repository-native canonical digests over versioned internal manifests for the first
+   release, with an export adapter only when a concrete consumer requires one. Adopting an
+   interchange format does not make a store immutable or a run reproducible; the internal envelope of
+   Section 8.3 is the contract that does.
 5. **The settlement mechanism.** Section 8.5 assumes the compiler can defer settlement by emitting a
    latency model or the decision-bridge projection. If the engine's settlement cycle cannot be
    deferred that way, then the settlement schedule itself is what has to change, and that is a
@@ -1456,10 +2153,17 @@ Five, none of which blocks M1 to M4.
    M2: configure the deferral, submit an intent from a bar callback with a next-session eligibility,
    and observe whether any fill can settle at that bar's close.
 
+   Answer (SD15, and blocking): unresolved by design until M2 produces test evidence. Both candidate
+   mechanisms are tested while both remain candidates, the test observes event ordering and fill
+   timestamps rather than the configuration it set, and if neither enforces the contract the
+   settlement schedule changes rather than the DSL working around it. This blocks M3.
+
 ## Appendix A. Provenance of this record
 
-Input documents: `purposal/research1.md` and `purposal/research2.md`, read in that order, and
-`purposal/research3.md`, read as the revised proposal and dispositioned in Section 3.1.
+Input documents: `purposal/research1.md` and `purposal/research2.md`, read in that order;
+`purposal/research3.md`, read as the revised proposal and dispositioned in Section 3.1; and
+`purposal/feedback.md`, a review of this document whose findings are dispositioned in Section 3.2 and
+whose answers to the open questions are adopted in Section 18.
 
 Repository evidence: read directly during this study, covering the backtest engine and its
 documented fill, fee, latency and realism semantics; the corporate-action model and adjustment
