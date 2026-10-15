@@ -27,8 +27,9 @@ of its findings, and the corrections it requires are applied in place. A second 
 executable evidence rather than further revision, and is dispositioned in Section 3.3, where its five
 release tests become the first acceptance package.
 
-The companion implementation plan is not written. Section 16 carries the milestones it would
-expand, and Section 18 records what remains open.
+The companion implementation plan is `docs/design/strategy_discovery_implementation.md`, which
+expands the milestones of Section 16 into workstreams, fixtures and exit conditions, and fixes the
+evidence model that Section 15.1 specifies. Section 18 records what remains open.
 
 Revision note: third revision. The first revision read the two original proposal documents,
 inventoried what this repository already provides against what they ask for, sourced the validation
@@ -2011,7 +2012,9 @@ The order follows dependencies, and it deliberately puts everything that can be 
 anything that can search. It is the revised proposal's milestone order, adopted: correctness before
 the compiler that depends on it, the ledger before the search it has to account for, and the search
 last of all. The phase labels in the workstream column remain this document's own, so that a
-cross-reference elsewhere still reads the way it did.
+cross-reference elsewhere still reads the way it did. The companion implementation plan expands each
+milestone below into workstreams, fixtures and exit conditions, and states the evidence each exit
+requires.
 
 | Milestone      | Workstreams                                                                                | Contents                                                                                                                                                                                                                                                                                                                                                                  | Exit condition                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | -------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
