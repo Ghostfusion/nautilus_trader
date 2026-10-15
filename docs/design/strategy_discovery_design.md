@@ -22,7 +22,10 @@ this document does not settle.
 
 A separate review of this document, `purposal/feedback.md`, is treated as the fourth input. It is a
 review rather than a proposal, so it is not restated as requirements: Section 3.2 dispositions each
-of its findings, and the corrections it requires are applied in place.
+of its findings, and the corrections it requires are applied in place. A second review,
+`purposal/feedback2.md`, reviews the result of that work. It reopens no architecture, requires
+executable evidence rather than further revision, and is dispositioned in Section 3.3, where its five
+release tests become the first acceptance package.
 
 The companion implementation plan is not written. Section 16 carries the milestones it would
 expand, and Section 18 records what remains open.
@@ -47,6 +50,16 @@ and 8.6), the language and its runtime contracts (Section 9), the search and gat
 review's answers to the four questions it settles are adopted in Section 18, three of them become
 decisions SD16 to SD18, and five existing decisions are amended. Eighteen decisions are recorded in
 Section 17.
+
+Revision note: fourth revision. This revision applies the second review, `purposal/feedback2.md`,
+which accepts that the six findings now have clear requirements and moves the design from
+architectural revision to evidence-based acceptance testing without approving implementation. Three
+things follow. The five tests it requires become the first acceptance package, with its pass
+conditions adopted where they were sharper than this document's own wording (Section 3.3). The
+mapping from ledger events to each statistical method's inputs becomes an explicit, versioned
+artifact, because four counters are bookkeeping and not yet a trial count (Section 7.7). And
+acceptance becomes a bundle rather than an assertion: a criterion is not passed because its section
+exists, and the fields of each entry are specified in Section 15.1.
 
 ## 1. Purpose and scope
 
@@ -279,6 +292,34 @@ primitive already in the repository is reimplemented. The review's closing princ
 the ordering rule for Section 16: nothing searches until the simulator's timestamps, portfolio
 accounting, statistical inventory and validation data boundaries are demonstrated to be correct.
 
+### 3.3 The second review, and the evidence it requires
+
+`purposal/feedback2.md` reviews the third revision. Its verdict is that the six blocking findings now
+have clear requirements, that the document should move from architectural revision to evidence-based
+acceptance testing, and that implementation of the full pipeline is not yet approved. It reopens no
+finding as a documentation defect and adds no architectural change. What it adds is a demand for
+evidence, and every part of that demand is adopted.
+
+| What the second review requires                                                       | Disposition                                                                                                                                                       | Where             |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| Five release tests, with their pass conditions                                        | Adopted as the first acceptance package, with the pass conditions that were sharper than this document's own wording                                              | Section 15        |
+| An explicit, versioned mapping from ledger events to each statistical method's inputs | Adopted: the deflated Sharpe ratio, PBO and the admission assessment each name their inputs, and an unavailable input is a non-approval rather than a guess       | Section 7.7; SD6  |
+| Confirmation data must be operationally protected, not merely named                   | Adopted: transitions, reservations, candidate identity and access events are recorded together, and a verdict binds to the candidate identity it was produced for | Section 11.3      |
+| An acceptance-evidence bundle, one entry per criterion                                | Adopted: the entry fields are specified, and a criterion is not passed because its section exists                                                                 | Section 15.1      |
+| Settlement timing and corporate-action accounting stay hard blockers                  | Retained unchanged, and named in the milestone exit conditions                                                                                                    | Sections 11.1, 16 |
+
+It also states plainly what this document's own checks do and do not establish, and the design agrees
+rather than argues. Markdown linting, the documentation conventions hook, table normalisation, the
+hidden-character and non-Latin-text checks, offline link resolution, internal cross-references and the
+decision and criterion numbering establish documentation consistency and structural hygiene. They do
+not establish engine timing, correct cash accounting, statistical validity or deterministic runtime
+behaviour. Those need executable tests and retained evidence, which is what Section 15.1 specifies.
+
+The second review also declines to repeat the architecture review, and this document takes it at its
+word: no section below changes an architectural decision in response to it. The five tests tighten
+what several criteria already required, the ledger-event mapping closes a gap between bookkeeping and
+statistics, and the bundle changes how a criterion may be reported rather than what it claims.
+
 ## 4. Architectural invariants
 
 These are acceptance criteria that outrank feature completion. A workstream that delivers a
@@ -306,7 +347,9 @@ component while breaking one is rejected rather than merged with a follow-up.
    a declared rule and is not assumed equal to the proposal count, the distinct-configuration count
    or the execution count (Section 10.5). Campaigns that continue one search over the same
    observations are related by a research-family identity, so a new campaign does not silently
-   restore the statistical budget its predecessor spent (Section 7.4).
+   restore the statistical budget its predecessor spent (Section 7.4), and the count any statistical
+   method consumes is produced by a versioned mapping from ledger events rather than by reading a
+   counter directly (Section 7.7).
 7. **The holdout is a campaign-level resource, not a per-candidate one.** A candidate evaluated
    against the confirmation set is retired whether it passed or failed. Beyond that, a campaign may
    not use confirmation results to choose among candidates: one candidate is frozen before the set
@@ -524,6 +567,10 @@ A trial count that is too small overstates the best result, and treating every t
 independent trial overstates the multiplicity, which is why trial identity and effective trial count
 are separate quantities (Section 10.5).
 
+The second review goes one step further than that last sentence, and the design accepts it: the
+contract between the inventory and the estimator is a versioned mapping rather than a convention, and
+where an input it needs is missing the gate returns a non-approval instead of a number (Section 7.7).
+
 ### 7.2 The probability of backtest overfitting: diagnosis, not gate
 
 The proposals name PBO as a gate. The procedure is implementable here: the repository already
@@ -558,7 +605,10 @@ excluded with its reason, rather than omitted. And calibration on planted noise 
 sufficient. Rejecting random specifications shows the diagnostic is not indiscriminate; it does not
 show that it can separate a realistic false discovery from a real but weak strategy, so the
 calibration suite of Section 15 also carries positive, leakage, cost, concentration, parameter-spike
-and accounting controls, and reports which controls the diagnostic failed to detect.
+and accounting controls, and reports which controls the diagnostic failed to detect. Its eligibility
+rule is part of the versioned mapping of Section 7.7: which configurations may enter the comparison
+matrix, and how an incomplete or failed run is represented there, are declared before the matrix is
+assembled rather than decided while it is being filled.
 
 ### 7.3 The reality check and the superior-predictive-ability test: refused
 
@@ -650,6 +700,12 @@ gate must emit is adopted as the minimum report:
 - A statement of which statistical claims the assessment can and cannot support, so a later reader
   is not left to infer it from a status.
 
+Two of those fields are separate numbers rather than one, which is the second review's point: a raw
+executed configuration count is an observation about the search, while an effective trial count is an
+inference that needs its own method and its own uncertainty. The assessment therefore states the power
+it assumes and the uncertainty in that assumption, and where an effective count cannot be estimated it
+says so and returns `REJECT` rather than a point estimate that merely looks precise (Section 7.7).
+
 Becoming usable needs more than those fields, and this is the least finished part of the design.
 Before the gate may refuse a campaign it has to define the claim it protects: the return sampling
 frequency used for the Sharpe estimate; the target effect size together with its significance and
@@ -738,6 +794,27 @@ development data or on locked evaluation data decides whether selection may see 
   access error, so the design does not rely on it.
 - The unrefereed controlled studies cited in Sections 7.2 and 7.3 are independent and quantitative
   but not peer reviewed, and are labelled as such wherever they are used.
+
+### 7.7 The mapping from ledger events to statistical inputs
+
+The second review's sharpest statistical point is that separate counters are bookkeeping rather than
+statistics: a thousand correlated configurations are not a thousand independent experiments, and a
+crashed execution is not a completed observation. The design therefore requires an explicit, versioned
+mapping from ledger events to the inputs each method consumes, and forbids a method from producing a
+precise number whose provenance is missing.
+
+| Method                              | What the mapping must supply                                                                                                                                                                                           | When it cannot                                                                           |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Deflated Sharpe ratio               | The return series for each configuration and its frequency; the selection universe the trial came from; the assumptions the deflation rests on; and the effective trial-count methodology with its dependence estimate | `INCONCLUSIVE`, naming the missing input                                                 |
+| Probability of backtest overfitting | Which eligible configurations enter the comparison matrix; the common index they are placed on; and how incomplete, failed or non-converged runs are represented rather than quietly excluded                          | Reported as not computable on the available inventory rather than on a convenient subset |
+| Admission assessment                | The raw executed configuration count and the effective count as separate numbers, with the uncertainty in the estimated power stated                                                                                   | `REJECT` when an input cannot be estimated                                               |
+
+Three rules make that table binding rather than descriptive. The mapping is versioned and digest-pinned
+with the campaign policy, so every result records which mapping produced it. Raw and effective counts
+are never conflated, and any method needing an effective count states how it obtained one and what it
+assumes. And where an input is unavailable the outcome is an explicit non-approval, `REJECT` or
+`INCONCLUSIVE` as the method requires, because an effective trial count manufactured from incomplete
+evidence is worse than a refusal: it is a refusal that looks like a result.
 
 ## 8. Architecture: components, processes, and the ledger
 
@@ -909,6 +986,12 @@ of them can be relied on.
 - **A duplicate execution is a distinct execution event.** It keeps the canonical configuration
   identity, so the execution count and the configuration count differ by design rather than by
   accident.
+- **An incomplete record is explicitly incomplete.** A registration that fails part-way leaves a
+  record marked incomplete rather than absent or complete, so a reader can distinguish an experiment
+  that never ran from one that ran and did not finish registering. An incomplete record is never
+  counted, and it is never completed retroactively by inference.
+- **Concurrency is a case, not an assumption.** Two workers registering the same experiment contend
+  for one idempotency key, and the second registration is idempotent rather than additive.
 
 What the hash chain is, and is not: it makes a deletion, an insertion or a reordering detectable when
 a record is verified against a checkpoint held elsewhere, and it offers nothing against an actor who
@@ -917,7 +1000,11 @@ detect accidental or partial damage, and on the writer protocol, the digest disc
 and a checkpoint outside the write path for anything stronger. Section 12 draws the boundary in the
 same terms: a local control, not a security guarantee. Those statements are the acceptance
 requirements for the ledger protocol, and neither idempotency nor reconciliation is optional detail
-to be deferred.
+to be deferred. Its acceptance test injects failures before registration, during artifact
+persistence, after registration and during duplicate submission, adds the concurrent case above, and
+requires that no experiment receives an invented return, that duplicate submissions are idempotent,
+that incomplete records remain explicitly incomplete, and that reconciliation fails closed when
+artifacts or identities disagree (Section 15 criterion 18).
 
 The honest limitation: the event store has no Python binding, so today a research record can cite a
 run identity and its manifest hashes only if the runner surfaces them. If a stronger join is
@@ -1042,6 +1129,13 @@ produced only after the candidate set is frozen. And a candidate may still be ev
 several folds inside development, which is a nested walk-forward design; what may not be ambiguous is
 which inner results are search-visible and which outer results stay untouched until the search they
 judge has finished.
+
+A role is attached to a result together with the search lineage that consumed it, rather than to a
+dataset on its own. A validation partition whose results influenced an evolutionary lineage is
+development data for that lineage, and no candidate descended from it may present a result on that
+partition as independent confirmation, even though the same partition remains locked for a lineage
+that has never seen it. The ledger records the pair, so the label cannot be shed by moving a candidate
+to a new branch or by re-proposing it under a new identity.
 
 The mechanism is a declared role on every result rather than a convention, so the ledger records it
 and the gate refuses a result whose role does not match the stage that asked for it. The test that
@@ -1544,6 +1638,17 @@ its family's confirmation history rather than a fresh copy of the data. And an e
 to help choose a winner is exploratory by construction, which is the review's point expressed as a
 rule rather than as a caution.
 
+The second review's remaining test is whether the workflow enforces that rule operationally rather
+than describing it, and the enforcement is a single record rather than four assertions. A custody
+transition, the reservation of the data it consumed, the identity of the frozen candidate, and the
+access event are written together, and the confirmation verdict is bound to that candidate identity.
+That is what closes the failure mode the review names: an agent or a worker querying confirmation
+results repeatedly, changing a candidate, and still claiming an independent confirmation. There is no
+operation that releases a reservation; a verdict whose candidate identity no longer matches the frozen
+one is void rather than merely suspicious; and a dataset is not independent because the system calls
+it confirmation, but because the record shows that nothing which influenced the candidate ever read
+it.
+
 ### 11.4 Candidate lifecycle
 
 `PROPOSED`, `COMPILED`, `BACKTESTED`, `VALIDATION_PENDING`, `VALIDATED`, `SHADOW`, with `INVALID`,
@@ -1720,8 +1825,17 @@ period. The list merges this document's own criteria with the revised proposal's
 (Section 3.1), which supplies seven of them; its remaining items extend a criterion below or are
 covered by an invariant. Five further criteria, numbered 17 to 21, are added by the review and are
 the tests it names explicitly: selection isolation, the ledger protocol, interpreter parity, feature
-parity, and allocation determinism. The numbering is a reading order rather than a priority order, and
-the exit conditions of Section 16 name the criteria each milestone owes.
+parity, and allocation determinism. The second review adds the twenty-second, which governs how any of
+them may be reported, and Section 15.1 specifies it. The numbering is a reading order rather than a
+priority order, and the exit conditions of Section 16 name the criteria each milestone owes.
+
+One rule about reporting governs all of them. A criterion is not satisfied by the existence of a
+design section, and this document's own passing checks are evidence about documentation rather than
+about behaviour: linting, the documentation conventions hook, table normalisation, the character
+checks, offline link resolution and cross-reference numbering establish hygiene, not engine timing,
+cash accounting, statistical validity or runtime determinism. Each criterion therefore needs an entry
+in the acceptance-evidence bundle of Section 15.1, produced by running its test, and a criterion whose
+fixture does not exist yet is reported as blocked rather than passed.
 
 1. **One candidate round-trips.** A hand-written specification compiles, runs, produces an evidence
    package, and appears in the ledger, with no manual edit at any step. Mechanism: an acceptance
@@ -1738,7 +1852,9 @@ the exit conditions of Section 16 name the criteria each milestone owes.
    imported.
 4. **A signal cannot fill before its declared eligibility time, and the test that proves it can
    fail.** The case table of Section 8.5 is run against the unsafe behaviour first, where it must
-   fail, and then against the enforced contract, where it must pass. Mechanism: the planted fixtures
+   fail, and then against the enforced contract, where it must pass. The test observes recorded event
+   ordering and fill timestamps, not the configuration values it set, because a configured latency
+   value is not evidence that the matching engine honoured the timing. Mechanism: the planted fixtures
    as gate calibration cases, with the pre-enforcement result recorded as evidence that the test
    discriminates.
 5. **Planted defects are caught.** A look-ahead candidate that profits only from close-to-close
@@ -1750,10 +1866,10 @@ the exit conditions of Section 16 name the criteria each milestone owes.
    equity or ETF candidate whose return includes distributions is refused rather than misstated,
    whether or not it targets them. Mechanism: a reconciliation fixture containing a dividend, a
    split, a position held through an ex-dividend date, and positions opened and closed around a
-   corporate-action boundary, comparing account equity and cash rather than two adjusted price
-   series. Until dividend cash flows exist upstream this criterion cannot pass, and it is a
-   prerequisite for a credible equity performance claim rather than a property of one exempted
-   strategy family (Section 11.1).
+   corporate-action boundary, reconciling cash, quantity, position value and account equity rather
+   than comparing two adjusted price series. Until dividend cash flows exist upstream this criterion
+   cannot pass, and it is a prerequisite for a credible equity performance claim rather than a
+   property of one exempted strategy family (Section 11.1).
 7. **Every executed configuration is in the inventory, and the four counts are separate.** Each
    executed configuration appears in the immutable inventory together with its executions and its
    attempts, including failures, recognised duplicates and abandoned branches; the four counts of
@@ -1815,34 +1931,74 @@ the exit conditions of Section 16 name the criteria each milestone owes.
 16. **The whole search is auditable after the fact.** A reader with the ledger, the policy digest and
     the engine version can reconstruct which candidates existed, which ran, which were judged, under
     which policy, and why each was rejected.
-17. **Selection cannot read locked evaluation data.** An evolutionary loop tuned to maximise a
-    deliberately noisy development metric never receives the locked validation or confirmation
-    result, and the role of every result is recorded. Mechanism: a search fixture with a noisy
-    development metric and an instrumented validator that fails the test if a locked result reaches
-    the selection step, plus an audit of the data roles recorded on the results.
-18. **The ledger protocol holds under interruption and repetition.** A result is not counted before
-    its artifact exists, its digest verifies and its run identity reconciles; an interrupted
-    registration replays to one statistical trial; a duplicate submission registers once; and
-    reconciliation fails closed. Mechanism: fixtures that kill the process between execution and
-    registration, that resubmit a job, and that alter the seed, binary identity or configuration
-    digest on the research side of a receipt, each of which must produce the specified outcome rather
-    than an exception.
-19. **The interpreter matches independently specified strategies.** For each reference strategy of
-    Section 9.3, being a ranking strategy, a threshold strategy, a holding-period exit, a rebalance
-    schedule, a target allocation, a strategy with no eligible instruments, and one encountering a
-    split or an opening gap, the interpreted strategy's signals, targets, timing and results match
-    the fixture. Mechanism: differential tests against hand-written fixtures, so that a defect in the
-    interpreter cannot present itself as a strategy result.
+17. **Selection cannot read locked evaluation data, and a partition that informed the search is
+    labelled development for that lineage.** Candidate A is evaluated, its result influences the
+    creation of candidate B, and B performs better on the same validation partition; that partition is
+    then development data for the affected lineage, and B's result there may not be presented as
+    independent confirmation. Confirmation requires newly reserved unseen data, or a pre-registered
+    protocol that was not adapted to those results. Mechanism: the A-then-B fixture above, an
+    instrumented validator that fails the test if a locked result reaches the selection step, and an
+    audit that the role recorded on each result names the lineage that consumed it.
+18. **The ledger protocol holds under interruption, concurrency and repetition.** A result is not
+    counted before its artifact exists, its digest verifies and its run identity reconciles; an
+    interrupted registration replays to one statistical trial; a duplicate submission registers once;
+    incomplete records stay explicitly incomplete; and reconciliation fails closed when artifacts or
+    identities disagree. Mechanism: injected failures before registration, during artifact
+    persistence, after registration and during duplicate submission, plus two concurrent workers
+    registering the same experiment and a fixture that alters the seed, binary identity or
+    configuration digest on the research side of a receipt. No experiment receives an invented
+    return, and none of these cases may be satisfied by an exception rather than by the specified
+    outcome.
+19. **The interpreter matches independently specified strategies.** The same fixed strategy and the
+    same market-data fixture are run through the reference implementation and through the compiled
+    interpreter, and for each reference strategy of Section 9.3, being a ranking strategy, a threshold
+    strategy, a holding-period exit, a rebalance schedule, a target allocation, a strategy with no
+    eligible instruments, and one encountering a split or an opening gap, the interpreted strategy's
+    signals, targets, timing and portfolio outcomes match the fixture. Differences are permitted only
+    within tolerances that are stated and justified, and a difference in a feature definition or in
+    compiled behaviour may not hide behind an unchanged specification identifier, because that
+    identifier is not what the run executed (Section 9.4). Mechanism: differential tests against
+    hand-written fixtures, so that a defect in the interpreter cannot present itself as a strategy
+    result.
 20. **Feature values have parity between research and decision time.** One fixture computes a feature
     offline through the research path and evaluates it at decision time through the interpreter, and
-    the two values, their availability timestamps and their universe membership agree. Mechanism:
-    the parity test of Section 9.6, over features with warm-up, missing values and a membership
-    change.
-21. **Allocation is deterministic.** The same selection, weights, positions and policy produce the
-    same targets, and each of the nine allocation decisions of Section 9.7 is exercised, including
-    the cases where caps bind against each other, where eligible instruments are fewer than the
-    requested portfolio size, and where a held position leaves the selected set. Mechanism: the
-    target-allocation fixtures, run twice for identity and once per declared rule.
+    the two agree on value, observation and availability timestamps, warm-up behaviour, missing-value
+    treatment, units and universe membership. Mechanism: the parity test of Section 9.6, over
+    features with warm-up, missing values, a unit convention and a membership change.
+21. **Allocation is deterministic, and it has no undocumented fallback.** The same selection,
+    weights, positions and versioned policy produce the same targets, with tie-breaks that are
+    deterministic. Each of the nine allocation decisions of Section 9.7 is exercised, including
+    ranking ties, a missing feature, a halted security, position and sector caps binding against each
+    other, a partial fill, a cash constraint, eligible instruments fewer than the requested portfolio
+    size, and a held position leaving the selected set. Mechanism: the target-allocation fixtures, run
+    twice for identity and once per declared rule, with a check that no path mutates a target outside
+    a declared rule.
+22. **Acceptance evidence is a bundle, not an assertion.** Every criterion in this list has an entry
+    in the acceptance-evidence bundle of Section 15.1, and a criterion without one is not passed.
+    Mechanism: the bundle's schema is validated, each entry's receipts and artifact digests are
+    resolved against the ledger, and a criterion whose fixture does not exist is reported as blocked
+    rather than passed.
+
+### 15.1 The acceptance-evidence bundle
+
+The second review asks for one compact bundle rather than a set of claims, and it is right that the
+existence of a design section is not evidence. Each of the twenty-two criteria above has one entry,
+and an entry carries six fields.
+
+| Field                 | Contents                                                                                        |
+| --------------------- | ----------------------------------------------------------------------------------------------- |
+| Criterion             | Its number, and the requirement in one sentence, quoted rather than paraphrased                 |
+| Test or fixture       | The identifier of the test, fixture or campaign that exercises it                               |
+| Procedure             | The command or reproducible procedure that runs it, with its inputs, seeds and versioned policy |
+| Expected and observed | The expected result, the observed result, and the difference where they differ                  |
+| Receipts and identity | The run receipt, artifact digests, engine build and policy digest the entry was produced under  |
+| Status                | Pass, fail, or blocked with the dependency that blocks it, and for a failure the open defect    |
+
+Three rules govern the bundle. An entry is produced by running the test, never by reading this
+document, and a self-assessment is not an entry. A criterion whose fixture does not yet exist is
+blocked, which is a legitimate status and the honest one. And the bundle is itself a derived artifact
+of the ledger, so its entries cite receipts the ledger holds, and a reader can re-run a procedure and
+compare the two results rather than take the entry's word for it.
 
 ## 16. Recommended order
 
@@ -1857,14 +2013,21 @@ the compiler that depends on it, the ledger before the search it has to account 
 last of all. The phase labels in the workstream column remain this document's own, so that a
 cross-reference elsewhere still reads the way it did.
 
-| Milestone      | Workstreams                                                                                | Contents                                                                                                                                                                                                                                                                                                                              | Exit condition                                                                                                                                                                                                                                                                             |
-| -------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| M1 Foundation  | SD-0 Contract                                                                              | The policy document and its digest discipline, the refusal vocabulary, the candidate schema and its validator, identity for studies and trials, the inventory of APIs, hashes, data contracts and lifecycles this design composes, and the integration verification matrix of Section 6.1                                             | Every composition point the design names has a matrix row with a fixture that proves it, plus the run-identity decision, the feature-access decision and the four count definitions of Section 10.5; no assumption is promoted to a verified capability because a symbol exists            |
-| M2 Correctness | SD-0.5 Execution timing and accounting (new in the second revision, extended by the third) | Deferred settlement and execution eligibility, the planted timing case table of Section 8.5, the corporate-action accounting tests of Section 15 criterion 6, and the event-ordering invariants                                                                                                                                       | Criteria 4 and 6 hold, the pre-enforcement fixtures are recorded as failing, and the settlement mechanism is verified rather than assumed. If the upstream settlement or dividend capability is required, M2 does not declare equity or ETF readiness; synthetic work continues separately |
-| M3 Core        | SD-1 Language and compiler                                                                 | The validator's bounds and caps, the compiler's five responsibilities and its structured result, the interpreter, the feature-value contract of Section 9.6, the allocation function of Section 9.7, and a hand-written candidate family                                                                                              | Criteria 1, 3, 19, 20 and 21 hold. The compiler does not advance a candidate towards credible performance reporting while its temporal and accounting prerequisites are unmet                                                                                                              |
-| M4 Governance  | SD-2 Ledger, SD-3 Gates                                                                    | Trial inventory with a hash chain and the registration protocol, evidence packages, lineage, the derived index, the recomputation test, the four counts, campaign and research-family lineage, the confirmation state machine, the gate service, the pre-registered thresholds, the admission assessment and its calibration protocol | Criteria 2, 7, 8, 9, 10, 11 and 18 hold, including a deliberate duplicate, a deliberate crash, an interrupted registration, a tampered receipt and a refused illegal transition. The admission gate is not complete until its formula and assumptions are testable                         |
-| M5 Discovery   | SD-4 Search, SD-5 Agents                                                                   | Genome representation, bounded mutation and recombination, deduplication, Pareto selection over named development metrics, the admission test, the campaign budget, the agent adapter, the five roles, prompt versioning, invocation records, the structured-output validator, the leakage controls, and the search-policy diagnosis  | Criteria 5, 14 and 17 hold, and the search cannot read locked validation or confirmation results, cannot change a pre-registered policy object, and cannot reach a metric, a threshold or an engine handle                                                                                 |
-| M6 Validation  | SD-6 Shadow                                                                                | The live-data signal monitor, simulated fills, drift reporting, the observation-count rule, and the end-to-end acceptance run                                                                                                                                                                                                         | Criteria 12, 13, 15 and 16 hold, over a complete evidence package with a locked candidate, the correct accounting model and identical temporal semantics between replay and shadow, with broker connectivity and live order submission absent throughout                                   |
+| Milestone      | Workstreams                                                                                | Contents                                                                                                                                                                                                                                                                                                                                                                  | Exit condition                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M1 Foundation  | SD-0 Contract                                                                              | The policy document and its digest discipline, the refusal vocabulary, the candidate schema and its validator, identity for studies and trials, the inventory of APIs, hashes, data contracts and lifecycles this design composes, and the integration verification matrix of Section 6.1                                                                                 | Every composition point the design names has a matrix row with a fixture that proves it, plus the run-identity decision, the feature-access decision and the four count definitions of Section 10.5; no assumption is promoted to a verified capability because a symbol exists; and the acceptance-evidence bundle of Section 15.1 exists with one entry per criterion, every entry not yet run marked blocked rather than passed                                               |
+| M2 Correctness | SD-0.5 Execution timing and accounting (new in the second revision, extended by the third) | Deferred settlement and execution eligibility, the planted timing case table of Section 8.5, the corporate-action accounting tests of Section 15 criterion 6, and the event-ordering invariants                                                                                                                                                                           | Criteria 4 and 6 hold, the pre-enforcement fixtures are recorded as failing, and the settlement mechanism is verified rather than assumed. Both candidate mechanisms are tested against recorded event ordering and fill timestamps, and discovery stays blocked until this milestone passes. If the upstream settlement or dividend capability is required, M2 does not declare equity or ETF readiness; synthetic work continues separately                                    |
+| M3 Core        | SD-1 Language and compiler                                                                 | The validator's bounds and caps, the compiler's five responsibilities and its structured result, the interpreter, the feature-value contract of Section 9.6, the allocation function of Section 9.7, and a hand-written candidate family                                                                                                                                  | Criteria 1, 3, 19, 20 and 21 hold. The compiler does not advance a candidate towards credible performance reporting while its temporal and accounting prerequisites are unmet, parity differences beyond a stated tolerance are failures, and no difference may hide behind an unchanged specification identifier                                                                                                                                                                |
+| M4 Governance  | SD-2 Ledger, SD-3 Gates                                                                    | Trial inventory with a hash chain and the registration protocol, evidence packages, lineage, the derived index, the recomputation test, the four counts, the versioned ledger-event mapping, campaign and research-family lineage, the confirmation state machine, the gate service, the pre-registered thresholds, the admission assessment and its calibration protocol | Criteria 2, 7, 8, 9, 10, 11 and 18 hold, including a deliberate duplicate, a deliberate crash, an interrupted registration, a concurrent registration, a tampered receipt, an incomplete record left incomplete, and a refused illegal transition. The admission gate is not complete until its formula, its assumptions and its ledger-event mapping are testable                                                                                                               |
+| M5 Discovery   | SD-4 Search, SD-5 Agents                                                                   | Genome representation, bounded mutation and recombination, deduplication, Pareto selection over named development metrics, the admission test, the campaign budget, the agent adapter, the five roles, prompt versioning, invocation records, the structured-output validator, the leakage controls, and the search-policy diagnosis                                      | Criteria 5, 14 and 17 hold, and the search cannot read locked validation or confirmation results, cannot change a pre-registered policy object, and cannot reach a metric, a threshold or an engine handle                                                                                                                                                                                                                                                                       |
+| M6 Validation  | SD-6 Shadow                                                                                | The live-data signal monitor, simulated fills, drift reporting, the observation-count rule, and the end-to-end acceptance run                                                                                                                                                                                                                                             | Criteria 12, 13, 15 and 16 hold, over a complete evidence package with a locked candidate, the correct accounting model and identical temporal semantics between replay and shadow, with broker connectivity and live order submission absent throughout. The bundle is complete, with every criterion passed, failed or blocked with its dependency named, and shadow results are reported as integration and operational evidence rather than as proof of future profitability |
+
+The second review's five release tests map onto the criteria as follows, and each exit condition above
+is stated in those terms: selection isolation is criterion 17, ledger crash and recovery is criterion
+18, interpreter and feature parity are criteria 19 and 20, allocation determinism is criterion 21, and
+settlement timing with corporate-action accounting is criteria 4 and 6. Its release discipline is
+adopted as the reading of the table: M2's two criteria are proved before discovery is unblocked, and
+M5 enables agent-driven evolution only after the earlier controls are enforced.
 
 M2 is the first hard acceptance gate, which is the revised proposal's most consequential sequencing
 change and also the review's own ordering rule: M3 does not begin until the timing contract is
@@ -1967,7 +2130,9 @@ continuing one search over the same observations share a research-family identit
 decides whether their trials enter one selection process. Reason: the review found a single counter
 carrying several incompatible meanings, and the deflated Sharpe ratio is meaningless without the
 search that produced the maximum. Evidence: Section 10.5, and the existing provenance helper that
-derives a count from recorded runs.
+derives a count from recorded runs. The mapping from ledger events to each method's inputs is
+versioned and its assumptions travel with the result, and where an input cannot be estimated the
+method returns a non-approval rather than a manufactured effective count (Section 7.7).
 
 ### SD7. Gates are conjunctions, the policy is frozen, and confirmation is campaign-level
 
@@ -2161,9 +2326,11 @@ milestones rather than expressing a design preference.
 ## Appendix A. Provenance of this record
 
 Input documents: `purposal/research1.md` and `purposal/research2.md`, read in that order;
-`purposal/research3.md`, read as the revised proposal and dispositioned in Section 3.1; and
+`purposal/research3.md`, read as the revised proposal and dispositioned in Section 3.1;
 `purposal/feedback.md`, a review of this document whose findings are dispositioned in Section 3.2 and
-whose answers to the open questions are adopted in Section 18.
+whose answers to the open questions are adopted in Section 18; and `purposal/feedback2.md`, a second
+review, accepted as requiring executable evidence rather than further revision and dispositioned in
+Section 3.3.
 
 Repository evidence: read directly during this study, covering the backtest engine and its
 documented fill, fee, latency and realism semantics; the corporate-action model and adjustment
