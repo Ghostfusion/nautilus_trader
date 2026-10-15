@@ -1167,7 +1167,7 @@ pub fn signal_quality(
             continue;
         }
         let mean = mean_of(&ics).expect("the series is not empty");
-        let standard_error = jackknife_standard_error(&ics, |values| mean_of(values));
+        let standard_error = jackknife_standard_error(&ics, mean_of);
         coefficient.mean = Some(mean);
         coefficient.standard_error = standard_error;
         coefficient.interval = standard_error.map(|se| (mean - 1.96 * se, mean + 1.96 * se));
