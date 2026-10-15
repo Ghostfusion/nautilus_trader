@@ -198,6 +198,68 @@ count and the effective count are separate numbers for the assessment; and a mis
 consequence: both consume their inputs through one implementation of the mapping, so that a method
 cannot quietly define its own counting rule.
 
+### 5.3 The four counts and their mapping rules
+
+Fixed before any count is taken, which is M1.5's deliverable. The rules are versioned
+`discovery.counts/v1` and digest-pinned with the campaign policy, so a result records which mapping
+produced it, and a change to any row below changes the identity of every entry that depended on the
+mapping (Section 4.3).
+
+The ledger recognises the event kinds below, and no other event changes a count.
+
+| Event kind                                                | Recorded when                                                                                                    | Effect on the counts                                                                         |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `proposal_recorded`                                       | A proposal arrives from an agent or an operator, before any validation                                           | `proposal_attempt_count` +1                                                                  |
+| `specification_refused`                                   | The validator or the compiler refuses a proposal                                                                 | None. The refusal is recorded, and it is not a statistical trial                             |
+| `compilation_recorded`                                    | A specification compiles and its behavioural identity is computed                                                | `unique_configuration_count` +1 when that identity is new under the equivalence rule, else 0 |
+| `equivalence_merge`                                       | The policy's equivalence rule merges a new identity into an existing configuration                               | None, and both identities are recorded beside the merge                                      |
+| `job_submitted`                                           | The orchestrator submits a job carrying its idempotency key                                                      | None                                                                                         |
+| `execution_attempt_closed`                                | A worker closes an attempt: completed, economically failed, errored, timed out, or crashed                       | `executed_experiment_count` +1, whatever the outcome                                         |
+| `registration_verified`                                   | The artifact exists, its digest verifies, and the run identity reconciles against the receipt                    | None by itself; it is the precondition for the row below                                     |
+| `trial_admitted`                                          | A verified execution enters the statistical inventory of its selection process                                   | `statistical_trial_count` +1                                                                 |
+| `registration_incomplete`                                 | Registration failed part-way                                                                                     | None, now or later. An incomplete record is never counted and never completed by inference   |
+| `duplicate_registration`                                  | A second registration arrives under an existing idempotency key                                                  | None. Every count is unchanged, which is what idempotent means here                          |
+| `gate_verdict`, `custody_event`, `search_policy_recorded` | A gate returns a verdict, a holdout reservation or access happens, a generation records its search-policy digest | None. These are evidence and lineage, not multiplicity                                       |
+
+| Count                        | Definition in force                                                        | Increments only on                                                     | Explicitly not                                                                 |
+| ---------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `proposal_attempt_count`     | Every proposal from an agent or an operator, compiled or not               | `proposal_recorded`                                                    | A refused proposal is counted here and nowhere else                            |
+| `unique_configuration_count` | Distinct configurations under the pre-registered equivalence rule          | `compilation_recorded` with a behavioural identity new under that rule | A duplicate execution adds nothing, even when it reruns the same configuration |
+| `executed_experiment_count`  | Every attempt that closed, whatever its outcome                            | `execution_attempt_closed`                                             | A job submitted and never started, and a duplicate registration                |
+| `statistical_trial_count`    | Verified executions admitted to the relevant statistical selection process | `trial_admitted`                                                       | A refusal, an incomplete registration, and any result that has not verified    |
+
+Five rules bind that arithmetic, and they are the ones M4.2 implements and criterion 7 tests.
+
+- Nothing is counted before it verifies. Only `registration_verified` admits a record to any
+  statistical use, so an unverified result is recorded and not counted.
+- Raw and effective are separate numbers and are never substituted for each other. The assessment
+  receives both, and the deflation receives the effective one with the methodology that produced it.
+- A crash or a timeout counts conservatively. The attempt stays in the execution count, it enters the
+  statistical inventory as a failure, and it is never given a fabricated or imputed return. A campaign
+  whose failure rate leaves the statistical count uncertain is `INCONCLUSIVE` on that ground alone.
+- A configuration that ran and failed economically stays in the statistical inventory, because its
+  return series is part of the maximum the deflation corrects for.
+- Nothing resets. The counts include earlier generations and abandoned branches, and a campaign that
+  continues a search over the same observations inherits, through its research family, what its
+  predecessor spent against that data.
+
+One reading is named rather than left to inference, because the design states it tersely: Section
+7.7's "raw executed configuration count" is taken here as `unique_configuration_count`, since the
+assessment's question is how many configurations were tried rather than how many times a machine ran,
+and the two differ by design wherever a duplicate execution exists.
+
+The methods then consume the mapping as follows, which is design Section 7.7 with its inputs pinned
+to the events above.
+
+| Method                              | What it consumes                                                                                                                         | Where the mapping supplies it                                                                                                                                      | When it cannot                               |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| Deflated Sharpe ratio               | The return series and frequency per configuration, the selection universe, and the effective trial count with its dependence methodology | `trial_admitted` records of the selection process, the campaign's declared universe at admission, and `statistical_trial_count` under the declared dependence rule | `INCONCLUSIVE`, naming the missing input     |
+| Probability of backtest overfitting | The eligible set, the common index its rows share, and the representation of failures                                                    | The four states of Section 5.1 applied to the admitted set, and the fold layout's common index                                                                     | Not computable, and no statistic is produced |
+| Admission assessment                | The raw configuration count and the effective count as separate numbers, with the uncertainty in the estimated power                     | `unique_configuration_count` and `statistical_trial_count` under the same dependence rule                                                                          | `REJECT`, never a defaulted number           |
+
+Both of the first two consume their inputs through one implementation of this table rather than one
+per method, which is the mechanical consequence Section 5.2 states.
+
 ## 6. Package layout and interfaces
 
 Placement is SD1: a pure-Python subpackage beside the repository's other research Python, with tests
