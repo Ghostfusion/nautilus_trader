@@ -59,6 +59,12 @@ For task-oriented data recipes, see the [how-to guides](../how_to/):
 | [Gold Perpetual Book Imbalance (AX Exchange)](gold_book_imbalance_ax)               | Order book imbalance on XAU-PERP.             | Databento API key |
 | [On-Chain Grid Market Making with Short-Term Orders (dYdX)](grid_market_maker_dydx) | Grid MM on dYdX v4 perpetuals.                | Live API          |
 
+## Strategy discovery
+
+| Tutorial                                 | Description                                                        | Data      |
+| :--------------------------------------- | :----------------------------------------------------------------- | :-------- |
+| [Strategy discovery][strategy_discovery] | Compile a candidate from data, run it, and read the evidence back. | Synthetic |
+
 ## Options
 
 | Tutorial                                                                | Description                                    | Data     |
@@ -80,3 +86,4 @@ For task-oriented data recipes, see the [how-to guides](../how_to/):
 [backtest_orderbook_bybit]: https://github.com/nautechsystems/nautilus_trader/blob/develop/docs/tutorials/backtest_orderbook_bybit.py
 [loading_external_data]: https://github.com/nautechsystems/nautilus_trader/blob/develop/docs/how_to/loading_external_data.py
 [data_catalog_databento]: https://github.com/nautechsystems/nautilus_trader/blob/develop/docs/how_to/data_catalog_databento.py
+[strategy_discovery]: https://github.com/Ghostfusion/nautilus_trader/blob/develop/docs/tutorials/strategy_discovery.py
