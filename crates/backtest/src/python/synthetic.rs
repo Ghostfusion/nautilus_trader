@@ -23,14 +23,8 @@ use crate::synthetic::{SyntheticFlow, SyntheticFlowConfig};
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 #[pyo3::pymethods]
 impl SyntheticFlowConfig {
-    /// Synthetic order-flow configuration calibrated to a target Hurst exponent and impact
+    /// Configuration for a `SyntheticFlow` calibrated to a target Hurst exponent and impact
     /// exponent.
-    ///
-    /// # Errors
-    ///
-    /// Returns a ``ValueError`` if ``target_hurst`` is not finite and strictly between 0.5 and
-    /// 1.0 exclusive, if ``impact_exponent`` is not finite and within the half-open range
-    /// ``(0.0, 0.5]``, or if ``count`` is below 2.
     #[new]
     fn py_new(target_hurst: f64, impact_exponent: f64, count: usize, seed: u64) -> PyResult<Self> {
         Self::new(target_hurst, impact_exponent, count, seed).map_err(to_pyvalue_err)
@@ -64,13 +58,21 @@ impl SyntheticFlowConfig {
         self.seed()
     }
 
-    /// Generates a ``SyntheticFlow`` from this configuration.
+    /// Generates a `SyntheticFlow` from this configuration.
     ///
-    /// The draws are deterministic under the configured seed.
+    /// The white noise is drawn from `rand::rngs::StdRng` seeded with
+    /// `StdRng.seed_from_u64`, the same generator the fill models use, as a standard uniform
+    /// draw over `[-1.0, 1.0)`. A uniform draw is a deliberate, documented choice: `rand_distr`
+    /// is not a dependency of `nautilus-backtest`, and the moving-average kernel, not the
+    /// marginal distribution of the innovations, is what carries the persistence.
+    ///
+    /// The induced price path uses a unit impact coefficient of 1.0, so the price change over a
+    /// period is exactly `sign(flow) * |flow|^impact_exponent`.
     ///
     /// # Errors
     ///
-    /// Returns a ``ValueError`` if generation fails.
+    /// Returns an error only if the flow cannot be generated; the configuration was validated at
+    /// construction, so this is currently infallible.
     #[pyo3(name = "generate")]
     fn py_generate(&self) -> PyResult<SyntheticFlow> {
         self.generate().map_err(to_pyvalue_err)
@@ -87,7 +89,7 @@ impl SyntheticFlow {
         self.quantities().to_vec()
     }
 
-    /// Returns the induced price path, beginning at ``0.0``.
+    /// Returns the induced price path, beginning at `0.0`.
     #[getter]
     #[pyo3(name = "prices")]
     fn py_prices(&self) -> Vec<f64> {

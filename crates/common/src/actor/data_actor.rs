@@ -279,7 +279,7 @@ pub trait DataActor {
     ///
     /// # Panics
     ///
-    /// Panics when a callback-scoped binding is used outside an active callback.
+    /// Panics if a callback-scoped binding is used outside an active callback.
     fn actor_id(&self) -> ActorId
     where
         Self: DataActorBinding,

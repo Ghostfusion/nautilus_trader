@@ -30,7 +30,7 @@ use rust_decimal::Decimal;
 use tokio_util::sync::CancellationToken;
 use ustr::Ustr;
 
-use super::{PolymarketDataClient, runtime::is_instrument_expired};
+use super::{PolymarketDataClient, runtime::is_instrument_expired_and_not_reported_open};
 use crate::{
     common::consts::GAMMA_CONDITION_IDS_BATCH_SIZE,
     filters::{
@@ -260,7 +260,7 @@ pub(super) fn cache_and_publish_instruments(
     let mut total = 0;
 
     for instrument in instruments {
-        if is_instrument_expired(&instrument, now_ns) {
+        if is_instrument_expired_and_not_reported_open(&instrument, now_ns) {
             log::debug!(
                 "Skipping expired instrument {} during live cache publish",
                 instrument.id()
@@ -403,8 +403,7 @@ pub(super) async fn refresh_expired_market_closure(
     cache: &Arc<AtomicMap<InstrumentId, InstrumentAny>>,
     sender: &EventSender<DataEvent>,
     now_ns: UnixNanos,
-    closed_condition_ids: &Arc<parking_lot::Mutex<AHashSet<String>>>,
-    ws_sub_mutex: &Arc<tokio::sync::Mutex<()>>,
+    subscriptions: &super::subscriptions::DataSubscriptions,
     cancellation: Option<&CancellationToken>,
 ) -> anyhow::Result<usize> {
     let mut carried: AHashMap<String, Vec<InstrumentId>> = AHashMap::new();
@@ -448,14 +447,7 @@ pub(super) async fn refresh_expired_market_closure(
     // Serialize terminal application with reset. If reset wins the boundary, this old generation
     // must not mutate or publish from the cache it captured before the request.
     for condition_id in &closed_ids {
-        if !crate::data::runtime::register_closed_condition_for_live_data(
-            closed_condition_ids,
-            ws_sub_mutex,
-            condition_id,
-            cancellation,
-        )
-        .await
-        {
+        if !subscriptions.mark_closed(condition_id, cancellation).await {
             return Ok(0);
         }
     }
@@ -508,10 +500,10 @@ impl PolymarketDataClient {
         self.provider.initialize(false).await?;
 
         let total = cache_and_publish_instruments(
-            &self.closed_condition_ids,
+            &self.subscriptions.closed_condition_ids,
             &self.instrument_update_state,
             &self.instruments,
-            &self.token_meta,
+            &self.subscriptions.token_meta,
             &self.data_sender,
             self.clock.get_time_ns(),
             self.provider
@@ -547,8 +539,8 @@ impl PolymarketDataClient {
         let instrument_config = self.config.instrument_config.clone();
         let instruments_cache = self.instruments.clone();
         let instrument_update_state = self.instrument_update_state.clone();
-        let token_meta = self.token_meta.clone();
-        let closed_condition_ids = self.closed_condition_ids.clone();
+        let token_meta = self.subscriptions.token_meta.clone();
+        let closed_condition_ids = self.subscriptions.closed_condition_ids.clone();
         let data_sender = self.data_sender.clone();
         let clock = self.clock;
 
@@ -851,6 +843,117 @@ mod tests {
     }
 
     #[rstest]
+    #[case::open(false, 1)]
+    #[case::closed(true, 0)]
+    fn cache_and_publish_past_end_market_honors_gamma_closure(
+        #[case] closed: bool,
+        #[case] expected: usize,
+    ) {
+        let mut binary = past_end_open_instrument();
+        set_market_closed(&mut binary, closed);
+        let instrument = InstrumentAny::BinaryOption(binary);
+        let now_ns = Instrument::expiration_ns(&instrument).unwrap();
+        let instruments = Arc::new(AtomicMap::new());
+        let token_meta = Arc::new(DashMap::new());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let total = cache_and_publish_instruments(
+            &Arc::new(Mutex::new(AHashSet::new())),
+            &Arc::new(Mutex::new(InstrumentUpdateState::default())),
+            &instruments,
+            &token_meta,
+            &tx.into(),
+            now_ns,
+            vec![instrument.clone()],
+        );
+        let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+
+        assert_eq!(total, expected);
+        assert_eq!(instruments.load().len(), expected);
+        assert_eq!(token_meta.len(), expected);
+        assert_eq!(events.len(), expected);
+
+        if !closed {
+            assert_eq!(
+                instruments.get_cloned(&instrument.id()),
+                Some(instrument.clone())
+            );
+            let token = token_meta
+                .get(&Ustr::from(instrument.raw_symbol().as_str()))
+                .unwrap();
+            assert_eq!(token.instrument_id, instrument.id());
+            assert_eq!(token.neg_risk, Some(true));
+            assert!(
+                matches!(&events[0], DataEvent::Instrument(published) if published == &instrument)
+            );
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn bootstrap_and_refresh_publish_past_end_open_market(
+        #[values(false, true)] refresh: bool,
+    ) {
+        let addr = market_closure_server(false, false).await;
+        let http = PolymarketGammaHttpClient::new(
+            Some(format!("http://{addr}")),
+            1,
+            RetryConfig::default(),
+        )
+        .unwrap();
+        let instrument_id = past_end_open_instrument().id;
+
+        let config = crate::config::PolymarketInstrumentProviderConfig {
+            load_ids: Some(vec![instrument_id]),
+            ..Default::default()
+        };
+
+        let mut client = make_client(PolymarketDataClientConfig::default());
+        client.provider =
+            crate::providers::PolymarketInstrumentProvider::new(http.clone(), Some(config.clone()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        client.data_sender = tx.into();
+
+        if refresh {
+            let total = refresh_scoped_instruments(
+                http,
+                Some(config),
+                vec![],
+                &client.subscriptions.closed_condition_ids,
+                &client.instrument_update_state,
+                &client.instruments,
+                &client.subscriptions.token_meta,
+                &client.data_sender,
+                client.clock,
+            )
+            .await
+            .unwrap();
+            assert_eq!(total, 2);
+        } else {
+            client.bootstrap_instruments().await.unwrap();
+        }
+
+        let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+
+        assert_eq!(client.instruments.load().len(), 2);
+        assert_eq!(client.subscriptions.token_meta.len(), 2);
+        assert_eq!(events.len(), 2);
+
+        for event in events {
+            let DataEvent::Instrument(instrument) = event else {
+                panic!("expected instrument");
+            };
+
+            assert!(is_expired(&instrument, client.clock.get_time_ns()));
+            assert_eq!(market_closed(&instrument), Some(false));
+            assert_eq!(
+                client.instruments.get_cloned(&instrument.id()),
+                Some(instrument)
+            );
+        }
+    }
+
+    #[rstest]
     fn apply_live_instrument_orders_cache_and_publication() {
         let instruments = Arc::new(AtomicMap::new());
         let instrument_update_state = Arc::new(Mutex::new(InstrumentUpdateState::default()));
@@ -966,15 +1069,24 @@ mod tests {
         )
         .unwrap();
 
-        let closed_condition_ids = Arc::new(Mutex::new(AHashSet::new()));
-        let ws_sub_mutex = Arc::new(tokio::sync::Mutex::new(()));
+        let (ws_tx, _ws_rx) = tokio::sync::mpsc::unbounded_channel();
+        let ws_client =
+            crate::websocket::pool::PolymarketMarketPoolHandle::test_single_shard(ws_tx, &[]);
+
+        let subscriptions = crate::data::DataSubscriptions::new(
+            instruments.clone(),
+            Arc::new(AtomicMap::new()),
+            Arc::new(AtomicMap::new()),
+            Arc::new(Mutex::new(())),
+            ws_client,
+            false,
+        );
         let result = refresh_expired_market_closure(
             &client,
             &instruments,
             &tx.clone().into(),
             UnixNanos::from(u64::MAX),
-            &closed_condition_ids,
-            &ws_sub_mutex,
+            &subscriptions,
             None,
         )
         .await;
@@ -1059,15 +1171,25 @@ mod tests {
         )
         .unwrap();
 
-        let closed_condition_ids = Arc::new(Mutex::new(AHashSet::new()));
-        let ws_sub_mutex = Arc::new(tokio::sync::Mutex::new(()));
+        let (ws_tx, _ws_rx) = tokio::sync::mpsc::unbounded_channel();
+        let ws_client =
+            crate::websocket::pool::PolymarketMarketPoolHandle::test_single_shard(ws_tx, &[]);
+
+        let subscriptions = crate::data::DataSubscriptions::new(
+            instruments.clone(),
+            Arc::new(AtomicMap::new()),
+            Arc::new(AtomicMap::new()),
+            Arc::new(Mutex::new(())),
+            ws_client,
+            false,
+        );
+        let closed_condition_ids = subscriptions.closed_condition_ids.clone();
         let result = refresh_expired_market_closure(
             &client,
             &instruments,
             &tx.clone().into(),
             UnixNanos::from(u64::MAX),
-            &closed_condition_ids,
-            &ws_sub_mutex,
+            &subscriptions,
             None,
         )
         .await;

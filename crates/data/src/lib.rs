@@ -51,6 +51,7 @@
 
 #![warn(rustc::all)]
 #![warn(clippy::pedantic)]
+#![warn(clippy::clone_on_ref_ptr)]
 #![deny(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(nonstandard_style)]
@@ -134,6 +135,8 @@ pub mod client;
 pub mod cross_venue;
 pub mod engine;
 pub mod option_chains;
+#[doc(hidden)]
+pub mod replay;
 
 #[cfg(feature = "python")]
 pub mod python;

@@ -164,7 +164,7 @@ impl BenchmarkInterval {
         self.end.as_u64()
     }
 
-    /// Returns whether the timestamp in nanoseconds lies within the interval.
+    /// Returns whether `timestamp` lies within the interval.
     #[pyo3(name = "contains")]
     fn py_contains(&self, timestamp: u64) -> bool {
         self.contains(UnixNanos::from(timestamp))
@@ -400,7 +400,7 @@ impl Metric {
         self.declaration
     }
 
-    /// The value when the metric is defined, or `None` when it is unavailable.
+    /// Returns the metric value when it is available.
     #[getter]
     #[pyo3(name = "value")]
     fn py_value(&self) -> Option<f64> {
@@ -537,51 +537,59 @@ impl ExecutionMetrics {
 #[gen_stub_pymethods]
 #[pyo3::pymethods]
 impl ExecutionObserver {
-    /// Creates a new observer for the declared parent terms.
+    /// A pure, clock-free accumulator for one parent order's execution observations.
+    ///
+    /// The observer stores only what it is fed and derives every metric without external state. It does
+    /// not mutate orders, maintain a ledger or depend on a clock or message bus.
     #[new]
     fn py_new(terms: ExecutionTerms) -> Self {
         Self::new(terms)
     }
 
-    /// The declared parent terms.
+    /// Returns the declared parent terms.
     #[getter]
     #[pyo3(name = "terms")]
     fn py_terms(&self) -> ExecutionTerms {
         self.terms().clone()
     }
 
-    /// The declared benchmark interval, or `None` when none was declared.
+    /// Returns the declared benchmark interval.
     #[getter]
     #[pyo3(name = "benchmark")]
     fn py_benchmark(&self) -> Option<BenchmarkInterval> {
         self.benchmark()
     }
 
-    /// Returns a copy of this observer with the benchmark interval set.
+    /// Sets the benchmark interval.
     #[pyo3(name = "with_benchmark")]
     fn py_with_benchmark(&self, interval: BenchmarkInterval) -> Self {
         self.clone().with_benchmark(interval)
     }
 
-    /// Sets the decision timestamp in nanoseconds and the decision price.
+    /// Sets the decision timestamp and price.
     #[pyo3(name = "set_decision")]
     fn py_set_decision(&mut self, timestamp: u64, price: Price) {
         self.set_decision(UnixNanos::from(timestamp), price);
     }
 
-    /// Sets the arrival timestamp in nanoseconds and the arrival price.
+    /// Sets the arrival timestamp and price.
     #[pyo3(name = "set_arrival")]
     fn py_set_arrival(&mut self, timestamp: u64, price: Price) {
         self.set_arrival(UnixNanos::from(timestamp), price);
     }
 
-    /// Sets the parent order's submission timestamp in nanoseconds.
+    /// Sets the parent order's submission timestamp.
     #[pyo3(name = "set_parent_submitted")]
     fn py_set_parent_submitted(&mut self, timestamp: u64) {
         self.set_parent_submitted(UnixNanos::from(timestamp));
     }
 
     /// Records the child counts reported by the execution algorithm that produced this execution.
+    ///
+    /// When set, the count metrics (child count and child churn) use these counts rather than
+    /// re-deriving them from the observed child events, so a caller holding an algorithm can
+    /// reuse its own `counts(primary_id)` evidence. The quantity-based metrics always work from
+    /// the observed child events.
     #[pyo3(name = "set_algorithm_child_counts")]
     fn py_set_algorithm_child_counts(&mut self, submitted: u32, cancelled: u32) {
         self.set_algorithm_child_counts(submitted, cancelled);

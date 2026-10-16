@@ -53,9 +53,14 @@ impl LinearMarketImpactModel {
 impl PrefactorInterval {
     /// A calibrated prefactor with the interval it was measured over and its provenance.
     ///
-    /// An interval whose bounds are equal is a point calibration, which is honest only when the
-    /// prefactor really was measured; `source` records which of the two a caller is looking at. A
-    /// model applies the upper bound, so an uncertain prefactor cannot flatter a simulated result.
+    /// The prefactor is uncertain by nature: the corpus finds it running from 0.34 to 1.50 across
+    /// markets, and reconstructing metaorders from an anonymous tape inflates it about twofold, so the
+    /// honest output is a bounded range rather than a point. An interval whose bounds are equal is a
+    /// point calibration and is allowed, because a prefactor fitted from observable fills really is a
+    /// point; the source is what records which of the two a caller is looking at.
+    ///
+    /// A model applies `Self.applied`, which is the upper bound, so an uncertain prefactor cannot
+    /// flatter a simulated result.
     #[new]
     #[pyo3(signature = (lower, upper, source))]
     fn py_new(lower: f64, upper: f64, source: ImpactCalibrationSource) -> PyResult<Self> {
@@ -63,41 +68,45 @@ impl PrefactorInterval {
     }
 
     /// Creates a point calibration from a single prefactor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `prefactor` is not finite and greater than zero.
     #[staticmethod]
     #[pyo3(name = "point")]
     fn py_point(prefactor: f64, source: ImpactCalibrationSource) -> PyResult<Self> {
         Self::point(prefactor, source).map_err(to_pyvalue_err)
     }
 
-    /// The lower bound of the calibrated prefactor.
+    /// Returns the lower bound of the calibrated prefactor.
     #[getter]
     #[pyo3(name = "lower")]
     fn py_lower(&self) -> f64 {
         self.lower()
     }
 
-    /// The upper bound of the calibrated prefactor.
+    /// Returns the upper bound of the calibrated prefactor.
     #[getter]
     #[pyo3(name = "upper")]
     fn py_upper(&self) -> f64 {
         self.upper()
     }
 
-    /// The bound a model applies, which is the upper one.
+    /// Returns the bound a model applies, which is the upper one.
     #[getter]
     #[pyo3(name = "applied")]
     fn py_applied(&self) -> f64 {
         self.applied()
     }
 
-    /// Where the interval came from.
+    /// Returns where the interval came from.
     #[getter]
     #[pyo3(name = "source")]
     fn py_source(&self) -> ImpactCalibrationSource {
         self.source()
     }
 
-    /// Whether the interval is a point.
+    /// Returns whether the interval is a point.
     #[getter]
     #[pyo3(name = "is_point")]
     fn py_is_point(&self) -> bool {
@@ -106,9 +115,14 @@ impl PrefactorInterval {
 
     /// Returns this calibration with the anonymous-tape de-bias applied.
     ///
-    /// Both bounds are divided by the inflation the reconstruction introduced, and the result
-    /// records that it was de-biased rather than measured. A prefactor fitted from the venue's own
-    /// fills is refused, because a measured prefactor needs no correction.
+    /// Both bounds are divided by `ANONYMOUS_TAPE_INFLATION`, because reconstructing metaorders
+    /// from an anonymous tape inflates the prefactor about twofold, and the result records that it
+    /// was de-biased rather than measured.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the prefactor was not fitted from an anonymous tape, because a measured
+    /// prefactor needs no correction and applying one would be a silent mistake.
     #[pyo3(name = "debiased")]
     fn py_debiased(&self) -> PyResult<Self> {
         self.debiased().map_err(to_pyvalue_err)
@@ -124,14 +138,31 @@ impl PrefactorInterval {
 impl SquareRootMarketImpactModel {
     /// A concave market impact model with a square-root shape.
     ///
-    /// The model moves the fill price against the order direction by the interval's upper bound
-    /// times the square root of the fill's size relative to `reference_quantity`, capped at
-    /// `max_increments`: a fill equal to the reference quantity moves by the applied prefactor's
-    /// worth of increments, and doubling the size less than doubles the adjustment. The exponent is
-    /// fixed at one half because the corpus finds it robust while the prefactor is not, which is
-    /// why the prefactor arrives as an interval with its calibration source rather than as a number.
+    /// The model moves the fill price against the order direction by the prefactor times the square
+    /// root of the fill's size relative to the reference quantity, capped at `max_increments`:
     ///
-    /// The model is a pure function of the fill quantity and takes no random seed.
+    /// ```text
+    /// increments = floor(prefactor * sqrt(fill_quantity / reference_quantity))
+    /// ```
+    ///
+    /// The prefactor is a `PrefactorInterval` rather than a number, and the model applies its upper
+    /// bound, so a prefactor inferred from an anonymous tape cannot be read as measured and cannot
+    /// flatter a result. The interval's bounds and source are part of the model's display, so a report
+    /// that prints the model prints what the calibration is worth.
+    ///
+    /// The exponent is fixed at one half rather than exposed as a parameter, because the corpus finds
+    /// the exponent robust across markets while the prefactor is not: a tape-derived calibration
+    /// reports the exponent as 0.489 +/- 0.0015 and 0.50 [0.32, 0.66], against a prefactor running
+    /// from 0.34 to 1.50 across three markets.
+    ///
+    /// The shape is what makes the model concave: doubling the filled quantity multiplies the impact
+    /// by the square root of two rather than by two, so a larger fill is filled less far through the
+    /// book per unit than a smaller one. The model keeps no state between calls, so the adjustment a
+    /// fill receives does not depend on the fills observed around it.
+    ///
+    /// The square root is evaluated in binary floating point and floored to whole increments, so the
+    /// count that leaves the model is exact while the ratio under it is not rational in general. A
+    /// fill whose continuous impact is below one increment leaves the price unchanged.
     #[new]
     #[pyo3(signature = (prefactor, reference_quantity, max_increments))]
     fn py_new(
@@ -142,21 +173,21 @@ impl SquareRootMarketImpactModel {
         Self::new(prefactor, reference_quantity, max_increments).map_err(to_pyruntime_err)
     }
 
-    /// The calibrated prefactor, with its bounds and its source.
+    /// Returns the calibrated prefactor, with its bounds and its source.
     #[getter]
     #[pyo3(name = "prefactor")]
     fn py_prefactor(&self) -> PrefactorInterval {
         self.prefactor()
     }
 
-    /// The fill quantity that moves the fill price by the prefactor's worth of increments.
+    /// Returns the fill quantity that moves the fill price by the prefactor's worth of increments.
     #[getter]
     #[pyo3(name = "reference_quantity")]
     fn py_reference_quantity(&self) -> Quantity {
         self.reference_quantity()
     }
 
-    /// The maximum number of price increments a fill price may move.
+    /// Returns the maximum number of price increments a fill price may move.
     #[getter]
     #[pyo3(name = "max_increments")]
     fn py_max_increments(&self) -> u64 {

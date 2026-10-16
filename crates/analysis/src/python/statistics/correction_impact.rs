@@ -25,14 +25,12 @@ use crate::{statistic::PortfolioStatistic, statistics::correction_impact::Correc
 #[pymethods]
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 impl CorrectionImpactReport {
-    /// Creates a report of a correction's effect on a declared outcome metric.
+    /// Reports a correction's measured effect on a declared outcome metric.
     ///
-    /// The metric must be declared: a correction whose effect is not named cannot be reported,
-    /// so the constructor raises rather than defaulting a metric for the caller.
-    ///
-    /// # Errors
-    ///
-    /// Raises `ValueError` when `outcome_metric` is absent or blank.
+    /// The report is the pair of measurements a correction is read through: `uncorrected` is the
+    /// metric on the stream as the gate received it and `corrected` is the metric on the stream after
+    /// the correction. The delta is their difference, so a correction that lowered a Sharpe ratio from
+    /// 1.518 to 0.589 reports a delta of -0.929 beside the count of records it removed.
     #[new]
     #[pyo3(signature = (outcome_metric=None, uncorrected=0.0, corrected=0.0))]
     #[expect(clippy::needless_pass_by_value)]
@@ -51,24 +49,31 @@ impl CorrectionImpactReport {
         self.name()
     }
 
+    /// Returns the declared outcome metric the correction was measured against.
     #[getter]
     #[pyo3(name = "metric")]
     fn py_metric(&self) -> String {
         self.metric().to_string()
     }
 
+    /// Returns the metric's value on the stream as the gate received it.
     #[getter]
     #[pyo3(name = "uncorrected")]
     fn py_uncorrected(&self) -> f64 {
         self.uncorrected()
     }
 
+    /// Returns the metric's value on the stream after the correction.
     #[getter]
     #[pyo3(name = "corrected")]
     fn py_corrected(&self) -> f64 {
         self.corrected()
     }
 
+    /// Returns the change the correction made to the declared metric.
+    ///
+    /// The delta is `corrected - uncorrected`. It is exactly zero when the correction changed
+    /// nothing, and it is reported rather than omitted.
     #[getter]
     #[pyo3(name = "delta")]
     fn py_delta(&self) -> f64 {

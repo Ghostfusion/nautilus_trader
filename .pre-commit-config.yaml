@@ -89,15 +89,17 @@ repos:
     hooks:
       - id: yamlfmt
 
-  - repo: https://github.com/hadolint/hadolint
+  - repo: https://github.com/AleksaC/hadolint-py
     rev: v2.15.1
     hooks:
-      - id: hadolint-docker
+      - id: hadolint
         name: dockerfile-lint
         description: Lint Dockerfiles for best practices and errors
+        types: [file]
+        files: (^|/)Dockerfile[^/]*$
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.50.3
+    rev: v1.51.1
     hooks:
       - id: typos
         description: Enforces American English spelling and checks for common typos
@@ -473,7 +475,7 @@ repos:
     rev: v3.21.2
     hooks:
       - id: pyupgrade
-        args: ["--py312-plus"]
+        args: ["--py313-plus"]
 
   - repo: https://github.com/asottile/add-trailing-comma
     rev: v4.0.0
@@ -512,7 +514,7 @@ repos:
           - "--in-place"
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.12.22 # Must match [uv] in .nautilus-engineering/tools.toml
+    rev: 0.13.0 # Must match [uv] in .nautilus-engineering/tools.toml
     hooks:
       - id: uv-lock
         args: ["--project", "python"]

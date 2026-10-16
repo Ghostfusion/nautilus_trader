@@ -45,6 +45,10 @@ pub mod universe;
 pub mod defi;
 
 use crate::{
+    data::{
+        CustomDataTrait, ensure_py_extractor_registered, ensure_rust_extractor_registered,
+        get_rust_extractor, greeks::YieldCurve,
+    },
     identifiers::{InstrumentIdError, OptionSeriesIdError},
     types::CurrencyLookupError,
 };
@@ -83,9 +87,15 @@ pub fn currency_lookup_error_to_pyvalue_err(e: CurrencyLookupError) -> PyErr {
 ///
 /// # Errors
 ///
-/// Returns a `PyErr` if registering any module components fails.
+/// Returns an error if registering any module components fails.
 #[pymodule]
 pub fn model(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let _result = ensure_rust_extractor_registered::<YieldCurve>();
+    let type_name = YieldCurve::type_name_static();
+    if let Some(extractor) = get_rust_extractor(type_name) {
+        let _result = ensure_py_extractor_registered(type_name, extractor);
+    }
+
     // Types
     m.add("HIGH_PRECISION", crate::types::fixed::HIGH_PRECISION_MODE)?;
     m.add("FIXED_SCALAR", crate::types::fixed::FIXED_SCALAR)?;
@@ -171,6 +181,7 @@ pub fn model(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::data::greeks::BlackScholesGreeksResult>()?;
     m.add_class::<crate::data::greeks::GreeksData>()?;
     m.add_class::<crate::data::greeks::PortfolioGreeks>()?;
+    m.add_class::<crate::data::greeks::YieldCurve>()?;
     m.add_class::<crate::data::option_chain::OptionGreeks>()?;
     m.add_class::<crate::data::option_chain::OptionChainSlice>()?;
     m.add_class::<crate::data::option_chain::OptionStrikeData>()?;
@@ -214,6 +225,7 @@ pub fn model(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::enums::MarketStatusAction>()?;
     m.add_class::<crate::enums::OmsType>()?;
     m.add_class::<crate::enums::OptionKind>()?;
+    m.add_class::<crate::enums::OptionSideFilter>()?;
     m.add_class::<crate::enums::OtoTriggerMode>()?;
     m.add_class::<crate::enums::OrderSide>()?;
     m.add_class::<crate::enums::OrderStatus>()?;
@@ -274,6 +286,20 @@ pub fn model(_: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     // Instruments
+    m.add_class::<instruments::tick_scheme::PyFixedTickScheme>()?;
+    m.add_class::<instruments::tick_scheme::PyTieredTickScheme>()?;
+    m.add_function(wrap_pyfunction!(
+        instruments::tick_scheme::py_register_tick_scheme,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        instruments::tick_scheme::py_get_tick_scheme,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        instruments::tick_scheme::py_list_tick_schemes,
+        m
+    )?)?;
     m.add_class::<crate::instruments::BettingInstrument>()?;
     m.add_class::<crate::instruments::BinaryOption>()?;
     m.add_class::<crate::instruments::Cfd>()?;
@@ -448,7 +474,7 @@ mod tests {
             assert!(py_err.is_instance_of::<PyValueError>(py));
             assert_eq!(
                 py_err.value(py).to_string(),
-                "invalid `OptionSeriesId` value 'DERIBIT:BTC:USD': expected format 'VENUE:UNDERLYING:SETTLEMENT:EXPIRY'"
+                "invalid `OptionSeriesId` value 'DERIBIT:BTC:USD': expected format 'VENUE:UNDERLYING:[REFERENCE:]SETTLEMENT:EXPIRY'"
             );
         });
     }

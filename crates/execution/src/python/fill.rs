@@ -340,6 +340,22 @@ impl CompetitionAwareFillModel {
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 impl AdverseSelectionFillModel {
     /// Fill model whose passive fill probability falls with queue ahead and adverse flow.
+    ///
+    /// A resting order fills less often when more quantity sits ahead of it at its price and when
+    /// recent aggressive trade flow is against its side. The fill probability is
+    ///
+    /// ```text
+    /// p = prob_fill_on_limit
+    ///     * exp(-(queue_sensitivity * queue_ahead / (queue_ahead + order_quantity)
+    ///             + toxicity_sensitivity * max(toxicity, 0)))
+    /// ```
+    ///
+    /// so it equals `prob_fill_on_limit` with no queue ahead and no adverse flow, and falls
+    /// monotonically as either signal turns against the order. The `queue_ahead / (queue_ahead +
+    /// order_quantity)` ratio is in `[0, 1)` and measures the order's place in the queue relative to
+    /// its own size; only adverse (positive) toxicity shortens the fill, while favourable flow leaves
+    /// the base probability in place. Slippage draws at `prob_slippage`, as for the other
+    /// probabilistic models.
     #[new]
     #[pyo3(signature = (
         prob_fill_on_limit=1.0,

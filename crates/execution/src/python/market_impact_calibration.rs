@@ -27,40 +27,45 @@ use crate::models::market_impact_calibration::{
 #[pymethods]
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 impl ImpactObservation {
-    /// One observed price impact, with the size that caused it and the volume it is measured
-    /// against.
+    /// One observed price impact, with the size that caused it and the volume it is measured against.
     ///
-    /// The quantity is the aggressive metaorder's own consumption rather than the clip that
-    /// happened to print, and `increments` is the price movement it left behind in whole price
-    /// increments.
+    /// The quantity is the aggressive metaorder's own consumption, not the clip that happened to
+    /// print: an anonymous tape's clips are not metaorders, and the caller reconstructs them before
+    /// fitting. The reference quantity is the volume the impact is expressed relative to, which is
+    /// what makes the estimates comparable across observations.
     #[new]
     #[pyo3(signature = (quantity, reference_quantity, increments))]
     fn py_new(quantity: Quantity, reference_quantity: Quantity, increments: u64) -> PyResult<Self> {
         Self::new(quantity, reference_quantity, increments).map_err(to_pyvalue_err)
     }
 
-    /// The aggressive quantity whose consumption caused the impact.
+    /// Returns the aggressive quantity whose consumption caused the impact.
     #[getter]
     #[pyo3(name = "quantity")]
     fn py_quantity(&self) -> Quantity {
         self.quantity()
     }
 
-    /// The volume the quantity is measured against.
+    /// Returns the volume the quantity is measured against.
     #[getter]
     #[pyo3(name = "reference_quantity")]
     fn py_reference_quantity(&self) -> Quantity {
         self.reference_quantity()
     }
 
-    /// The observed price movement in whole price increments.
+    /// Returns the observed price movement in whole price increments.
     #[getter]
     #[pyo3(name = "increments")]
     fn py_increments(&self) -> u64 {
         self.increments()
     }
 
-    /// The prefactor this observation implies, or `None` when it has no usable estimate.
+    /// Returns the prefactor this observation implies, or `None` when the observation is not
+    /// usable.
+    ///
+    /// The estimate is `increments / sqrt(quantity / reference_quantity)`: the square-root law
+    /// inverted, with the quantity and reference quantity carried as exact decimals so the ratio
+    /// is not rounded before the square root is taken.
     #[getter]
     #[pyo3(name = "prefactor")]
     fn py_prefactor(&self) -> Option<f64> {
@@ -74,13 +79,14 @@ impl ImpactObservation {
 
 /// Fits a prefactor from observations taken where the aggressor and the metaorder are observable.
 ///
-/// The fitted interval spans the per-observation estimates and its source records that the
-/// prefactor was measured, so the result needs no de-bias.
+/// The fitted interval spans the per-observation estimates, and its source records that the
+/// prefactor was measured rather than inferred, so the result needs no de-bias.
 ///
 /// # Errors
 ///
-/// Returns a `ValueError` if the observations are empty or if the fitted span is not a usable
-/// interval.
+/// Returns an error if `observations` is empty, if any observation has no usable estimate, or if
+/// the span is not a valid interval, which is what a series in which no observation moved the
+/// price by an increment produces.
 #[pyfunction]
 #[pyo3_stub_gen::derive::gen_stub_pyfunction(module = "nautilus_trader.execution")]
 #[pyo3(name = "fit_prefactor_from_fills")]
@@ -99,8 +105,9 @@ pub fn py_fit_prefactor_from_fills(
 ///
 /// # Errors
 ///
-/// Returns a `ValueError` if the observations are empty or if the fitted span is not a usable
-/// interval.
+/// Returns an error if `observations` is empty, if any observation has no usable estimate, or if
+/// the span is not a valid interval, which is what a series in which no observation moved the
+/// price by an increment produces.
 #[pyfunction]
 #[pyo3_stub_gen::derive::gen_stub_pyfunction(module = "nautilus_trader.execution")]
 #[pyo3(name = "fit_prefactor_from_tape")]

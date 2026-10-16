@@ -25,6 +25,18 @@ use nautilus_model::{
     types::{Price, Quantity},
 };
 
+use super::parse::is_representable_size;
+
+/// IB publishes price -1 when a side has no quote; a zero or negative price
+/// with genuine size is a legitimate value for spreads. The paired zero-size
+/// sentinel is handled by the size updates, which clear the side.
+// IB sends -1 without a size for a side that has no quote; -1 with a size is a real
+// price, such as a spread's bid
+pub(crate) fn is_sentinel_price(price: f64, size: Option<f64>) -> bool {
+    !price.is_finite()
+        || ((price + 1.0).abs() < f64::EPSILON && !size.is_some_and(|size| size > 0.0))
+}
+
 fn checked_quantity(size: f64, precision: u8) -> Option<Quantity> {
     let quantity = match Quantity::new_checked(size, precision) {
         Ok(quantity) => quantity,
@@ -34,8 +46,7 @@ fn checked_quantity(size: f64, precision: u8) -> Option<Quantity> {
         }
     };
 
-    let tolerance = 10_f64.powi(-i32::from(precision)) * 1e-9;
-    if (quantity.as_f64() - size).abs() > tolerance {
+    if !is_representable_size(quantity, size, precision) {
         tracing::warn!(
             "Ignoring unrepresentable IB quote size {} with precision {}",
             size,
@@ -45,6 +56,16 @@ fn checked_quantity(size: f64, precision: u8) -> Option<Quantity> {
     }
 
     Some(quantity)
+}
+
+fn checked_price(price: f64, precision: u8) -> Option<Price> {
+    match Price::new_checked(price, precision) {
+        Ok(price) => Some(price),
+        Err(e) => {
+            tracing::warn!("Ignoring invalid IB quote price {price}: {e}");
+            None
+        }
+    }
 }
 
 /// Quote cache that accumulates IB tick updates to build complete quotes.
@@ -89,11 +110,21 @@ impl QuoteCache {
         &mut self,
         instrument_id: InstrumentId,
         price: f64,
+        size: Option<f64>,
         price_precision: u8,
         size_precision: u8,
         ts_event: UnixNanos,
         ts_init: UnixNanos,
     ) -> Option<QuoteTick> {
+        if is_sentinel_price(price, size) {
+            if let Some(cached) = self.quotes.get_mut(&instrument_id) {
+                cached.bid_price = None;
+                cached.bid_size = None;
+            }
+
+            return None;
+        }
+
         let cached = self
             .quotes
             .entry(instrument_id)
@@ -122,11 +153,21 @@ impl QuoteCache {
         &mut self,
         instrument_id: InstrumentId,
         price: f64,
+        size: Option<f64>,
         price_precision: u8,
         size_precision: u8,
         ts_event: UnixNanos,
         ts_init: UnixNanos,
     ) -> Option<QuoteTick> {
+        if is_sentinel_price(price, size) {
+            if let Some(cached) = self.quotes.get_mut(&instrument_id) {
+                cached.ask_price = None;
+                cached.ask_size = None;
+            }
+
+            return None;
+        }
+
         let cached = self
             .quotes
             .entry(instrument_id)
@@ -183,6 +224,14 @@ impl QuoteCache {
         ts_init: UnixNanos,
         ignore_size_only: bool,
     ) -> Option<QuoteTick> {
+        if !size.is_finite() || size <= 0.0 {
+            if let Some(cached) = self.quotes.get_mut(&instrument_id) {
+                cached.bid_size = None;
+            }
+
+            return None;
+        }
+
         checked_quantity(size, size_precision)?;
 
         let cached = self
@@ -253,6 +302,14 @@ impl QuoteCache {
         ts_init: UnixNanos,
         ignore_size_only: bool,
     ) -> Option<QuoteTick> {
+        if !size.is_finite() || size <= 0.0 {
+            if let Some(cached) = self.quotes.get_mut(&instrument_id) {
+                cached.ask_size = None;
+            }
+
+            return None;
+        }
+
         checked_quantity(size, size_precision)?;
 
         let cached = self
@@ -304,8 +361,8 @@ impl QuoteCache {
         // Check if we have all required fields
         let bid_price = cached.bid_price?;
         let ask_price = cached.ask_price?;
-        let bid_size = cached.bid_size.unwrap_or(0.0);
-        let ask_size = cached.ask_size.unwrap_or(0.0);
+        let bid_size = cached.bid_size?;
+        let ask_size = cached.ask_size?;
 
         let bid_qty = checked_quantity(bid_size, size_precision)?;
         let ask_qty = checked_quantity(ask_size, size_precision)?;
@@ -313,8 +370,8 @@ impl QuoteCache {
         // Build the quote
         let quote = QuoteTick::new(
             instrument_id,
-            Price::new(bid_price, price_precision),
-            Price::new(ask_price, price_precision),
+            checked_price(bid_price, price_precision)?,
+            checked_price(ask_price, price_precision)?,
             bid_qty,
             ask_qty,
             ts_event,
@@ -396,9 +453,9 @@ impl OptionGreeksCache {
                 if let Some(theta) = computation.theta {
                     greeks.theta = theta;
                 }
+
                 greeks.rho = 0.0; // IB does not publish rho in tickOptionComputation
                 cached.greeks = Some(greeks);
-
                 if let Some(mark_iv) = computation.implied_volatility {
                     cached.mark_iv = Some(mark_iv);
                 }
@@ -472,13 +529,81 @@ impl OptionGreeksCache {
 mod tests {
     use ibapi::contracts::{OptionComputation, tick_types::TickType};
     use nautilus_core::UnixNanos;
-    use nautilus_model::identifiers::{InstrumentId, Symbol, Venue};
+    use nautilus_model::{
+        identifiers::{InstrumentId, Symbol, Venue},
+        types::Quantity,
+    };
     use rstest::rstest;
 
-    use super::{OptionGreeksCache, QuoteCache};
+    use super::{OptionGreeksCache, QuoteCache, is_sentinel_price};
 
     fn instrument_id() -> InstrumentId {
         InstrumentId::new(Symbol::from("AAPL"), Venue::from("NASDAQ"))
+    }
+
+    #[rstest]
+    #[case(-1.0, None, true)]
+    #[case(-1.0, Some(0.0), true)]
+    #[case(-1.0, Some(3.0), false)]
+    #[case(f64::NAN, Some(3.0), true)]
+    #[case(f64::INFINITY, None, true)]
+    #[case(-1.25, None, false)]
+    #[case(0.0, None, false)]
+    #[case(99.5, None, false)]
+    fn test_is_sentinel_price(
+        #[case] price: f64,
+        #[case] size: Option<f64>,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(is_sentinel_price(price, size), expected);
+    }
+
+    #[rstest]
+    fn test_quote_cache_emits_negative_spread_prices() {
+        let mut cache = QuoteCache::new();
+        let instrument_id = instrument_id();
+
+        cache.update_bid_price(
+            instrument_id,
+            -3.25,
+            None,
+            2,
+            0,
+            UnixNanos::new(1),
+            UnixNanos::new(1),
+        );
+        cache.update_ask_price(
+            instrument_id,
+            -2.75,
+            None,
+            2,
+            0,
+            UnixNanos::new(2),
+            UnixNanos::new(2),
+        );
+        cache.update_bid_size(
+            instrument_id,
+            5.0,
+            2,
+            0,
+            UnixNanos::new(3),
+            UnixNanos::new(3),
+        );
+        let quote = cache
+            .update_ask_size(
+                instrument_id,
+                7.0,
+                2,
+                0,
+                UnixNanos::new(4),
+                UnixNanos::new(4),
+            )
+            .unwrap();
+
+        assert_eq!(quote.bid_price.as_f64(), -3.25);
+        assert_eq!(quote.ask_price.as_f64(), -2.75);
+        assert_eq!(quote.bid_size.as_f64(), 5.0);
+        assert_eq!(quote.ask_size.as_f64(), 7.0);
     }
 
     #[rstest]
@@ -489,6 +614,7 @@ mod tests {
         let quote = cache.update_bid_price(
             instrument_id,
             100.0,
+            None,
             2,
             0,
             UnixNanos::new(1),
@@ -500,13 +626,14 @@ mod tests {
     }
 
     #[rstest]
-    fn test_quote_cache_builds_complete_quote_with_default_sizes() {
+    fn test_quote_cache_requires_both_sizes() {
         let mut cache = QuoteCache::new();
         let instrument_id = instrument_id();
 
         cache.update_bid_price(
             instrument_id,
             100.0,
+            None,
             2,
             0,
             UnixNanos::new(1),
@@ -515,18 +642,36 @@ mod tests {
         let quote = cache.update_ask_price(
             instrument_id,
             101.0,
+            None,
             2,
             0,
             UnixNanos::new(2),
             UnixNanos::new(2),
         );
 
-        assert!(quote.is_some());
-        let quote = quote.unwrap();
+        assert!(quote.is_none());
+        cache.update_bid_size(
+            instrument_id,
+            10.0,
+            2,
+            0,
+            UnixNanos::new(3),
+            UnixNanos::new(3),
+        );
+        let quote = cache
+            .update_ask_size(
+                instrument_id,
+                11.0,
+                2,
+                0,
+                UnixNanos::new(4),
+                UnixNanos::new(4),
+            )
+            .unwrap();
         assert_eq!(quote.bid_price.as_f64(), 100.0);
         assert_eq!(quote.ask_price.as_f64(), 101.0);
-        assert_eq!(quote.bid_size.as_f64(), 0.0);
-        assert_eq!(quote.ask_size.as_f64(), 0.0);
+        assert_eq!(quote.bid_size.as_f64(), 10.0);
+        assert_eq!(quote.ask_size.as_f64(), 11.0);
         assert!(cache.get_last_quote(&instrument_id).is_some());
     }
 
@@ -538,6 +683,7 @@ mod tests {
         cache.update_bid_price(
             instrument_id,
             100.0,
+            None,
             2,
             0,
             UnixNanos::new(1),
@@ -546,10 +692,27 @@ mod tests {
         cache.update_ask_price(
             instrument_id,
             101.0,
+            None,
             2,
             0,
             UnixNanos::new(2),
             UnixNanos::new(2),
+        );
+        cache.update_bid_size(
+            instrument_id,
+            10.0,
+            2,
+            0,
+            UnixNanos::new(3),
+            UnixNanos::new(3),
+        );
+        cache.update_ask_size(
+            instrument_id,
+            11.0,
+            2,
+            0,
+            UnixNanos::new(4),
+            UnixNanos::new(4),
         );
 
         let quote = cache.update_bid_size_with_filter(
@@ -557,14 +720,14 @@ mod tests {
             10.0,
             2,
             0,
-            UnixNanos::new(3),
-            UnixNanos::new(3),
+            UnixNanos::new(5),
+            UnixNanos::new(5),
             true,
         );
 
         assert!(quote.is_none());
         let last_quote = cache.get_last_quote(&instrument_id).unwrap();
-        assert_eq!(last_quote.bid_size.as_f64(), 0.0);
+        assert_eq!(last_quote.bid_size.as_f64(), 10.0);
     }
 
     #[rstest]
@@ -575,6 +738,7 @@ mod tests {
         cache.update_bid_price(
             instrument_id,
             100.0,
+            None,
             2,
             0,
             UnixNanos::new(1),
@@ -583,10 +747,27 @@ mod tests {
         cache.update_ask_price(
             instrument_id,
             101.0,
+            None,
             2,
             0,
             UnixNanos::new(2),
             UnixNanos::new(2),
+        );
+        cache.update_bid_size(
+            instrument_id,
+            10.0,
+            2,
+            0,
+            UnixNanos::new(3),
+            UnixNanos::new(3),
+        );
+        cache.update_ask_size(
+            instrument_id,
+            11.0,
+            2,
+            0,
+            UnixNanos::new(4),
+            UnixNanos::new(4),
         );
 
         let quote = cache.update_bid_size(
@@ -594,13 +775,58 @@ mod tests {
             0.5,
             2,
             0,
-            UnixNanos::new(3),
-            UnixNanos::new(3),
+            UnixNanos::new(5),
+            UnixNanos::new(5),
         );
 
         assert!(quote.is_none());
         let last_quote = cache.get_last_quote(&instrument_id).unwrap();
-        assert_eq!(last_quote.bid_size.as_f64(), 0.0);
+        assert_eq!(last_quote.bid_size.as_f64(), 10.0);
+    }
+
+    #[rstest]
+    fn test_quote_cache_accepts_large_size_at_size_precision() {
+        let mut cache = QuoteCache::new();
+        let instrument_id = instrument_id();
+
+        cache.update_bid_price(
+            instrument_id,
+            1.16375,
+            None,
+            5,
+            2,
+            UnixNanos::new(1),
+            UnixNanos::new(1),
+        );
+        cache.update_ask_price(
+            instrument_id,
+            1.1638,
+            None,
+            5,
+            2,
+            UnixNanos::new(2),
+            UnixNanos::new(2),
+        );
+        cache.update_bid_size(
+            instrument_id,
+            2_500_000.0,
+            5,
+            2,
+            UnixNanos::new(3),
+            UnixNanos::new(3),
+        );
+        let quote = cache
+            .update_ask_size(
+                instrument_id,
+                1_975_139.0,
+                5,
+                2,
+                UnixNanos::new(4),
+                UnixNanos::new(4),
+            )
+            .unwrap();
+
+        assert_eq!(quote.ask_size, Quantity::new(1_975_139.0, 2));
     }
 
     #[rstest]
@@ -611,6 +837,7 @@ mod tests {
         cache.update_bid_price(
             instrument_id,
             100.0,
+            None,
             2,
             0,
             UnixNanos::new(1),
@@ -619,28 +846,37 @@ mod tests {
         cache.update_ask_price(
             instrument_id,
             101.0,
+            None,
             2,
             0,
             UnixNanos::new(2),
             UnixNanos::new(2),
         );
-        cache.update_bid_size_with_filter(
+        cache.update_bid_size(
             instrument_id,
             10.0,
             2,
             0,
             UnixNanos::new(3),
             UnixNanos::new(3),
-            true,
+        );
+        cache.update_ask_size(
+            instrument_id,
+            11.0,
+            2,
+            0,
+            UnixNanos::new(4),
+            UnixNanos::new(4),
         );
 
         let quote = cache.update_bid_price(
             instrument_id,
             100.5,
+            None,
             2,
             0,
-            UnixNanos::new(4),
-            UnixNanos::new(4),
+            UnixNanos::new(5),
+            UnixNanos::new(5),
         );
 
         assert!(quote.is_some());

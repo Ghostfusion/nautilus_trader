@@ -721,3 +721,19 @@ def test_live_node_config_from_file_layers_overrides(tmp_path) -> None:
     loaded = LiveNodeConfig.from_file(str(path), overrides={"load_state": True})
 
     assert loaded.load_state is True
+@pytest.mark.parametrize("zone", ["America/New_York", "UTC", "Australia/Sydney"])
+def test_calendar_time_zone_config(zone: str) -> None:
+    """
+    Preserve configured IANA zones, including an explicit UTC override.
+    """
+    config = LiveDataEngineConfig(time_bars_time_zone=zone)
+    assert config.time_bars_time_zone == zone
+    assert LiveDataEngineConfig().time_bars_time_zone is None
+
+
+def test_calendar_time_zone_config_rejects_unknown_zone() -> None:
+    """
+    Reject a zone name absent from the bundled database.
+    """
+    with pytest.raises(ValueError, match="Not/A_Zone"):
+        LiveDataEngineConfig(time_bars_time_zone="Not/A_Zone")

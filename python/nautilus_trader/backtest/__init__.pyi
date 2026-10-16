@@ -82,6 +82,8 @@ class BacktestDataConfig:
     def optimize_file_loading(self) -> bool: ...
     @property
     def data_adjustment(self) -> DataAdjustment | None: ...
+    @property
+    def batch_deltas(self) -> bool: ...
     def __new__(
         cls,
         data_type: model.NautilusDataType,
@@ -101,6 +103,7 @@ class BacktestDataConfig:
         optimize_file_loading: bool | None = None,
         data_adjustment: DataAdjustment | None = None,
         catalog_backend: persistence.CatalogBackend | None = None,
+        batch_deltas: bool | None = None,
     ) -> BacktestDataConfig: ...
 
 @typing.final

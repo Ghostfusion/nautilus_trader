@@ -221,6 +221,12 @@ impl OrderEmulatorConfig {
 #[pyo3_stub_gen::derive::gen_stub_pymethods]
 impl CircuitBreakerConfig {
     /// Configuration for a matching engine's circuit breaker.
+    ///
+    /// The breaker watches the venue's reference price, which is the same reference the price band is
+    /// measured against. It trips when that price moves by at least `move_bps` basis points from its
+    /// value at the start of the current window, where a window lasts `window_ns` from the event that
+    /// anchored it. A tripped breaker halts the market for `halt_ns` and reopens on the first matching
+    /// pass at or after the end of that halt, which anchors a fresh window.
     #[new]
     #[pyo3(signature = (move_bps = None, window_ns = None, halt_ns = None))]
     fn py_new(move_bps: Option<u32>, window_ns: Option<u64>, halt_ns: Option<u64>) -> Self {

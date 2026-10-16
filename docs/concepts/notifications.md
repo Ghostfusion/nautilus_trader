@@ -11,17 +11,17 @@ The event set is closed, not open-ended. A `NotificationEvent` carries exactly o
 `NotificationClass` variants, so a sink cannot be registered for an event type it has never heard
 of:
 
-| Class                      | Raised from                                       |
-| -------------------------- | ------------------------------------------------- |
-| `RiskLimitBreach`          | The risk engine halting trading.                  |
-| `OrderRejection`           | A rejected order.                                 |
-| `StrategyStop`             | A strategy stopping.                              |
-| `ExecutionCompletion`      | An order fill completing an execution.            |
-| `DrawdownThresholdBreach`  | A position's realized return breaching a threshold. |
-| `DataFeedDisconnect`       | A data feed disconnecting.                        |
-| `BrokerDisconnect`         | A broker or venue disconnecting.                  |
-| `BacktestCompletion`       | A backtest run completing.                        |
-| `OptimizationCompletion`   | An optimization run completing.                   |
+| Class                     | Raised from                                         |
+| ------------------------- | --------------------------------------------------- |
+| `RiskLimitBreach`         | The risk engine halting trading.                    |
+| `OrderRejection`          | A rejected order.                                   |
+| `StrategyStop`            | A strategy stopping.                                |
+| `ExecutionCompletion`     | An order fill completing an execution.              |
+| `DrawdownThresholdBreach` | A position's realized return breaching a threshold. |
+| `DataFeedDisconnect`      | A data feed disconnecting.                          |
+| `BrokerDisconnect`        | A broker or venue disconnecting.                    |
+| `BacktestCompletion`      | A backtest run completing.                          |
+| `OptimizationCompletion`  | An optimization run completing.                     |
 
 Each event carries the identity a sink needs to be useful (strategy, instrument, account and run
 where applicable), a `NotificationSeverity` (`Info`, `Warning` or `Critical`) and a message.

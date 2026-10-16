@@ -26,7 +26,7 @@ use crate::{
         BarAggregation, BarIntervalType, BetSide, BookAction, BookType, ContingencyType,
         ContinuousFutureAdjustmentType, CurrencyType, ExerciseStyle, GreeksConvention,
         InstrumentClass, InstrumentCloseType, LiquiditySide, MarketStatus, MarketStatusAction,
-        OmsType, OptionKind, OrderSide, OrderStatus, OrderType, OtoTriggerMode,
+        OmsType, OptionKind, OptionSideFilter, OrderSide, OrderStatus, OrderType, OtoTriggerMode,
         PositionAdjustmentType, PositionSide, PriceType, RecordFlag, TimeInForce, TradingState,
         TrailingOffsetType, TriggerType,
     },
@@ -1015,6 +1015,50 @@ impl OptionKind {
 impl ExerciseStyle {
     /// The exercise style of an option contract, which determines when the holder
     /// may exercise the option.
+    #[new]
+    fn py_new(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let t = Self::type_object(py);
+        Self::py_from_str(&t, value)
+    }
+
+    const fn __hash__(&self) -> isize {
+        *self as isize
+    }
+
+    fn __str__(&self) -> String {
+        self.to_string()
+    }
+
+    #[getter]
+    #[must_use]
+    pub fn name(&self) -> String {
+        self.to_string()
+    }
+
+    #[getter]
+    #[must_use]
+    pub fn value(&self) -> u8 {
+        *self as u8
+    }
+
+    #[classmethod]
+    fn variants(_: &Bound<'_, PyType>, py: Python<'_>) -> EnumIterator {
+        EnumIterator::new::<Self>(py)
+    }
+
+    #[classmethod]
+    #[pyo3(name = "from_str")]
+    fn py_from_str(_: &Bound<'_, PyType>, data: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let data_str: &str = data.extract()?;
+        let tokenized = data_str.to_uppercase();
+        Self::from_str(&tokenized).map_err(to_pyvalue_err)
+    }
+}
+
+#[pymethods]
+#[pyo3_stub_gen::derive::gen_stub_pymethods]
+impl OptionSideFilter {
+    /// Selects which option kinds an option chain carries at each strike position.
     #[new]
     fn py_new(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<Self> {
         let t = Self::type_object(py);

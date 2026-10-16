@@ -320,7 +320,8 @@ impl MakerTakerFeeModel {
     /// Creates a new `MakerTakerFeeModel` with explicit default rates.
     ///
     /// Negative maker rates represent rebates where the venue supports them.
-    /// Use `Self.set_override` for exact per-instrument rates.
+    /// Use `Self.set_override` for exact per-instrument rates and
+    /// `Self.set_volume_tiers` for per-instrument volume ladders.
     #[new]
     #[gen_stub(override_return_type(type_repr = "typing.Self", imports = ("typing",)))]
     #[pyo3(signature = (maker_rate, taker_rate, overrides=None, volume_tiers=None))]

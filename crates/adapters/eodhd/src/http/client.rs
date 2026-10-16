@@ -92,6 +92,7 @@ impl EodhdHttpClient {
         let keyed_quotas = vec![(EODHD_REST_RATE_KEY.to_string(), *EODHD_REST_QUOTA)];
         let client = HttpClient::builder()
             .redirect_policy(HttpRedirectPolicy::Reject)
+            .redact_url(true)
             .headers(headers)
             .keyed_quotas(keyed_quotas)
             .default_quota(*EODHD_REST_QUOTA)
@@ -298,7 +299,7 @@ impl EodhdHttpClient {
         // The API token travels as a query parameter, so transport errors must not echo the URL.
         let response = self
             .client
-            .request_with_url_redacted(
+            .request(
                 Method::GET,
                 url.to_string(),
                 Some(params),

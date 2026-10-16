@@ -560,6 +560,7 @@ impl OcmState {
             && !self.is_canceled_replace(&order.id)
             && !self.fill_tracker.has_unseen_fill(order)
             && !self.fill_tracker.has_unseen_fill_void(order)
+            && !self.fill_tracker.has_unseen_price_restatement(order)
     }
 
     pub(crate) fn clear_canceled_replace(&mut self, bet_id: &str) {
@@ -650,6 +651,16 @@ impl OcmState {
             .flat_map(|correlation| &correlation.venue_order_ids)
             .filter(|bet_id| self.replaced_venue_order_ids.contains(*bet_id))
             .map(|bet_id| self.fill_tracker.matched_quantity(bet_id))
+            .sum()
+    }
+
+    pub(crate) fn replaced_voided_quantity(&self, client_order_id: &ClientOrderId) -> Decimal {
+        self.order_correlations
+            .get(client_order_id)
+            .into_iter()
+            .flat_map(|correlation| &correlation.venue_order_ids)
+            .filter(|bet_id| self.replaced_venue_order_ids.contains(*bet_id))
+            .map(|bet_id| self.fill_tracker.voided_quantity(bet_id))
             .sum()
     }
 

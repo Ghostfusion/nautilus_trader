@@ -805,6 +805,7 @@ impl BacktestDataConfig {
         optimize_file_loading = None,
         data_adjustment = None,
         catalog_backend = None,
+        batch_deltas = None,
     ))]
     #[expect(clippy::too_many_arguments)]
     fn py_new(
@@ -836,6 +837,7 @@ impl BacktestDataConfig {
         optimize_file_loading: Option<bool>,
         data_adjustment: Option<DataAdjustment>,
         catalog_backend: Option<pyo3::PyRef<'_, PyCatalogBackend>>,
+        batch_deltas: Option<bool>,
     ) -> pyo3::PyResult<Self> {
         let data_type = data_type
             .extract::<pyo3::PyRef<'_, PyNautilusDataType>>()
@@ -873,6 +875,7 @@ impl BacktestDataConfig {
             .maybe_bar_types(bar_types)
             .maybe_optimize_file_loading(optimize_file_loading)
             .maybe_data_adjustment(data_adjustment)
+            .maybe_batch_deltas(batch_deltas)
             .build()
             .map_err(config_error_to_pyvalue_err)
     }
@@ -992,6 +995,12 @@ impl BacktestDataConfig {
     #[pyo3(name = "data_adjustment")]
     fn py_data_adjustment(&self) -> Option<DataAdjustment> {
         self.data_adjustment()
+    }
+
+    #[getter]
+    #[pyo3(name = "batch_deltas")]
+    fn py_batch_deltas(&self) -> bool {
+        self.batch_deltas()
     }
 
     fn __repr__(&self) -> String {
@@ -1183,6 +1192,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .unwrap()
         });
@@ -1201,5 +1211,48 @@ mod tests {
                 SecretString::from("rust-secret"),
             )]))
         );
+    }
+
+    #[rstest]
+    #[case::default(None, true)]
+    #[case::disabled(Some(false), false)]
+    #[case::enabled(Some(true), true)]
+    fn test_data_config_py_new_sets_batch_deltas(
+        #[case] batch_deltas: Option<bool>,
+        #[case] expected: bool,
+    ) {
+        Python::initialize();
+
+        let config = Python::attach(|py| {
+            let data_type = Bound::new(
+                py,
+                PyNautilusDataType::new(NautilusDataType::OrderBookDelta),
+            )
+            .unwrap();
+            BacktestDataConfig::py_new(
+                data_type.as_any(),
+                "catalog".to_string(),
+                None,
+                None,
+                None,
+                Some(InstrumentId::from("EUR/USD.SIM")),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                batch_deltas,
+            )
+            .unwrap()
+        });
+
+        assert_eq!(config.batch_deltas(), expected);
+        assert_eq!(config.py_batch_deltas(), expected);
     }
 }
