@@ -404,6 +404,17 @@ capability to change, and its own open request for the general case is issue 330
 fork-side, closed by whoever owns the stage, and the capability row of Section 14 is where it is
 recorded.
 
+The decision on that gap is to leave it open rather than to close it here. Criterion 6 stays `failed`
+for the reason the fixture measures, the equity-readiness statement stays withheld rather than
+softened, and this plan's own response stands: claims are made on synthetic fixtures or on an
+instrument subset whose accounting is known to be correct, and the limitation is reported with every
+result. Crediting entitlements is a platform change inside the corporate-action stage, with the cash
+ledger, the position quantity and the adjustment series all moving together and the reconciliation
+having to agree with all three, so it is its own change rather than part of a discovery milestone;
+and if the capability is ever wanted outside this fork, offering the stage upstream is the route
+issue 3307 describes. The withholding is what the bundle already enforces: the criterion 6 entry
+carries its measured failure and the accounting fixture pins the numbers it rests on.
+
 M2 stays open on the request and the gap rather than on the timing contract, and the M3 blockage is not the
 one SD15 describes. That rule fires when neither mechanism enforces the contract, and one does, so
 the compiler emits a latency deferral and never the bridge pattern alone. The bridge remains useful

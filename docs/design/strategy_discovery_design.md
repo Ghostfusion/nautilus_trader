@@ -2404,7 +2404,10 @@ milestones rather than expressing a design preference.
    stage rather than upstream's, before claiming credible equity or ETF performance. Cash entitlement at the ex-date, the credit itself, splits, symbol changes,
    delistings and valuation around corporate actions are implemented and tested against deterministic
    fixtures, and the reconciliation compares account equity and cash rather than two adjusted price
-   series. Until then the equity-readiness statement of M2 is withheld rather than softened.
+   series. Until then the equity-readiness statement of M2 is withheld rather than softened, and the
+   gap is left open rather than closed in the discovery workstream, because crediting entitlements
+   moves the cash ledger, the position quantity and the adjustment series together; Section 8 of
+   `docs/design/strategy_discovery_implementation.md` records that decision and the reason.
 4. **Interchange format.** Should the ledger export an external lineage model such as OpenLineage,
    which would cost a dependency and a mapping, or is the repository's digest identity sufficient for
    the scale this design targets?
