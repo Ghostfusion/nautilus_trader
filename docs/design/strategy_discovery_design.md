@@ -1106,8 +1106,8 @@ change, because the deferral the compiler needs exists. And the engine fills an 
 eligibility has been reached but whose instrument has published nothing since, with the fill landing
 on the last known close at the shutdown drain and no fill event reaching the strategy, so the
 missing-bar case fabricates a fill rather than refusing one. Section 8 of
-`docs/design/strategy_discovery_implementation.md` records the measurement, the two upstream requests
-it produces and the status of criteria 4 and 6.
+`docs/design/strategy_discovery_implementation.md` records the measurement, the platform request it
+produced, the fork-side gap it found and the status of criteria 4 and 6.
 
 The planted test is specified as a set of cases rather than a single fixture, and it has to fail
 against the unsafe behaviour before it passes against the safe one.
@@ -1650,8 +1650,8 @@ for a credible equity or ETF performance claim rather than a restriction on one 
 long-only position held across an ex-dividend date is affected even when nobody set out to capture
 the distribution, so an equity or ETF candidate whose return includes distributions may not pass G1
 while the cash path is undemonstrated; the review's point is exactly that not targeting dividends is
-not the same as being unaffected by them. Until the upstream capability lands, the acceptable claims
-are those made on synthetic fixtures or on an instrument subset whose accounting is known to be
+not the same as being unaffected by them. Until that stage accounts for entitlements, the acceptable
+claims are those made on synthetic fixtures or on an instrument subset whose accounting is known to be
 correct, and neither may be presented as validation of ordinary US equity or ETF performance
 (Section 18, SD12).
 
@@ -1930,8 +1930,8 @@ fixture does not exist yet is reported as blocked rather than passed.
    whether or not it targets them. Mechanism: a reconciliation fixture containing a dividend, a
    split, a position held through an ex-dividend date, and positions opened and closed around a
    corporate-action boundary, reconciling cash, quantity, position value and account equity rather
-   than comparing two adjusted price series. Until dividend cash flows exist upstream this criterion
-   cannot pass, and it is a prerequisite for a credible equity performance claim rather than a
+   than comparing two adjusted price series. Until the corporate-action stage credits entitlements
+   this criterion cannot pass, and it is a prerequisite for a credible equity performance claim rather than a
    property of one exempted strategy family (Section 11.1).
 7. **Every executed configuration is in the inventory, and the four counts are separate.** Each
    executed configuration appears in the immutable inventory together with its executions and its
@@ -2322,7 +2322,10 @@ compiler's to close. An order set the bridge submits carries a fill that precede
 bridge itself resolved, which the compiler closes by emitting the latency deferral and never the
 bridge pattern alone. And a deferred intent whose instrument has published nothing since its arrival
 is settled at the shutdown drain against the last known close, which no configuration withholds and
-which is therefore an upstream request rather than a compiler emission.
+which is therefore a platform request rather than a compiler emission. It was posted as a comment on
+upstream issue 5054
+(<https://github.com/nautechsystems/nautilus_trader/issues/5054#issuecomment-6207459633>), after
+upstream's own fix closed the snapshot-timer path and retained the shutdown drain.
 
 ### SD16. The run-identity join is a verified receipt, not a binding
 
@@ -2397,8 +2400,8 @@ milestones rather than expressing a design preference.
    lands the acceptable claims are those made on synthetic fixtures or on an instrument subset whose
    accounting is known to be correct.
 
-   Answer (SD12, and blocking): close the upstream gap before claiming credible equity or ETF
-   performance. Cash entitlement at the ex-date, the credit itself, splits, symbol changes,
+   Answer (SD12, and blocking): close the platform gap, which is in this fork's own corporate-action
+   stage rather than upstream's, before claiming credible equity or ETF performance. Cash entitlement at the ex-date, the credit itself, splits, symbol changes,
    delistings and valuation around corporate actions are implemented and tested against deterministic
    fixtures, and the reconciliation compares account equity and cash rather than two adjusted price
    series. Until then the equity-readiness statement of M2 is withheld rather than softened.
@@ -2431,11 +2434,14 @@ milestones rather than expressing a design preference.
    Neither mechanism prices a released intent at its eligibility instant unless the snapshot carries
    market data there, which makes the snapshot's coverage at that instant a declared data requirement
    rather than an engine behaviour. The settlement schedule therefore does not have to change, and
-   the upstream request this question anticipated is narrower: the shutdown drain must not settle a
+   the platform request this question anticipated is narrower: the shutdown drain must not settle a
    deferred intent against a close that predates it, because a fill at a price from before the intent
-   existed is not a fill the simulator can defend. M3 is no longer blocked by this question, and what
-   remains of it is its own work, the compiler refusing a specification that decides at a close and
-   executes at it. The measurement, its fixture and the two requests are recorded in Section 8 of
+   existed is not a fill the simulator can defend, and it was posted as a comment on upstream issue
+   5054
+   (<https://github.com/nautechsystems/nautilus_trader/issues/5054#issuecomment-6207459633>). M3 is
+   no longer blocked by this question, and what remains of it is its own work, the compiler refusing
+   a specification that decides at a close and executes at it. The measurement, its fixture, the
+   request and the fork-side gap are recorded in Section 8 of
    `docs/design/strategy_discovery_implementation.md`.
 
 ## Appendix A. Provenance of this record
