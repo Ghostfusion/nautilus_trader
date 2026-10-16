@@ -315,7 +315,6 @@ class RefusalCode(Enum):
     EXIT_INCOMPLETE = "exit_incomplete"
     REBALANCE_TIMING_MISMATCH = "rebalance_timing_mismatch"
     REBALANCE_FREQUENCY_MISMATCH = "rebalance_frequency_mismatch"
-    HOLDING_PERIOD_BELOW_REBALANCE = "holding_period_below_rebalance"
     SECTOR_INPUT_UNDECLARED = "sector_input_undeclared"
     FEATURE_UNAVAILABLE_AT_DECISION = "feature_unavailable_at_decision"
     UNDEFERRED_EXECUTION = "undeferred_execution"

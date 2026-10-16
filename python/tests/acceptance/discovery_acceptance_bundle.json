@@ -1,5 +1,5 @@
 {
-  "schema": "discovery.acceptance-bundle/v1",
+  "schema": "discovery.acceptance-bundle/v2",
   "entries": [
     {
       "criterion": 1,
@@ -21,13 +21,28 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 2",
       "fixture": "FX-M4-1",
       "milestone": "M4",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "failed",
+      "identity": {
+        "digest": "sha256:6ef2774d75482c75c9b9ae3a1bf71bfd0958d055736ceb98af812097ae7a285c",
+        "components": {
+          "fixture": "FX-M4-1",
+          "test_module": "python/tests/integration/test_discovery_governance.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "declared artifacts, no backtest"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_1_and_fx_m4_6_every_number_recomputes_over_the_envelope",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_1",
+      "expected": "The same specification, snapshot, configuration, seed and binary produce the same result digest",
+      "observed": "The recomputation agrees across the two stores: the four counts, each entry's identity and the declared non-deterministic components recompute from the ledger and the inventory alone, and the inventory's chain verifies against a checkpoint held outside it. What cannot be recomputed is named rather than passed over: the engine's canonical blake3 digest, the seed, build and configuration join of decision M1.3, and the retained artifact, which needs the store that holds it",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+      },
+      "defect": "the canonical blake3 digest and the seed, build and configuration join cannot be recomputed in Python: the engine computes the digest from the document it holds, and the manifest of decision M1.3 has no binding"
     },
     {
       "criterion": 3,
@@ -55,7 +70,8 @@
       "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_timing_contract.py -q (13 passed in 1.24 s), over in-process one-minute bars and quotes for AAPL.XNAS, no catalog snapshot, no seed",
       "expected": "The case table of design Section 8.5 run against both halves: the pre-enforcement half is expected to fail, so the test discriminates, and the enforced half fills no earlier than the declared eligibility",
       "observed": "The pre-enforcement half fails as expected: with no deferral the fill carries the decision bar's own timestamp and that bar's own close, and the account is debited at that instant. The enforced half holds for the latency model, whose fill is never earlier than the arrival and lands on the first bar at or after it. Two cases disagree with the table and are named here. The bridge mechanism resolves an artifact's eligibility to the next session's open and stamps the signal with it, but its submission path holds no clock, so the order set is submitted at delivery and the fill precedes the declared eligibility by the whole interval to the next session. And a deferred intent with no subsequent market data is filled at shutdown against the last known close, without notifying the strategy, where the table requires that no fill be fabricated. With bar-only data the deferral prices at a bar close rather than at an opening price, so the declared eligibility can be honoured in time but not in price unless the snapshot carries market data at that instant",
-      "receipts": "engine build: nautilus_trader 2.0.0rc6, git_commit d884003c497c, rustc 1.99.0, profile release, precision high; the extension was built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and quotes in process; no run receipt exists, because the research ledger of SD16 is not implemented"
+      "receipts": "engine build: nautilus_trader 2.0.0rc6, git_commit d884003c497c, rustc 1.99.0, profile release, precision high; the extension was built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and quotes in process; no run receipt exists, because the research ledger of SD16 is not implemented",
+      "defect": "the decision-bridge projection resolves eligibility and defers nothing, and the shutdown drain settles a deferred intent against the last known close without notifying the strategy; the latency model enforces the contract, so the accepted mechanism is named and the fixture's pre-enforcement half is retained as evidence that it discriminates"
     },
     {
       "criterion": 5,
@@ -63,13 +79,27 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 5",
       "fixture": "FX-M4-2",
       "milestone": "M4",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:a4ac8f63a0413463bffd2549009e4cced3679c25f8bdd5b9299e2f3982b7f7e2",
+        "components": {
+          "fixture": "FX-M4-2",
+          "test_module": "python/tests/integration/test_discovery_governance.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "planted control series and declared defects"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_7_and_fx_m4_2_the_gate_is_calibrated_on_seven_classes_of_control",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_7",
+      "expected": "A look-ahead candidate fails G0, a cost-blind candidate fails G1, a single-name candidate fails G4 and a parameter-spike candidate fails G4's neighbourhood test",
+      "observed": "Each planted defect is caught by the gate that carries it: the look-ahead control fails G0 with INVALID, the cost-blind control fails G1 with REJECTED, the single-name control fails G4 on the instrument ceiling, and the parameter-spike control fails G4 because one of two neighbours reproduces within the declared tolerance. The suite reports the detected and missed sets, and a control it fails to detect is named rather than raising",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+      }
     },
     {
       "criterion": 6,
@@ -83,7 +113,8 @@
       "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_corporate_action_accounting.py -q (6 passed in 1.08 s), with a zero-slippage fill model and no commission, over in-process bars at the raw prices and split and dividend records announced before they take effect",
       "expected": "Cash, quantity, position value and account equity reconcile across a dividend, a split, a position held through an ex-date, and positions opened and closed around an action boundary",
       "observed": "The value leg reconciles and the cash leg does not. The adjustment series carries both actions: a split factor of one quarter and 2.50 per share, adjusting the raw 400.00 to 97.50. The held position's whole cash movement is its 40,000 purchase cost, so the 250 it was entitled to at the ex-date is credited to nothing. The split leaves the quantity at 100 rather than 400, and a round trip opened at 400.00 and closed at 200.00 realises 20,000 where a total-return account of the same position would carry 19,750. Both action records are delivered to the module, and the same run without them produces identical numbers, so the omission is in the accounting rather than in the data. The defect is the absent upstream dividend cash-flow path, which is the equity-readiness prerequisite of decision SD12",
-      "receipts": "engine build: nautilus_trader 2.0.0rc6, git_commit d884003c497c, rustc 1.99.0, profile release, precision high; the extension was built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and action records in process; no run receipt exists, because the research ledger of SD16 is not implemented"
+      "receipts": "engine build: nautilus_trader 2.0.0rc6, git_commit d884003c497c, rustc 1.99.0, profile release, precision high; the extension was built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and action records in process; no run receipt exists, because the research ledger of SD16 is not implemented",
+      "defect": "the corporate-action stage credits no entitlement: a held position moves only by its purchase cost and the distribution it was entitled to is credited to nothing, so the cash leg cannot reconcile and the equity-readiness statement stays withheld"
     },
     {
       "criterion": 7,
@@ -91,13 +122,27 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 7",
       "fixture": "FX-M4-3",
       "milestone": "M4",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:8250a98d04467c2978a10dcd34a5b467faa15dbf2b22e1de4c39e87d6321748d",
+        "components": {
+          "fixture": "FX-M4-3",
+          "test_module": "python/tests/integration/test_discovery_governance.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "a campaign over declared artifacts"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_3_counts_and_lineage_over_a_duplicate_a_crash_and_a_refusal",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_3",
+      "expected": "Each executed configuration appears in the inventory with its executions and attempts, the four counts are separate, and an illegal transition is refused",
+      "observed": "The campaign with a duplicate, a crash and a refusal reports two proposal attempts, one unique configuration, three executed experiments and two statistical trials under discovery.counts/v1; the crash stays in the execution count and is never given an imputed return; the lineage names the candidate, its campaign, its research family and the recorded agent invocation; the counts are folded from the events rather than kept as counters; and an illegal registration transition and a transition the lifecycle table does not permit are both refused",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+      }
     },
     {
       "criterion": 8,
@@ -105,13 +150,27 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 8",
       "fixture": "FX-M4-4",
       "milestone": "M4",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:77ee9993ba76dbbf60b9cf35439689cf074e939d15d59062c0f8b955b52499cc",
+        "components": {
+          "fixture": "FX-M4-4",
+          "test_module": "python/tests/integration/test_discovery_governance.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "a declared sample and a campaign plan"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_4_an_over_budget_search_is_refused_before_the_first_backtest",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_4",
+      "expected": "An over-budget plan is refused at admission, a REDUCE case narrows and proceeds, a REJECT case is refused on data that cannot support the claim, and an unestimable input is rejected rather than admitted on defaults",
+      "observed": "The assessment admits a plan that fits (110 required observations against 960 usable at 200 counted trials), narrows an over-budget one to the configuration count that fits, refuses data that cannot support the claim at any allocation, and refuses a plan whose cross-trial dispersion cannot be estimated rather than defaulting one. Every outcome carries the formula and its version, each input with its provenance, each assumption with its sensitivity, the raw and effective trial counts as separate numbers, the power limitation, and the claims it can and cannot support",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+      }
     },
     {
       "criterion": 9,
@@ -119,13 +178,27 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 9",
       "fixture": "FX-M4-5",
       "milestone": "M4",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:69d21d3a4210fdc11e7b2499df963d82c8bbb3691421c5f0e3ee42cca15a9a52",
+        "components": {
+          "fixture": "FX-M4-5",
+          "test_module": "python/tests/integration/test_discovery_governance.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "a declared confirmation set, no holdout data"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_5_the_confirmation_set_cannot_influence_selection",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_5",
+      "expected": "The five negative cases are refused, every access is recorded, and the verdict is bound to the frozen candidate's identity",
+      "observed": "The campaign is refused a read while searching, a mutation of the frozen candidate, a policy change under it, a read for a second candidate, a second read against the spent reservation, and a citation of its verdict for another candidate, each by the code that names it; a replacement's read is permitted only under an exploratory label that travels with the access record and consumes nothing; carrying the holdout's summary statistics into the search is refused and quarantines the candidate; a worker environment naming the confirmation root is reported; and a successor campaign inherits its family's spent reservation rather than a fresh copy of the data",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+      }
     },
     {
       "criterion": 10,
@@ -133,13 +206,28 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 10",
       "fixture": "FX-M4-6",
       "milestone": "M4",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "failed",
+      "identity": {
+        "digest": "sha256:0d9f1b08474995681bda50937595bc06d15660ae8549997acb1695f4de1e35bb",
+        "components": {
+          "fixture": "FX-M4-6",
+          "test_module": "python/tests/integration/test_discovery_governance.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "a declared envelope and a synthetic entry"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_1_and_fx_m4_6_every_number_recomputes_over_the_envelope",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_6",
+      "expected": "The evidence package's quantities recompute from the ledger and the data snapshot alone, every envelope reference resolves to retained content, and the test fails if any input it needs is unavailable",
+      "observed": "The envelope declares every required kind and resolves each reference from the content retained beside its digest; a reference whose content was not retained leaves the package unresolved and the recomputation incomplete rather than passing; a receipt resolves against the artifact the ledger holds; and an entry no admitted trial explains is reported as a disagreement. Two inputs cannot be recomputed here and each names the dependency that blocks it: the engine's canonical blake3 digest and the engine-side manifest of decision M1.3",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+      },
+      "defect": "the engine's canonical digest cannot be recomputed from retained bytes, and the engine-side run manifest of decision M1.3 is unreachable from Python, so the envelope is not complete over its whole span"
     },
     {
       "criterion": 11,
@@ -147,13 +235,27 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 11",
       "fixture": "FX-M4-7",
       "milestone": "M4",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:49dcbc5ac53047f6cf230eede6d780d8be2a014837807be388b612c772d46a8e",
+        "components": {
+          "fixture": "FX-M4-7",
+          "test_module": "python/tests/integration/test_discovery_governance.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "planted control series"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_7_and_fx_m4_2_the_gate_is_calibrated_on_seven_classes_of_control",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_7",
+      "expected": "The report states which controls each diagnostic detected and which it failed to detect, with the false-accept and false-reject behaviour at the pre-registered thresholds",
+      "observed": "The null, positive, leakage, cost, concentration, parameter-spike and accounting controls are each detected by the gate that carries them, with no false accept and no false reject at the pre-registered thresholds; the report names the detected and missed sets and the classes behind them; a control the chain passes is reported as missed rather than raising; and a rejected positive control is reported as a false reject. The probability of backtest overfitting stays a diagnostic: it rejects nothing, and its four states are reported with its exclusions",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+      }
     },
     {
       "criterion": 12,
@@ -167,7 +269,8 @@
       "procedure": null,
       "expected": null,
       "observed": null,
-      "receipts": null
+      "receipts": null,
+      "dependency": "the boundary tests and the capability environment of M6"
     },
     {
       "criterion": 13,
@@ -181,7 +284,8 @@
       "procedure": null,
       "expected": null,
       "observed": null,
-      "receipts": null
+      "receipts": null,
+      "dependency": "the shadow run of M6, which the replay is compared against"
     },
     {
       "criterion": 14,
@@ -195,7 +299,8 @@
       "procedure": null,
       "expected": null,
       "observed": null,
-      "receipts": null
+      "receipts": null,
+      "dependency": "an admitted campaign of M5"
     },
     {
       "criterion": 15,
@@ -209,7 +314,8 @@
       "procedure": null,
       "expected": null,
       "observed": null,
-      "receipts": null
+      "receipts": null,
+      "dependency": "a shadow period with live data and simulated fills, in M6"
     },
     {
       "criterion": 16,
@@ -223,7 +329,8 @@
       "procedure": null,
       "expected": null,
       "observed": null,
-      "receipts": null
+      "receipts": null,
+      "dependency": "a completed search to audit, in M6"
     },
     {
       "criterion": 17,
@@ -237,7 +344,8 @@
       "procedure": null,
       "expected": null,
       "observed": null,
-      "receipts": null
+      "receipts": null,
+      "dependency": "the A-then-B selection fixture of M5"
     },
     {
       "criterion": 18,
@@ -245,13 +353,27 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 18",
       "fixture": "FX-M4-8",
       "milestone": "M4",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:4d235df7fc8f5dbc0f4efb6cc88ecf9fc59a019584c9d982bd818131edfe04b9",
+        "components": {
+          "fixture": "FX-M4-8",
+          "test_module": "python/tests/integration/test_discovery_governance.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "a campaign under injected failures"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_8_the_protocol_holds_under_interruption_concurrency_and_repetition",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_8",
+      "expected": "No invented return, idempotent duplicates, incomplete records left incomplete, and reconciliation fails closed when artifacts or identities disagree",
+      "observed": "An interruption before registration and one during persistence both leave the record explicitly incomplete and count nothing; two concurrent registrations of one experiment admit exactly one trial; a duplicate submission under an existing key changes no count; an interrupted registration replays to one trial; a receipt whose seed the research side moved fails closed; the ledger refuses a second writer, a second entry for one candidate and a transition out of a reconciled registration; and a record removed from the inventory is detected against a checkpoint held outside it",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+      }
     },
     {
       "criterion": 19,
@@ -307,7 +429,8 @@
       "procedure": null,
       "expected": null,
       "observed": null,
-      "receipts": null
+      "receipts": null,
+      "dependency": "the completed bundle and its verification at M6.5"
     }
   ]
 }

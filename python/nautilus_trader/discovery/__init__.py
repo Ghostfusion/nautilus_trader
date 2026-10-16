@@ -33,6 +33,14 @@ from nautilus_trader.discovery.compile import compile_specification as compile_s
 from nautilus_trader.discovery.compile import compose_plan as compose_plan
 from nautilus_trader.discovery.compile import engine_version as engine_version
 from nautilus_trader.discovery.compile import specification_digest_of as specification_digest_of
+from nautilus_trader.discovery.custody import ConfirmationCustody as ConfirmationCustody
+from nautilus_trader.discovery.custody import ConfirmationVerdict as ConfirmationVerdict
+from nautilus_trader.discovery.custody import CustodyError as CustodyError
+from nautilus_trader.discovery.custody import CustodyRefusalCode as CustodyRefusalCode
+from nautilus_trader.discovery.custody import CustodyState as CustodyState
+from nautilus_trader.discovery.custody import Reservation as Reservation
+from nautilus_trader.discovery.custody import WorkerEnvironmentCheck as WorkerEnvironmentCheck
+from nautilus_trader.discovery.custody import inherited_reservations as inherited_reservations
 from nautilus_trader.discovery.features import MISSING_UNAVAILABLE as MISSING_UNAVAILABLE
 from nautilus_trader.discovery.features import OPERATORS as OPERATORS
 from nautilus_trader.discovery.features import WARMUP_UNAVAILABLE as WARMUP_UNAVAILABLE
@@ -45,10 +53,82 @@ from nautilus_trader.discovery.features import FeatureValueAt as FeatureValueAt
 from nautilus_trader.discovery.features import build_memberships as build_memberships
 from nautilus_trader.discovery.features import build_panel as build_panel
 from nautilus_trader.discovery.features import compute_observations as compute_observations
+from nautilus_trader.discovery.gates import Actor as Actor
+from nautilus_trader.discovery.gates import AdmissionAssessment as AdmissionAssessment
+from nautilus_trader.discovery.gates import AdmissionInputs as AdmissionInputs
+from nautilus_trader.discovery.gates import AdmissionOutcome as AdmissionOutcome
+from nautilus_trader.discovery.gates import CalibrationCase as CalibrationCase
+from nautilus_trader.discovery.gates import CalibrationOutcome as CalibrationOutcome
+from nautilus_trader.discovery.gates import CalibrationReport as CalibrationReport
+from nautilus_trader.discovery.gates import CandidateState as CandidateState
+from nautilus_trader.discovery.gates import ControlClass as ControlClass
+from nautilus_trader.discovery.gates import GateEvidence as GateEvidence
+from nautilus_trader.discovery.gates import GateName as GateName
+from nautilus_trader.discovery.gates import GatePolicy as GatePolicy
+from nautilus_trader.discovery.gates import GateReport as GateReport
+from nautilus_trader.discovery.gates import GateService as GateService
+from nautilus_trader.discovery.gates import GateVerdict as GateVerdict
+from nautilus_trader.discovery.gates import GateVerdictRecord as GateVerdictRecord
+from nautilus_trader.discovery.gates import Lifecycle as Lifecycle
+from nautilus_trader.discovery.gates import OutcomeRecord as OutcomeRecord
+from nautilus_trader.discovery.gates import PboEvaluation as PboEvaluation
+from nautilus_trader.discovery.gates import PboExclusion as PboExclusion
+from nautilus_trader.discovery.gates import PboRow as PboRow
+from nautilus_trader.discovery.gates import PboState as PboState
+from nautilus_trader.discovery.gates import TrackingAssumptions as TrackingAssumptions
+from nautilus_trader.discovery.gates import TransitionRecord as TransitionRecord
+from nautilus_trader.discovery.gates import TransitionRule as TransitionRule
+from nautilus_trader.discovery.gates import assess_admission as assess_admission
+from nautilus_trader.discovery.gates import evaluate_pbo_matrix as evaluate_pbo_matrix
+from nautilus_trader.discovery.gates import (
+    minimum_track_record_length as minimum_track_record_length,
+)
+from nautilus_trader.discovery.gates import required_observations as required_observations
+from nautilus_trader.discovery.gates import run_calibration as run_calibration
+from nautilus_trader.discovery.gates import transition_rule as transition_rule
+from nautilus_trader.discovery.ledger import BUNDLE_SCHEMA as BUNDLE_SCHEMA
+from nautilus_trader.discovery.ledger import COUNTS_MAPPING as COUNTS_MAPPING
+from nautilus_trader.discovery.ledger import ENVELOPE_SCHEMA as ENVELOPE_SCHEMA
+from nautilus_trader.discovery.ledger import INVENTORY_SCHEMA as INVENTORY_SCHEMA
 from nautilus_trader.discovery.ledger import LEDGER_SCHEMA as LEDGER_SCHEMA
+from nautilus_trader.discovery.ledger import (
+    NON_DETERMINISTIC_COMPONENTS as NON_DETERMINISTIC_COMPONENTS,
+)
+from nautilus_trader.discovery.ledger import REQUIRED_REFERENCE_KINDS as REQUIRED_REFERENCE_KINDS
+from nautilus_trader.discovery.ledger import AttemptOutcome as AttemptOutcome
+from nautilus_trader.discovery.ledger import AttemptRecord as AttemptRecord
+from nautilus_trader.discovery.ledger import BundleFinding as BundleFinding
+from nautilus_trader.discovery.ledger import BundleVerification as BundleVerification
+from nautilus_trader.discovery.ledger import CampaignInventory as CampaignInventory
+from nautilus_trader.discovery.ledger import ChainVerification as ChainVerification
+from nautilus_trader.discovery.ledger import CountName as CountName
+from nautilus_trader.discovery.ledger import Counts as Counts
+from nautilus_trader.discovery.ledger import DataRole as DataRole
 from nautilus_trader.discovery.ledger import DiscoveryLedger as DiscoveryLedger
+from nautilus_trader.discovery.ledger import EnvelopeKind as EnvelopeKind
+from nautilus_trader.discovery.ledger import EnvelopeReference as EnvelopeReference
+from nautilus_trader.discovery.ledger import EventKind as EventKind
 from nautilus_trader.discovery.ledger import EvidencePackage as EvidencePackage
+from nautilus_trader.discovery.ledger import IdempotencyKey as IdempotencyKey
+from nautilus_trader.discovery.ledger import LedgerEvent as LedgerEvent
+from nautilus_trader.discovery.ledger import LineageRecord as LineageRecord
+from nautilus_trader.discovery.ledger import Recomputation as Recomputation
+from nautilus_trader.discovery.ledger import RecomputedQuantity as RecomputedQuantity
+from nautilus_trader.discovery.ledger import Reconciliation as Reconciliation
+from nautilus_trader.discovery.ledger import RegistrationOutcome as RegistrationOutcome
+from nautilus_trader.discovery.ledger import RegistrationState as RegistrationState
+from nautilus_trader.discovery.ledger import ReproducibilityEnvelope as ReproducibilityEnvelope
 from nautilus_trader.discovery.ledger import RunIdentity as RunIdentity
+from nautilus_trader.discovery.ledger import RunReceipt as RunReceipt
+from nautilus_trader.discovery.ledger import TrialMapping as TrialMapping
+from nautilus_trader.discovery.ledger import bundle_identity as bundle_identity
+from nautilus_trader.discovery.ledger import counts_from_events as counts_from_events
+from nautilus_trader.discovery.ledger import non_deterministic_digest as non_deterministic_digest
+from nautilus_trader.discovery.ledger import recompute as recompute
+from nautilus_trader.discovery.ledger import reconcile_receipt as reconcile_receipt
+from nautilus_trader.discovery.ledger import research_family_id as research_family_id
+from nautilus_trader.discovery.ledger import trial_mapping as trial_mapping
+from nautilus_trader.discovery.ledger import verify_bundle as verify_bundle
 from nautilus_trader.discovery.policy import POLICY_ID as POLICY_ID
 from nautilus_trader.discovery.policy import POLICY_VERSION as POLICY_VERSION
 from nautilus_trader.discovery.policy import ComplexityLimits as ComplexityLimits
@@ -115,17 +195,37 @@ from nautilus_trader.discovery.validate import validate_specification as validat
 
 
 __all__ = [
+    "BUNDLE_SCHEMA",
+    "COUNTS_MAPPING",
+    "ENVELOPE_SCHEMA",
+    "INVENTORY_SCHEMA",
     "LEDGER_SCHEMA",
     "MISSING_UNAVAILABLE",
+    "NON_DETERMINISTIC_COMPONENTS",
     "OPERATORS",
     "POLICY_ID",
     "POLICY_VERSION",
+    "REQUIRED_REFERENCE_KINDS",
     "SPECIFICATION_SCHEMA_ID",
     "SPECIFICATION_SCHEMA_VERSION",
     "WARMUP_UNAVAILABLE",
+    "Actor",
+    "AdmissionAssessment",
+    "AdmissionInputs",
+    "AdmissionOutcome",
     "AllocationRequest",
+    "AttemptOutcome",
+    "AttemptRecord",
     "Bound",
     "BoundKind",
+    "BundleFinding",
+    "BundleVerification",
+    "CalibrationCase",
+    "CalibrationOutcome",
+    "CalibrationReport",
+    "CampaignInventory",
+    "CandidateState",
+    "ChainVerification",
     "CompilationResult",
     "CompiledPlan",
     "ComplexityLimits",
@@ -133,16 +233,28 @@ __all__ = [
     "ConditionAny",
     "ConditionLeaf",
     "ConditionNode",
+    "ConfirmationCustody",
+    "ConfirmationVerdict",
+    "ControlClass",
+    "CountName",
+    "Counts",
     "CrossSectionEntry",
     "CrossSectionRow",
+    "CustodyError",
+    "CustodyRefusalCode",
+    "CustodyState",
     "DataBlock",
+    "DataRole",
     "DecisionRecord",
     "DiscoveryInterpreter",
     "DiscoveryInterpreterConfig",
     "DiscoveryLedger",
     "DiscoveryPolicy",
     "EntryBlock",
+    "EnvelopeKind",
+    "EnvelopeReference",
     "EvaluationBlock",
+    "EventKind",
     "EvidencePackage",
     "ExitBlock",
     "ExperimentOutcome",
@@ -155,45 +267,88 @@ __all__ = [
     "FeatureValueAt",
     "FeaturesBlock",
     "FillRecord",
+    "GateEvidence",
+    "GateName",
+    "GatePolicy",
+    "GateReport",
+    "GateService",
+    "GateVerdict",
+    "GateVerdictRecord",
+    "IdempotencyKey",
     "IdentityBlock",
     "InterpreterRunInputs",
+    "LedgerEvent",
+    "Lifecycle",
+    "LineageRecord",
+    "OutcomeRecord",
     "ParsedSpecification",
+    "PboEvaluation",
+    "PboExclusion",
+    "PboRow",
+    "PboState",
     "PortfolioBlock",
     "ProvenanceBlock",
     "RebalanceBlock",
+    "Recomputation",
+    "RecomputedQuantity",
+    "Reconciliation",
     "Reference",
-    "ReferenceKind",
     "Refusal",
     "RefusalCode",
+    "RegistrationOutcome",
+    "RegistrationState",
+    "ReproducibilityEnvelope",
+    "Reservation",
     "RiskBlock",
     "RiskPostRunBlock",
     "RiskPreTradeBlock",
     "RiskRuntimeBlock",
     "RunIdentity",
+    "RunReceipt",
     "RunRequest",
     "SelectionBlock",
     "SignalRecord",
     "Specification",
+    "TrackingAssumptions",
+    "TransitionRecord",
+    "TransitionRule",
+    "TrialMapping",
     "UniverseBlock",
     "ValidationResult",
     "ValidationWarning",
     "WarningCode",
+    "WorkerEnvironmentCheck",
     "allocate_targets",
+    "assess_admission",
     "build_memberships",
     "build_panel",
+    "bundle_identity",
     "canonical_mapping",
     "compile_specification",
     "compose_plan",
     "compute_observations",
     "count_condition_leaves",
+    "counts_from_events",
     "decimal_of",
     "engine_version",
+    "evaluate_pbo_matrix",
     "experiment_for",
+    "inherited_reservations",
+    "minimum_track_record_length",
+    "non_deterministic_digest",
     "parse_specification",
     "rebalance_period_key",
+    "recompute",
+    "reconcile_receipt",
+    "required_observations",
+    "research_family_id",
+    "run_calibration",
     "run_experiment",
     "scan_for_code_references",
     "select_cross_section",
     "specification_digest_of",
+    "transition_rule",
+    "trial_mapping",
     "validate_specification",
+    "verify_bundle",
 ]

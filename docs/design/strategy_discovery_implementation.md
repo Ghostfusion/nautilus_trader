@@ -559,6 +559,118 @@ Exit: design criteria 2, 7, 8, 9, 10, 11 and 18 hold, the mapping is versioned a
 gate's false-accept and false-reject behaviour on the calibration suite is reported. Whether PBO is
 promoted from diagnostic to gate is decided here, on that report, and the default is that it is not.
 
+M4's exit, and where each condition is met. The three modules the plan's Section 6 names own the
+milestone, and each carries its own unit tests; the fixtures that span the milestone are one
+integration module, because each is a campaign rather than a module's behaviour.
+
+| Workstream | Module                                                                        | Fixture                                                             |
+| ---------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| M4.1-M4.2  | `ledger.py`: the append protocol, the four counts and the versioned mapping   | `python/tests/unit/discovery/test_ledger.py`, `FX-M4-3`, `FX-M4-8`  |
+| M4.3       | `ledger.py`: lineage and the research family                                  | `FX-M4-3`: `python/tests/integration/test_discovery_governance.py`  |
+| M4.4-M4.5  | `custody.py`, `ledger.py`: custody, reservations, receipts and reconciliation | `python/tests/unit/discovery/test_custody.py`, `FX-M4-5`, `FX-M4-8` |
+| M4.6       | `ledger.py`: the envelope and the recomputation                               | `FX-M4-1`, `FX-M4-6`, and the bundle check's identity recomputation |
+| M4.7-M4.8  | `gates.py`: the gate service, the lifecycle and the admission assessment      | `python/tests/unit/discovery/test_gates.py`, `FX-M4-4`              |
+| M4.9-M4.10 | `gates.py`: the calibration suite and the overfitting matrix                  | `FX-M4-7`, `FX-M4-2`, `FX-M4-9`                                     |
+
+The gate service reads its policy and nothing else, and every threshold, limit and cost is declared
+there: the deflated Sharpe floor, the net Sharpe floor, the margin over the baseline, three
+concentration ceilings, the neighbourhood tolerance and its required agreement, the drawdown limit,
+the positive-fold share and the share of closed attempts that may produce no usable return series.
+The service records each verdict through the campaign inventory, stops at the first gate that does
+not pass, and reports the verdicts it reached rather than the gates it never asked.
+
+Six of the milestone's eight criteria hold, and the two that do not are measured rather than
+expected.
+
+Criterion 7 holds over a campaign with a deliberate duplicate, a deliberate crash and a deliberate
+refusal: the four counts are separate, the crash stays in the execution count and is never given an
+imputed return, the lineage names the candidate, its campaign, its research family and the recorded
+invocation, a duplicate submission changes no count, and an illegal transition is refused in both the
+registration protocol and the lifecycle table. Criterion 8 holds with its arithmetic: the assessment
+admits a plan that fits, narrows one that does not to the configuration count that does, refuses data
+that cannot support the claim at any allocation, and refuses a plan whose cross-trial dispersion
+cannot be estimated rather than defaulting one. Criterion 9 holds with the five negative cases
+refused by code, the reservation spent once and never released, the verdict bound to the frozen
+candidate, and a worker environment that names the confirmation root reported. Criterion 11 holds on
+the calibration suite: the null, positive, leakage, cost, concentration, parameter-spike and
+accounting controls are each detected by the gate that carries them, with no false accept and no
+false reject at the pre-registered thresholds, and a control the chain passes is reported as missed
+rather than raising. Criterion 18 holds under interruption before registration, during persistence,
+after registration and during duplicate submission, with two concurrent registrations admitting one
+trial and a tampered receipt failing closed. Criterion 2's recomputation holds for the counts, the
+entry identities and the declared non-deterministic components, and criterion 10's envelope resolves
+every reference it declares.
+
+| Criterion | Status | What the entry records                                                                               |
+| --------- | ------ | ---------------------------------------------------------------------------------------------------- |
+| 2         | Failed | The recomputation agrees, but the seed, build and configuration join of decision M1.3 does not exist |
+| 7         | Passed | Four separate counts, lineage, idempotency and refused illegal transitions over one campaign         |
+| 8         | Passed | `ADMIT`, `REDUCE`, `REJECT` and an unestimable input, each with its arithmetic and its sensitivity   |
+| 9         | Passed | The five negative cases, the spent reservation, the bound verdict and the worker-environment check   |
+| 10        | Failed | The envelope resolves, but the engine's canonical digest cannot be recomputed from retained bytes    |
+| 11        | Passed | Seven classes of control, detected and missed sets reported, PBO left as a diagnostic                |
+| 18        | Passed | Interruption, concurrency, repetition, a tampered receipt and a checkpoint outside the write path    |
+
+Criterion 5 is satisfied by the same suite: the planted defects of `FX-M4-2` are the leakage, cost,
+concentration and parameter-spike controls, and each is caught by the gate the design names for it.
+The bundle's entries for criteria 2 and 10 are therefore `failed` rather than blocked, which is
+Section 4.2's definition: both were evaluated against a real fixture and neither met its pass
+condition, and each names the defect that causes it.
+
+Seven findings are carried, and each is recorded rather than repaired silently.
+
+The first is a gap in the mapping. The four counts, the admitted trials, the failure classes and the
+data roles are read from the ledger, which is what makes the deflation's multiplicity auditable; the
+per-trial return series and Sharpe estimates are not, because an entry retains the engine's canonical
+document, which Python cannot deserialise, and the analysis crate's Sharpe is annualised while the
+correction is per-period. The gate therefore consumes those inputs as declared evidence at M4, and
+retaining a per-trial return series is an M5 input-list item rather than a change to the entries'
+identity.
+
+The second is the receipt's authority. Reconciliation compares every joined field and fails closed,
+but until decision M1.3's narrow upstream change exists, the manifest it compares against is the one
+the caller declares. The check is real and its tampered-receipt fixture is discriminating; what it
+cannot yet claim is that the manifest is the engine's own.
+
+The third is what cannot be recomputed, and it is what makes criteria 2 and 10 `failed`. The
+extension computes the engine's canonical blake3 digest from the document it holds and exposes no
+surface that recomputes it from retained bytes, so the ledger records both the digest and the
+document's SHA-256 and the recomputation verifies the latter. A narrow Rust-side hashing step, in the
+shape SD16 prefers, would close it.
+
+The fourth is a narrowing rather than a defect. Custody permits a replacement candidate's read only
+under an exploratory label, which travels with the access record and consumes nothing, and a
+successor campaign inherits its family's spent reservation through a declared input read from its
+predecessor's inventory rather than from a shared file. The design's rule that a branch inherits its
+family's confirmation history is therefore enforced by the caller declaring what it inherited, not by
+a store the two campaigns share.
+
+The fifth is the admission relation's limits, and they are stated in every report rather than
+inferred from a status: the relation is a significance relation and not a power calculation, so the
+declared power is an assumption the assessment cannot verify; the published minimum-backtest-length
+relation is inverted by searching the correction the repository already computes rather than by a
+second implementation of its quantiles; and the declared cross-trial dispersion is realised by a
+symmetric set of trial estimates whose sample variance is exactly that dispersion squared, because
+the correction consumes the dispersion rather than the estimates.
+
+The sixth is the overfitting matrix's status. It is evaluated against its preconditions before it is
+computed, its four states are reported with their exclusions, and it rejects nothing: nothing in the
+gate chain reads it, and the decision the design reserved - whether to promote it from diagnostic to
+gate - is not taken on a matrix that reports `not computable` for realistic inventories.
+
+The seventh closes the vocabulary question M3 carried. `HOLDING_PERIOD_BELOW_REBALANCE` is removed
+from the closed refusal vocabulary, because no stage could emit it soundly and the interaction it
+named is resolved by the interpreter's own rule, which the design states: a holding-period cap is
+counted in the decision periods of the declared signal frequency, and a rebalance that re-signals a
+held instrument does not restart its holding period.
+
+Two questions are carried rather than settled. The per-bar decision question is unchanged: a decision
+is taken per bar event, so a period's first cross-section is partially updated and a holding whose
+cap expires can be re-entered in that period, and whether a period should carry one decision is
+still the search milestone's to answer. And the calibration suite's thresholds are now exercised
+rather than tuned: the report states the detected and missed sets at the pre-registered values, and a
+gate that cannot discriminate is a finding rather than a reason to move a threshold.
+
 ## 11. M5: discovery
 
 Goal: enable generation and search inside an admitted space, with the controls already enforced.

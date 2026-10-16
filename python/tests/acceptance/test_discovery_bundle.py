@@ -39,6 +39,8 @@ from typing import Any
 
 import pytest
 
+from nautilus_trader.discovery.ledger import verify_bundle
+
 
 BUNDLE_PATH = Path(__file__).resolve().parent / "discovery_acceptance_bundle.json"
 DESIGN_PATH = (
@@ -48,7 +50,7 @@ PLAN_PATH = (
     Path(__file__).resolve().parents[3] / "docs" / "design" / "strategy_discovery_implementation.md"
 )
 
-BUNDLE_SCHEMA = "discovery.acceptance-bundle/v1"
+BUNDLE_SCHEMA = "discovery.acceptance-bundle/v2"
 CRITERION_COUNT = 22
 CRITERION_NUMBERS = tuple(range(1, CRITERION_COUNT + 1))
 
@@ -73,7 +75,15 @@ PROVENANCE_FIELDS = (
     "fixture",
     "milestone",
 )
-ENTRY_FIELDS = SECTION_4_1_FIELDS + PROVENANCE_FIELDS
+# Section 4.2 requires a block to name its dependency and a failure its open defect.
+OUTCOME_FIELDS = (
+    "dependency",
+    "defect",
+)
+# The closed set an entry may carry, and the subset every entry must carry: the outcome fields
+# are conditional on the status, which the status check below enforces.
+ENTRY_FIELDS = SECTION_4_1_FIELDS + PROVENANCE_FIELDS + OUTCOME_FIELDS
+REQUIRED_FIELDS = SECTION_4_1_FIELDS + PROVENANCE_FIELDS
 
 # The fields an entry can only carry because a fixture ran, as Section 4.1 requires of every one of
 # them: `status` and `criterion` are always present and are not evidence.
@@ -145,7 +155,7 @@ def _validate_entry(entry: dict[str, Any]) -> None:
         raise BundleValidationError(f"entry must be a JSON object, was {type(entry).__name__}")
 
     number = entry.get("criterion")
-    missing = [field for field in ENTRY_FIELDS if field not in entry]
+    missing = [field for field in REQUIRED_FIELDS if field not in entry]
     if missing:
         raise BundleValidationError(f"entry {number!r} is missing fields: {missing}")
 
@@ -178,6 +188,18 @@ def _validate_entry(entry: dict[str, Any]) -> None:
         raise BundleValidationError(
             f"entry {number!r} has status {status!r}, not one of {STATUS_VOCABULARY}",
         )
+
+    _validate_outcome(number, entry, status)
+
+
+def _validate_outcome(number: Any, entry: dict[str, Any], status: str) -> None:
+    """
+    Validate the outcome a status requires: a dependency for a block, a defect for a failure.
+    """
+    if status == "blocked" and not str(entry.get("dependency", "")).strip():
+        raise BundleValidationError(f"entry {number!r} is blocked and names no dependency")
+    if status == "failed" and not str(entry.get("defect", "")).strip():
+        raise BundleValidationError(f"entry {number!r} failed and names no open defect")
 
 
 def _validate_criterion_numbers(entries: list[dict[str, Any]]) -> None:
@@ -280,7 +302,7 @@ def test_every_entry_has_all_eight_fields() -> None:
     bundle = load_bundle()
 
     for entry in bundle["entries"]:
-        missing = [field for field in ENTRY_FIELDS if field not in entry]
+        missing = [field for field in REQUIRED_FIELDS if field not in entry]
         assert missing == [], f"criterion {entry['criterion']} is missing fields {missing}"
 
 
@@ -431,3 +453,39 @@ def test_a_paraphrased_requirement_is_detected() -> None:
     violations = _verbatim_violations(bundle, _design_section_15_text())
 
     assert violations == [1], f"violations are {violations}"
+
+
+def test_the_bundle_recomputes_its_identities_and_resolves_its_receipts() -> None:
+    """
+    Test the M4 half: an entry's identity digest recomputes from the components it declares.
+
+    An identity held as prose is named rather than recomputed, and both kinds are reported rather
+    than silently accepted: the entries the earlier milestones produced carry a sentence until the
+    bundle is completed at M6.5, and every entry from M4 onwards carries components whose digest
+    the check recomputes. A receipt's digest recomputes from its own fields, and an artifact the
+    entry cites is resolved against the content the caller retains.
+    """
+    document = load_bundle()
+    verification = verify_bundle(document, resolve={})
+
+    assert verification.ok, [finding.describe() for finding in verification.findings]
+    assert verification.entries == CRITERION_COUNT
+    assert verification.resolved == ()
+    assert set(verification.named_only) == {1, 3, 4, 6, 19, 20, 21}
+
+    recomputed = [
+        int(entry["criterion"])
+        for entry in document["entries"]
+        if isinstance(entry["identity"], dict)
+    ]
+    assert set(recomputed) == {2, 5, 7, 8, 9, 10, 11, 18}
+
+    # A tampered identity and a missing dependency are both findings, so the check has teeth.
+    tampered = load_bundle()
+    entry = tampered["entries"][0]
+    entry["identity"] = {"digest": "sha256:" + "0" * 64, "components": {"fixture": "FX-M3-1"}}
+    assert not verify_bundle(tampered).ok
+
+    blocked = load_bundle()
+    blocked["entries"][11].pop("dependency")
+    assert not verify_bundle(blocked).ok
