@@ -457,13 +457,13 @@ def test_a_paraphrased_requirement_is_detected() -> None:
 
 def test_the_bundle_recomputes_its_identities_and_resolves_its_receipts() -> None:
     """
-    Test the M4 half: an entry's identity digest recomputes from the components it declares.
+    Test the M4 and M5 halves: an entry's identity digest recomputes from the components it declares.
 
     An identity held as prose is named rather than recomputed, and both kinds are reported rather
     than silently accepted: the entries the earlier milestones produced carry a sentence until the
-    bundle is completed at M6.5, and every entry from M4 onwards carries components whose digest
-    the check recomputes. A receipt's digest recomputes from its own fields, and an artifact the
-    entry cites is resolved against the content the caller retains.
+    bundle is completed at M6.5, and every entry from M4 onwards, including the search milestones,
+    carries components whose digest the check recomputes. A receipt's digest recomputes from its own
+    fields, and an artifact the entry cites is resolved against the content the caller retains.
     """
     document = load_bundle()
     verification = verify_bundle(document, resolve={})
@@ -478,7 +478,7 @@ def test_the_bundle_recomputes_its_identities_and_resolves_its_receipts() -> Non
         for entry in document["entries"]
         if isinstance(entry["identity"], dict)
     ]
-    assert set(recomputed) == {2, 5, 7, 8, 9, 10, 11, 18}
+    assert set(recomputed) == {2, 5, 7, 8, 9, 10, 11, 14, 17, 18}
 
     # A tampered identity and a missing dependency are both findings, so the check has teeth.
     tampered = load_bundle()

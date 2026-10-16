@@ -45,6 +45,7 @@ from nautilus_trader.discovery.ledger import counts_from_events
 from nautilus_trader.discovery.ledger import non_deterministic_digest
 from nautilus_trader.discovery.ledger import recompute
 from nautilus_trader.discovery.ledger import reconcile_receipt
+from nautilus_trader.discovery.ledger import recorded_trial_sharpes
 from nautilus_trader.discovery.ledger import research_family_id
 from nautilus_trader.discovery.ledger import trial_mapping
 from nautilus_trader.discovery.ledger import verify_bundle
@@ -660,3 +661,29 @@ def test_an_equivalence_merge_records_both_identities(tmp_path: Path) -> None:
     assert event.payload["merged_into"] == OTHER
     assert event.payload["rule"] == "ordered_conditions"
     assert campaign.counts().unique_configurations == 0
+
+
+def test_a_measurement_is_read_from_the_ledger_rather_than_declared(tmp_path: Path) -> None:
+    """
+    The runner's per-period Sharpe ratios are declared at the close and read back from the record.
+
+    An attempt that produced no usable return series declares none, so a measurement read from the
+    inventory cannot count a trial whose return series never existed.
+    """
+    campaign = inventory(tmp_path / "inventory")
+    measured = key()
+    campaign.submit_job(measured, candidate_id=CANDIDATE)
+    campaign.close_attempt(
+        measured,
+        outcome=AttemptOutcome.COMPLETED,
+        trial_sharpes=(0.5, -0.5, 0.25),
+    )
+
+    crashed = key("crash")
+    campaign.submit_job(crashed, candidate_id=CANDIDATE)
+    campaign.close_attempt(crashed, outcome=AttemptOutcome.CRASHED)
+
+    assert campaign.attempts()[measured.value].trial_sharpes == (0.5, -0.5, 0.25)
+    assert campaign.attempts()[crashed.value].trial_sharpes == ()
+    assert recorded_trial_sharpes(campaign) == (0.5, -0.5, 0.25)
+    assert campaign.attempts()[measured.value].to_dict()["trial_sharpes"] == [0.5, -0.5, 0.25]

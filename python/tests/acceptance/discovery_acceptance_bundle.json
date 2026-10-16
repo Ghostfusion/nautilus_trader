@@ -293,14 +293,29 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 14",
       "fixture": "FX-M5-1",
       "milestone": "M5",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null,
-      "dependency": "an admitted campaign of M5"
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:332d651d874d81da1abd02423a02127918e4281db839c917751e7010a5a72609",
+        "components": {
+          "fixture": "FX-M5-1",
+          "test_module": "python/tests/integration/test_discovery_search.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "a campaign whose sample cannot support the claim, with one completed execution and one crashed one"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_search.py, test_fx_m5_1_a_campaign_against_insufficient_power_ends_inconclusive",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_search.py -q -k fx_m5_1",
+      "expected": "an inconclusive verdict with a stated reason and a trial inventory",
+      "observed": "G3 returns inconclusive on twelve observations against a twenty-observation contract, the lifecycle records the outcome without promoting the candidate, and the inventory separates two executions from the one admitted trial and one unusable attempt",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it drives the search's own recorders and the gate service over declared artifacts and runs no backtest"
+      },
+      "dependency": null,
+      "defect": null
     },
     {
       "criterion": 15,
@@ -338,14 +353,29 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 17",
       "fixture": "FX-M5-2",
       "milestone": "M5",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null,
-      "dependency": "the A-then-B selection fixture of M5"
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:720160b47cc9384e0820210cafef621a1de26c422f774319aa08f1bc2fda90a1",
+        "components": {
+          "fixture": "FX-M5-2",
+          "test_module": "python/tests/integration/test_discovery_search.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "a locked validation partition whose result informed one lineage, and a second lineage that never consumed a result there"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_search.py, test_fx_m5_2_a_partition_that_informed_a_lineage_is_development_for_it",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_search.py -q -k fx_m5_2",
+      "expected": "the informed lineage cannot present the partition as validation, an untouched lineage can, and selection refuses a locked result",
+      "observed": "the downgrade is recorded with the candidate that caused it, the descendant's validation attempt is refused by name, the untouched lineage keeps the partition, and the audit joins each submitted job to its candidate's lineage",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
+        "note": "no run receipt exists for this fixture: it drives the search's own recorders and the gate service over declared artifacts and runs no backtest"
+      },
+      "dependency": null,
+      "defect": null
     },
     {
       "criterion": 18,

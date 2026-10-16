@@ -1210,6 +1210,7 @@ class AttemptRecord:
     receipt_digest: str = ""
     admitted: bool = False
     data_role: DataRole = DataRole.DEVELOPMENT
+    trial_sharpes: tuple[float, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """
@@ -1228,6 +1229,7 @@ class AttemptRecord:
             "receipt_digest": self.receipt_digest,
             "admitted": self.admitted,
             "data_role": self.data_role.value,
+            "trial_sharpes": list(self.trial_sharpes),
         }
 
 
@@ -1573,6 +1575,9 @@ class CampaignInventory:
             elif event.kind is EventKind.EXECUTION_ATTEMPT_CLOSED:
                 outcome = AttemptOutcome(str(event.payload["outcome"]))
                 record["outcome"] = outcome
+                declared = event.payload.get("trial_sharpes", ())
+                if isinstance(declared, list | tuple):
+                    record["trial_sharpes"] = tuple(float(value) for value in declared)
                 record["state"] = (
                     RegistrationState.COMPLETED
                     if outcome.produced_a_return_series
@@ -1832,12 +1837,19 @@ class CampaignInventory:
         *,
         outcome: AttemptOutcome,
         detail: str = "",
+        trial_sharpes: tuple[float, ...] = (),
     ) -> LedgerEvent:
         """
         Close an execution attempt, which is what an executed experiment counts.
 
         The close is written once per key: a replay of the registration step does not close the
         same attempt a second time, so an interrupted registration cannot become two executions.
+
+        The runner is where a return series exists, so the per-period Sharpe ratios it measured are
+        declared here rather than by whoever later reads the ledger: a gate that consumes the
+        cross-trial dispersion can then read it from the inventory instead of being told it. The
+        ratios are per-period rather than annualised, because the correction that consumes them is
+        per-period, and an attempt that produced no usable series declares none.
 
         Parameters
         ----------
@@ -1847,6 +1859,8 @@ class CampaignInventory:
             How the attempt closed.
         detail : str, default ""
             What the caller recorded about the outcome, such as the failure class.
+        trial_sharpes : tuple[float, ...], default ()
+            The per-period Sharpe ratios the attempt's return series produced, in period order.
 
         Returns
         -------
@@ -1875,7 +1889,11 @@ class CampaignInventory:
                 key.value,
                 EventKind.EXECUTION_ATTEMPT_CLOSED,
                 candidate_id=str(self._candidate_for(key.value)),
-                payload={"outcome": outcome.value, "detail": detail},
+                payload={
+                    "outcome": outcome.value,
+                    "detail": detail,
+                    "trial_sharpes": list(trial_sharpes),
+                },
             )
 
     def mark_incomplete(self, key: IdempotencyKey, *, reason: str) -> RegistrationOutcome:
@@ -2422,6 +2440,32 @@ class TrialMapping:
             "data_roles": {key: role.value for key, role in self.data_roles.items()},
             "effective_trials": self.effective_trials,
         }
+
+
+def recorded_trial_sharpes(inventory: CampaignInventory) -> tuple[float, ...]:
+    """
+    Return the per-period Sharpe ratios every attempt declared, in idempotency key order.
+
+    This is the reader a gate uses instead of being told the cross-trial dispersion: the ratios are
+    read from the inventory, so a correction that consumes them is computed from what the runs
+    measured rather than from what a caller asserted. An attempt that declared none contributes
+    nothing, which is the same statement as an attempt that produced no usable return series.
+
+    Parameters
+    ----------
+    inventory : CampaignInventory
+        The campaign's inventory.
+
+    Returns
+    -------
+    tuple[float, ...]
+
+    """
+    return tuple(
+        sharpes
+        for _, record in sorted(inventory.attempts().items())
+        for sharpes in record.trial_sharpes
+    )
 
 
 def trial_mapping(

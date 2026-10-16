@@ -688,6 +688,57 @@ Goal: enable generation and search inside an admitted space, with the controls a
 Exit: design criteria 5, 14 and 17 hold, no agent can reach a metric, a threshold, the confirmation
 set or an engine handle, and the search policy can report which version proposed which candidate.
 
+M5's exit, and where each condition is met. Each workstream landed as its own module in
+`python/nautilus_trader/discovery/`, and each carries the fixture its row names.
+
+| Workstream | Module                                       | Fixture                                                        |
+| ---------- | -------------------------------------------- | -------------------------------------------------------------- |
+| M5.1       | `genome.py`                                  | `python/tests/unit/discovery/test_genome.py`                   |
+| M5.2       | `evolve.py`                                  | `python/tests/unit/discovery/test_evolve.py`                   |
+| M5.3       | `evolve.py`, `PartitionRoles`                | `FX-M5-2`: `python/tests/integration/test_discovery_search.py` |
+| M5.4       | `agents.py`, `prompts/`                      | `python/tests/unit/discovery/test_agents.py`                   |
+| M5.5       | `agents.py`, with `validate.py`              | `FX-M5-3`: the same integration module                         |
+| M5.6       | `evolve.py`, `SearchPolicy`                  | the per-generation digest through `record_search_policy`       |
+| M5.7       | the driver the integration fixtures exercise | `FX-M5-1`: the same integration module                         |
+
+| Criterion | Result | Evidence                                                                                                                                                                                                           |
+| --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 5         | holds  | M4's calibration suite is re-run over the merged tree, and the search adds no path that evades a gate                                                                                                              |
+| 14        | passes | `FX-M5-1`: twelve observations against a twenty-observation contract reach G3, which returns inconclusive; the campaign records its reason and reports two executions, one admitted trial and one unusable attempt |
+| 17        | passes | `FX-M5-2`: the partition A informed is development data for that lineage, B's validation attempt on it is refused by name, another lineage keeps the partition, and selection refuses a locked result              |
+
+Five findings are carried rather than repaired silently. The three degrees of freedom are enforced by
+construction rather than by review: the only operation that changes a mechanism takes the
+replacement hypothesis and falsification statement as an argument, so no call can change the
+mechanism and keep the old pair. The equivalence rule is pre-registered and names which
+specification differences are a different configuration, so a rerun, a rename and a recompilation
+cannot become several trials while a genuinely distinct configuration cannot vanish. The search
+policy names its mutable set and refuses a frozen field by name, and the generation stamp travels
+with the policy as a stamp rather than an instruction. The partition role is attached to a result
+together with the lineage that consumed it, so the boundary survives a new branch or a new identity.
+And the measurement: the per-period Sharpe ratios an attempt produced are declared when the attempt
+closes and read back by `recorded_trial_sharpes`, so a correction that consumes the cross-trial
+dispersion computes it from the inventory instead of being told it. The raw return series stays with
+the run's canonical document, which Python cannot deserialise, and the ratios are per-period, which
+is what the correction consumes.
+
+Two limits are named. Four of the five roles are not candidate producers, so their responses are
+checked for being a JSON object rather than against the language's schema; the authority that limits
+them is the field set they are given, which is exact because a prompt declares its fields and
+`Prompt.render` refuses any other. And agents still cannot be reproduced by recall: a campaign
+replays a recorded response, which is why the invocation record is evidence and a live call is not.
+
+The per-bar decision question is settled by declaring it rather than by changing the interpreter. A
+decision is taken on every decision bar and only a rebalance bar allocates, so a holding-period cap
+that expires inside a period closes the position on that bar and leaves the proceeds uninvested until
+that period's rebalance bar. The design's Section 9.7 states it, and for `daily` every decision bar
+is a rebalance bar, so the interval does not arise.
+
+The discovery suites report 264 passed over `python/tests/unit/discovery` and the acceptance tree and
+74 passed over `python/tests/integration -k discovery`, `ruff check` and `ruff format --check` are
+clean, and the two bundle entries this milestone resolves carry component identities whose digests
+recompute. `make` remains unusable in this environment, so every gate above was run directly.
+
 ## 12. M6: validation and shadow
 
 Goal: exercise the frozen path, close the boundary, and report shadow as integration evidence.

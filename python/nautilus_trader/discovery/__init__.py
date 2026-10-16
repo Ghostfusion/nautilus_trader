@@ -27,6 +27,27 @@ them.
 Importing this package has no side effects and needs no network.
 """
 
+from nautilus_trader.discovery.agents import _ISO_DATE_LENGTH as _ISO_DATE_LENGTH
+from nautilus_trader.discovery.agents import _ISO_DATE_PART_WIDTHS as _ISO_DATE_PART_WIDTHS
+from nautilus_trader.discovery.agents import _MAY_NOT as _MAY_NOT
+from nautilus_trader.discovery.agents import _PRODUCES as _PRODUCES
+from nautilus_trader.discovery.agents import _PROMPTS as _PROMPTS
+from nautilus_trader.discovery.agents import AGENT_PROTOCOL_VERSION as AGENT_PROTOCOL_VERSION
+from nautilus_trader.discovery.agents import INSUFFICIENT_DATA_KEY as INSUFFICIENT_DATA_KEY
+from nautilus_trader.discovery.agents import INSUFFICIENT_DATA_VALUE as INSUFFICIENT_DATA_VALUE
+from nautilus_trader.discovery.agents import SPECIFICATION_KEY as SPECIFICATION_KEY
+from nautilus_trader.discovery.agents import AgentContext as AgentContext
+from nautilus_trader.discovery.agents import AgentModel as AgentModel
+from nautilus_trader.discovery.agents import AgentOutcome as AgentOutcome
+from nautilus_trader.discovery.agents import AgentRequest as AgentRequest
+from nautilus_trader.discovery.agents import AgentResult as AgentResult
+from nautilus_trader.discovery.agents import Contamination as Contamination
+from nautilus_trader.discovery.agents import InvocationRecord as InvocationRecord
+from nautilus_trader.discovery.agents import Language as Language
+from nautilus_trader.discovery.agents import ReplayModel as ReplayModel
+from nautilus_trader.discovery.agents import Role as Role
+from nautilus_trader.discovery.agents import classify as classify
+from nautilus_trader.discovery.agents import invoke as invoke
 from nautilus_trader.discovery.compile import CompilationResult as CompilationResult
 from nautilus_trader.discovery.compile import CompiledPlan as CompiledPlan
 from nautilus_trader.discovery.compile import compile_specification as compile_specification
@@ -41,6 +62,43 @@ from nautilus_trader.discovery.custody import CustodyState as CustodyState
 from nautilus_trader.discovery.custody import Reservation as Reservation
 from nautilus_trader.discovery.custody import WorkerEnvironmentCheck as WorkerEnvironmentCheck
 from nautilus_trader.discovery.custody import inherited_reservations as inherited_reservations
+from nautilus_trader.discovery.evolve import _CONVENTIONS as _CONVENTIONS
+from nautilus_trader.discovery.evolve import _EDIT_ATTEMPTS as _EDIT_ATTEMPTS
+from nautilus_trader.discovery.evolve import _EXPLORATION_SHARE as _EXPLORATION_SHARE
+from nautilus_trader.discovery.evolve import _GENERATION_STAMP as _GENERATION_STAMP
+from nautilus_trader.discovery.evolve import (
+    _PARAMETER_GENES_PER_MUTATION as _PARAMETER_GENES_PER_MUTATION,
+)
+from nautilus_trader.discovery.evolve import _PREFERS_HIGH as _PREFERS_HIGH
+from nautilus_trader.discovery.evolve import (
+    _STRUCTURAL_GENES_PER_MUTATION as _STRUCTURAL_GENES_PER_MUTATION,
+)
+from nautilus_trader.discovery.evolve import EQUIVALENCE_IGNORED_PATHS as EQUIVALENCE_IGNORED_PATHS
+from nautilus_trader.discovery.evolve import EQUIVALENCE_RULE_ID as EQUIVALENCE_RULE_ID
+from nautilus_trader.discovery.evolve import EVOLUTION_VERSION as EVOLUTION_VERSION
+from nautilus_trader.discovery.evolve import FROZEN_FIELDS as FROZEN_FIELDS
+from nautilus_trader.discovery.evolve import SEARCH_POLICY_ID as SEARCH_POLICY_ID
+from nautilus_trader.discovery.evolve import SEARCH_POLICY_VERSION as SEARCH_POLICY_VERSION
+from nautilus_trader.discovery.evolve import Amendment as Amendment
+from nautilus_trader.discovery.evolve import Deduplication as Deduplication
+from nautilus_trader.discovery.evolve import DevelopmentResult as DevelopmentResult
+from nautilus_trader.discovery.evolve import EquivalenceMerge as EquivalenceMerge
+from nautilus_trader.discovery.evolve import Evolution as Evolution
+from nautilus_trader.discovery.evolve import GenerationPlan as GenerationPlan
+from nautilus_trader.discovery.evolve import Objective as Objective
+from nautilus_trader.discovery.evolve import PartitionRole as PartitionRole
+from nautilus_trader.discovery.evolve import PartitionRoles as PartitionRoles
+from nautilus_trader.discovery.evolve import RoleAssignment as RoleAssignment
+from nautilus_trader.discovery.evolve import SearchDiagnosis as SearchDiagnosis
+from nautilus_trader.discovery.evolve import SearchPolicy as SearchPolicy
+from nautilus_trader.discovery.evolve import SearchRefusal as SearchRefusal
+from nautilus_trader.discovery.evolve import Selection as Selection
+from nautilus_trader.discovery.evolve import deduplicate as deduplicate
+from nautilus_trader.discovery.evolve import dominates as dominates
+from nautilus_trader.discovery.evolve import equivalence_key as equivalence_key
+from nautilus_trader.discovery.evolve import pareto_front as pareto_front
+from nautilus_trader.discovery.evolve import role_audit as role_audit
+from nautilus_trader.discovery.evolve import selectable as selectable
 from nautilus_trader.discovery.features import MISSING_UNAVAILABLE as MISSING_UNAVAILABLE
 from nautilus_trader.discovery.features import OPERATORS as OPERATORS
 from nautilus_trader.discovery.features import WARMUP_UNAVAILABLE as WARMUP_UNAVAILABLE
@@ -86,6 +144,25 @@ from nautilus_trader.discovery.gates import (
 from nautilus_trader.discovery.gates import required_observations as required_observations
 from nautilus_trader.discovery.gates import run_calibration as run_calibration
 from nautilus_trader.discovery.gates import transition_rule as transition_rule
+from nautilus_trader.discovery.genome import _CONDITION_BOUND as _CONDITION_BOUND
+from nautilus_trader.discovery.genome import _MECHANISM_PATHS as _MECHANISM_PATHS
+from nautilus_trader.discovery.genome import _MUTATION_ATTEMPTS as _MUTATION_ATTEMPTS
+from nautilus_trader.discovery.genome import _MUTATION_PLACES as _MUTATION_PLACES
+from nautilus_trader.discovery.genome import _PARAMETER_GENES as _PARAMETER_GENES
+from nautilus_trader.discovery.genome import _STATEMENT_FIELDS as _STATEMENT_FIELDS
+from nautilus_trader.discovery.genome import _STRUCTURAL_GENES as _STRUCTURAL_GENES
+from nautilus_trader.discovery.genome import GENOME_VERSION as GENOME_VERSION
+from nautilus_trader.discovery.genome import Change as Change
+from nautilus_trader.discovery.genome import Edit as Edit
+from nautilus_trader.discovery.genome import Gene as Gene
+from nautilus_trader.discovery.genome import GeneticDegree as GeneticDegree
+from nautilus_trader.discovery.genome import Genome as Genome
+from nautilus_trader.discovery.genome import GenomeRefusal as GenomeRefusal
+from nautilus_trader.discovery.genome import Mechanism as Mechanism
+from nautilus_trader.discovery.genome import genome_of as genome_of
+from nautilus_trader.discovery.genome import mutate as mutate
+from nautilus_trader.discovery.genome import recombine as recombine
+from nautilus_trader.discovery.genome import with_mechanism as with_mechanism
 from nautilus_trader.discovery.ledger import BUNDLE_SCHEMA as BUNDLE_SCHEMA
 from nautilus_trader.discovery.ledger import COUNTS_MAPPING as COUNTS_MAPPING
 from nautilus_trader.discovery.ledger import ENVELOPE_SCHEMA as ENVELOPE_SCHEMA
@@ -135,6 +212,8 @@ from nautilus_trader.discovery.policy import ComplexityLimits as ComplexityLimit
 from nautilus_trader.discovery.policy import DiscoveryPolicy as DiscoveryPolicy
 from nautilus_trader.discovery.policy import Reference as Reference
 from nautilus_trader.discovery.policy import ReferenceKind as ReferenceKind
+from nautilus_trader.discovery.prompts import PROMPTS_ID as PROMPTS_ID
+from nautilus_trader.discovery.prompts import Prompt as Prompt
 from nautilus_trader.discovery.run import ExperimentOutcome as ExperimentOutcome
 from nautilus_trader.discovery.run import RunRequest as RunRequest
 from nautilus_trader.discovery.run import experiment_for as experiment_for
@@ -195,9 +274,17 @@ from nautilus_trader.discovery.validate import validate_specification as validat
 
 
 __all__ = [
+    "AGENT_PROTOCOL_VERSION",
     "BUNDLE_SCHEMA",
     "COUNTS_MAPPING",
     "ENVELOPE_SCHEMA",
+    "EQUIVALENCE_IGNORED_PATHS",
+    "EQUIVALENCE_RULE_ID",
+    "EVOLUTION_VERSION",
+    "FROZEN_FIELDS",
+    "GENOME_VERSION",
+    "INSUFFICIENT_DATA_KEY",
+    "INSUFFICIENT_DATA_VALUE",
     "INVENTORY_SCHEMA",
     "LEDGER_SCHEMA",
     "MISSING_UNAVAILABLE",
@@ -205,15 +292,44 @@ __all__ = [
     "OPERATORS",
     "POLICY_ID",
     "POLICY_VERSION",
+    "PROMPTS_ID",
     "REQUIRED_REFERENCE_KINDS",
+    "SEARCH_POLICY_ID",
+    "SEARCH_POLICY_VERSION",
+    "SPECIFICATION_KEY",
     "SPECIFICATION_SCHEMA_ID",
     "SPECIFICATION_SCHEMA_VERSION",
     "WARMUP_UNAVAILABLE",
+    "_CONDITION_BOUND",
+    "_CONVENTIONS",
+    "_EDIT_ATTEMPTS",
+    "_EXPLORATION_SHARE",
+    "_GENERATION_STAMP",
+    "_ISO_DATE_LENGTH",
+    "_ISO_DATE_PART_WIDTHS",
+    "_MAY_NOT",
+    "_MECHANISM_PATHS",
+    "_MUTATION_ATTEMPTS",
+    "_MUTATION_PLACES",
+    "_PARAMETER_GENES",
+    "_PARAMETER_GENES_PER_MUTATION",
+    "_PREFERS_HIGH",
+    "_PRODUCES",
+    "_PROMPTS",
+    "_STATEMENT_FIELDS",
+    "_STRUCTURAL_GENES",
+    "_STRUCTURAL_GENES_PER_MUTATION",
     "Actor",
     "AdmissionAssessment",
     "AdmissionInputs",
     "AdmissionOutcome",
+    "AgentContext",
+    "AgentModel",
+    "AgentOutcome",
+    "AgentRequest",
+    "AgentResult",
     "AllocationRequest",
+    "Amendment",
     "AttemptOutcome",
     "AttemptRecord",
     "Bound",
@@ -226,6 +342,7 @@ __all__ = [
     "CampaignInventory",
     "CandidateState",
     "ChainVerification",
+    "Change",
     "CompilationResult",
     "CompiledPlan",
     "ComplexityLimits",
@@ -235,6 +352,7 @@ __all__ = [
     "ConditionNode",
     "ConfirmationCustody",
     "ConfirmationVerdict",
+    "Contamination",
     "ControlClass",
     "CountName",
     "Counts",
@@ -246,16 +364,21 @@ __all__ = [
     "DataBlock",
     "DataRole",
     "DecisionRecord",
+    "Deduplication",
+    "DevelopmentResult",
     "DiscoveryInterpreter",
     "DiscoveryInterpreterConfig",
     "DiscoveryLedger",
     "DiscoveryPolicy",
+    "Edit",
     "EntryBlock",
     "EnvelopeKind",
     "EnvelopeReference",
+    "EquivalenceMerge",
     "EvaluationBlock",
     "EventKind",
     "EvidencePackage",
+    "Evolution",
     "ExitBlock",
     "ExperimentOutcome",
     "FeatureDeclaration",
@@ -274,19 +397,31 @@ __all__ = [
     "GateService",
     "GateVerdict",
     "GateVerdictRecord",
+    "Gene",
+    "GenerationPlan",
+    "GeneticDegree",
+    "Genome",
+    "GenomeRefusal",
     "IdempotencyKey",
     "IdentityBlock",
     "InterpreterRunInputs",
+    "InvocationRecord",
+    "Language",
     "LedgerEvent",
     "Lifecycle",
     "LineageRecord",
+    "Mechanism",
+    "Objective",
     "OutcomeRecord",
     "ParsedSpecification",
+    "PartitionRole",
+    "PartitionRoles",
     "PboEvaluation",
     "PboExclusion",
     "PboRow",
     "PboState",
     "PortfolioBlock",
+    "Prompt",
     "ProvenanceBlock",
     "RebalanceBlock",
     "Recomputation",
@@ -297,15 +432,22 @@ __all__ = [
     "RefusalCode",
     "RegistrationOutcome",
     "RegistrationState",
+    "ReplayModel",
     "ReproducibilityEnvelope",
     "Reservation",
     "RiskBlock",
     "RiskPostRunBlock",
     "RiskPreTradeBlock",
     "RiskRuntimeBlock",
+    "Role",
+    "RoleAssignment",
     "RunIdentity",
     "RunReceipt",
     "RunRequest",
+    "SearchDiagnosis",
+    "SearchPolicy",
+    "SearchRefusal",
+    "Selection",
     "SelectionBlock",
     "SignalRecord",
     "Specification",
@@ -324,31 +466,43 @@ __all__ = [
     "build_panel",
     "bundle_identity",
     "canonical_mapping",
+    "classify",
     "compile_specification",
     "compose_plan",
     "compute_observations",
     "count_condition_leaves",
     "counts_from_events",
     "decimal_of",
+    "deduplicate",
+    "dominates",
     "engine_version",
+    "equivalence_key",
     "evaluate_pbo_matrix",
     "experiment_for",
+    "genome_of",
     "inherited_reservations",
+    "invoke",
     "minimum_track_record_length",
+    "mutate",
     "non_deterministic_digest",
+    "pareto_front",
     "parse_specification",
     "rebalance_period_key",
+    "recombine",
     "recompute",
     "reconcile_receipt",
     "required_observations",
     "research_family_id",
+    "role_audit",
     "run_calibration",
     "run_experiment",
     "scan_for_code_references",
     "select_cross_section",
+    "selectable",
     "specification_digest_of",
     "transition_rule",
     "trial_mapping",
     "validate_specification",
     "verify_bundle",
+    "with_mechanism",
 ]

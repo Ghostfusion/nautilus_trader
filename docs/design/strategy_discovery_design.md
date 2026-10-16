@@ -1421,6 +1421,15 @@ Two conventions this section left implicit, which the implementation states and 
   rebalance timing is declared relative to the decision time and a clock read is a different
   quantity.
 
+One further convention follows from the two, and it is stated because it decides when cash is
+available rather than because it changes a number. A decision is taken on every decision bar, and
+only a rebalance bar allocates: the exits are evaluated before the entries on every bar, and the
+selection and the targets are produced on the rebalance bar alone. A holding-period cap that expires
+on a bar inside a period therefore closes the position on that bar, and the proceeds stay uninvested
+until the period's rebalance bar, because no allocation runs in between. For the `daily` frequency
+every decision bar is a rebalance bar, so the interval does not arise, and a cap-driven exit inside a
+period can never be followed by a re-entry in that same period.
+
 ## 10. Search: agents, evolution, and accounting
 
 ### 10.1 Roles and authorities
