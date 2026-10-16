@@ -359,8 +359,7 @@ which in a ranking is indistinguishable from a weak signal.
 ### L3 A computed number carries its binding budget
 
 **Observed.** "The LLM argues the thesis; this computes the number. Size = min over independent
-budgets (Kelly, risk-per-trade) scaled by volatility targeting, order-flow distribution and agreement
-- all clamped to config caps and returned with an audit trail of which budget bound it."
+budgets (Kelly, risk-per-trade) scaled by volatility targeting, order-flow distribution and agreement - all clamped to config caps and returned with an audit trail of which budget bound it."
 (`tradingagents/strategies/contract.py:1-6`, wired at `graph/trading_graph.py:1083-1199` behind
 `enable_position_contract`, default off.)
 

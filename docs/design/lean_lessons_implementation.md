@@ -774,7 +774,7 @@ Steps 2 to 6 (`5c091e708f`) are the package `python/nautilus_trader/optimization
 single-concern modules rather than one: `space.py` (parameter model, deterministic expansion, a
 canonical digest per experiment), `search.py` (enumeration only, so a strategy never sees a result),
 `runner.py` (the single execution path), `metrics.py` (the statistics bridge), `report.py` (ranking
-and aggregation), `optimizer.py` (search, runner and objective tied together), `stages.py`, 
+and aggregation), `optimizer.py` (search, runner and objective tied together), `stages.py`,
 `persistence.py`, and `concurrency.py`. Search and execution are separate: `GridSearch` enumerates
 and `BacktestRunner` executes exactly one experiment, building its run config and running it through
 `BacktestNode` - no engine is constructed and no run is reached into. A run that fails is recorded as
@@ -942,11 +942,11 @@ Step 4 is the exposure, on both surfaces. Python (`914c1b0fa3`) gained `to_file`
 `crates/system/src/python/config_file.rs`, with `KernelConfig` out of scope because it has no Python
 pyclass and no Python file surface was invented for it. The round trip is asserted on non-default
 values (`load_state=True`, `timeout_connection=45`, `run_analysis=False`), so it cannot pass
-vacuously, and an unknown key raises `ValueError` quoting the loader: `unknown field
-\`unknown_field\`, expected one of \`environment\`, ..., \`run_analysis\``. The CLI (`d9641533b7`)
-gained `nautilus config validate` and `nautilus config resolve`, each taking a file and a `--schema`
-flag selecting `kernel` (the default), `backtest` or `live`, delegating to `load_config` with no
-second loader and emitting one JSON document under envelope schema `nautilus.config.cli/v1`.
+vacuously, and an unknown key raises `ValueError` quoting the loader: unknown field
+`unknown_field`, expected one of `environment`, ..., `run_analysis`. The CLI (`d9641533b7`)
+gained `nautilus config validate` and `nautilus config resolve`, each taking a file and a
+`--schema` flag selecting `kernel` (the default), `backtest` or `live`, delegating to `load_config`
+with no second loader and emitting one JSON document under envelope schema `nautilus.config.cli/v1`.
 
 Two defects were found in review and fixed in `04f661f95d` rather than shipped, both of which the
 original slice's own evidence could not have caught because it validated files produced by the same
@@ -954,8 +954,8 @@ build:
 
 - the schema is feature-gated. `BacktestEngineConfig` carries `streaming` and `catalogs` behind
   `#[cfg(feature = "streaming")]`, which the Python extension always enables and the CLI did not, so
-  a file written by the Python package was rejected by the CLI with `unknown field \`streaming\``.
-  The CLI now enables the same schema features (`nautilus-backtest/streaming`,
+  a file written by the Python package was rejected by the CLI with the message unknown field
+  `streaming`. The CLI now enables the same schema features (`nautilus-backtest/streaming`,
   `nautilus-live/streaming`), and a Python-written `BacktestEngineConfig` validates through the CLI
   with `status: ok` and exit 0, which is the cross-surface check that was missing. A test pins the
   alignment by asserting the CLI's `BacktestEngineConfig` schema contains the feature-gated keys;
