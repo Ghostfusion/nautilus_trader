@@ -40,6 +40,7 @@ from nautilus_trader.discovery.ledger import RegistrationOutcome
 from nautilus_trader.discovery.ledger import RegistrationState
 from nautilus_trader.discovery.ledger import ReproducibilityEnvelope
 from nautilus_trader.discovery.ledger import RunReceipt
+from nautilus_trader.discovery.ledger import audit_campaign
 from nautilus_trader.discovery.ledger import bundle_identity
 from nautilus_trader.discovery.ledger import counts_from_events
 from nautilus_trader.discovery.ledger import non_deterministic_digest
@@ -687,3 +688,120 @@ def test_a_measurement_is_read_from_the_ledger_rather_than_declared(tmp_path: Pa
     assert campaign.attempts()[crashed.value].trial_sharpes == ()
     assert recorded_trial_sharpes(campaign) == (0.5, -0.5, 0.25)
     assert campaign.attempts()[measured.value].to_dict()["trial_sharpes"] == [0.5, -0.5, 0.25]
+
+
+def test_a_gate_verdict_is_read_back_with_the_reason_it_was_reached_for(tmp_path: Path) -> None:
+    """
+    A verdict is recorded with the reason, so a reader reconstructs why a candidate stopped.
+
+    The fact that a gate stopped a candidate is not the same statement as the reason it did, and a
+    verdict without one cannot explain a rejection. The order is the order the gates ran, so the last
+    verdict for a candidate is the one that ended its evaluation.
+    """
+    campaign = inventory(tmp_path / "inventory")
+    campaign.record_gate_verdict(
+        CANDIDATE,
+        gate="G0",
+        status="passed",
+        evidence_digest="sha256:" + "d" * 64,
+        reason="the run was entitled to what it consumed",
+    )
+    campaign.record_gate_verdict(
+        CANDIDATE,
+        gate="G1",
+        status="rejected",
+        evidence_digest="sha256:" + "d" * 64,
+        reason="the candidate did not survive its own costs",
+    )
+
+    verdicts = campaign.gate_verdicts()
+
+    assert [verdict.gate for verdict in verdicts] == ["G0", "G1"]
+    assert [verdict.status for verdict in verdicts] == ["passed", "rejected"]
+    assert verdicts[1].reason == "the candidate did not survive its own costs"
+    assert verdicts[1].candidate_id == CANDIDATE
+    assert verdicts[1].evidence_digest == "sha256:" + "d" * 64
+    assert verdicts[1].sequence == 1
+
+    # A verdict is evidence rather than multiplicity, so no count moves.
+    assert campaign.counts().statistical_trials == 0
+
+
+def test_the_whole_campaign_is_reconstructable_from_the_chain(tmp_path: Path) -> None:
+    """
+    Criterion 16: which candidates existed, which ran, which were judged and why each was rejected.
+
+    A refused candidate never reaches the lineage, so it is named here because the refusal names it:
+    a reader that listed only compiled candidates would lose exactly the candidates that were turned
+    away. The policy digest and the engine version are inputs rather than ledger contents, and the
+    audit reports what the chain corroborates instead of claiming a join it cannot make.
+    """
+    policy = "sha256:" + "9" * 64
+    campaign = CampaignInventory(
+        tmp_path / "inventory",
+        writer="orchestrator",
+        campaign_id="campaign-1",
+        family_id=research_family_id(snapshot="snapshot-1", selection_process="rank_first"),
+        policy_digest=policy,
+    )
+    campaign.record_proposal(CANDIDATE, generation=0)
+    campaign.record_compilation(
+        CANDIDATE,
+        specification_digest=CANDIDATE_DIGEST,
+        new_configuration=True,
+        generation=0,
+    )
+    campaign.record_proposal(OTHER, generation=0)
+    campaign.record_refusal(OTHER, code="VALUE_NOT_DECLARED", path="entry.threshold")
+    register(campaign)
+    campaign.record_gate_verdict(
+        CANDIDATE,
+        gate="G1",
+        status="rejected",
+        evidence_digest="sha256:" + "d" * 64,
+        reason="the candidate did not survive its own costs",
+    )
+    campaign.record_search_policy(search_policy_digest="sha256:" + "7" * 64, generation=0)
+
+    audit = audit_campaign(
+        campaign,
+        policy_digest=policy,
+        engine_version="nautilus_trader 2.0.0rc8",
+    )
+
+    assert audit.campaign_id == "campaign-1"
+    assert audit.events == len(campaign.events())
+    assert audit.head == campaign.checkpoint()
+    assert audit.counts.proposal_attempts == 2
+    assert audit.counts.unique_configurations == 1
+    assert audit.counts.executed_experiments == 1
+    assert audit.counts.statistical_trials == 1
+    assert [candidate.candidate_id for candidate in audit.candidates] == [CANDIDATE, OTHER]
+
+    judged, refused = audit.candidates
+    assert judged.outcome == "rejected"
+    assert judged.admitted == 1
+    assert judged.outcomes == ("completed",)
+    assert judged.attempts == (key().value,)
+    assert judged.reasons == ("the candidate did not survive its own costs",)
+    assert refused.outcome == "refused"
+    assert refused.refusals == ("VALUE_NOT_DECLARED",)
+    assert refused.attempts == ()
+    assert audit.judged == (judged,)
+
+    # The policy digest and the engine version are reported, not assumed.
+    assert audit.policy_matches is True
+    assert audit.recorded_policy_digest == policy
+    assert audit.search_policy_digests == ("sha256:" + "7" * 64,)
+    assert audit.build_identities == (MANIFEST["build_identity"],)
+    assert audit.engine_version == "nautilus_trader 2.0.0rc8"
+
+    undeclared = audit_campaign(campaign)
+    assert undeclared.policy_matches is None
+    assert audit_campaign(campaign, policy_digest=OTHER).policy_matches is False
+
+    # A derived view is deterministic: the same chain and the same declared inputs give one digest.
+    again = audit_campaign(campaign, policy_digest=policy, engine_version=audit.engine_version)
+    assert again.digest() == audit.digest()
+    assert again.to_dict() == audit.to_dict()
+    assert audit.to_dict()["candidates"][0]["outcome"] == "rejected"

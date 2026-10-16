@@ -16,14 +16,14 @@ compiler and a working agent are capabilities, not evidence.
 
 ## 1. Status and scope
 
-| Item                       | State                                                                                                                                                                                                                            |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Design baseline            | `docs/design/strategy_discovery_design.md`, fourth revision, with eighteen decisions and twenty-two acceptance criteria                                                                                                          |
-| Authorised work            | M1 only, by the owner: the verification matrix, the bundle skeleton, the four settled decisions, the baseline campaign and the composition fixtures. M2 to M6 remain unstarted, and this plan still authorises nothing by itself |
-| This document              | Implementation planning: workstreams, deliverables, fixtures, exits, and the two evidence skeletons                                                                                                                              |
-| Code written for discovery | None. The package `python/nautilus_trader/discovery/` does not exist                                                                                                                                                             |
-| Kernel changes             | None proposed. Where one is required, this plan says so and requests it rather than working around it                                                                                                                            |
-| Release posture            | Closed. M1 through M4 are prerequisites for enabling M5, and M2 is a hard gate                                                                                                                                                   |
+| Item                       | State                                                                                                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Design baseline            | `docs/design/strategy_discovery_design.md`, fourth revision, with eighteen decisions and twenty-two acceptance criteria                                                                                                  |
+| Authorised work            | M1 to M6, milestone by milestone and each on the owner's request. M1 to M5 are complete and pushed and M6 is complete; this plan authorises nothing by itself                                                            |
+| This document              | Implementation planning: workstreams, deliverables, fixtures, exits, and the two evidence skeletons                                                                                                                      |
+| Code written for discovery | The package `python/nautilus_trader/discovery/` holds fourteen modules, a prompt set and a facade of 249 exports, with the unit, integration and acceptance fixtures each milestone's exit records                       |
+| Kernel changes             | None proposed. Where one is required, this plan says so and requests it rather than working around it                                                                                                                    |
+| Release posture            | Closed for live trading. The search is enabled only behind M4's governance and M5's controls, and M6's shadow evidence is evidence about integration and operational behaviour rather than proof of future profitability |
 
 In scope: the sequencing of M1 to M6, the module and test layout, the fixture set that each
 acceptance criterion needs, the evidence model, and the failure paths when a prerequisite cannot be
@@ -755,6 +755,69 @@ Exit: design criteria 12, 13, 15 and 16 hold, the bundle is complete and validat
 report is labelled as evidence about integration and operational behaviour rather than about
 profitability.
 
+### 12.1 What M6 produced
+
+| Workstream | Module                                                                                                    | Fixture                                                               |
+| ---------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| M6.1       | `ledger.py`: the gate reason, `gate_verdicts`, `CampaignAudit` and `audit_campaign`; `gates.py` writes it | `FX-M6-4`: `python/tests/integration/test_discovery_audit.py`         |
+| M6.2       | the fixture, over `validate.py`'s closed schema and the repository's canonical credential list            | `FX-M6-1`: `python/tests/integration/test_discovery_boundary.py`      |
+| M6.3       | `shadow.py`: `TemporalContract`, `TemporalReading`, `TemporalParity` and `temporal_parity`                | `FX-M6-2`: `python/tests/integration/test_discovery_shadow.py`        |
+| M6.4       | `shadow.py`: `ShadowPlan`, `ShadowObservation`, `ShadowReport` and `shadow_period`                        | `FX-M6-3`: the same integration module                                |
+| M6.5       | the bundle, the facade and the bundle check                                                               | `FX-M1-3`: `python/tests/acceptance/discovery_acceptance_bundle.json` |
+
+Unit tests: `python/tests/unit/discovery/test_shadow.py` for the contract, the observation-count rule
+and the report, and two cases in `test_ledger.py` for the verdict reader and the audit.
+
+| Criterion | Result | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 12        | passes | `FX-M6-1`: four tests. The graph resolved in a clean interpreter holds no adapter module and no export names an execution surface; the sandbox exports its execution client factory and config and no data client; the 91 variables of the canonical list reach neither the stripped environment discovery imports in nor a worker's; a proposal declaring `data.venue` is refused as `BLOCK_UNKNOWN_FIELD` and one declaring `universe.module_path` as `CODE_REFERENCE_REFUSED`, and both refusals are recorded and read back |
+| 13        | passes | `FX-M6-2`: the candidate decides at the session open and declares `next_session_open`; the feed derives the eligible instant from the declaration and the observed series, the engine's fill records that same instant, and the two readings agree on the declared fields and on the pair. A reading declaring `same_session_close` reports `execution_eligibility` as the differing field, and a shifted reading reports the timestamps as differing                                                                          |
+| 15        | passes | `FX-M6-3`: a late signal, a non-fill with its reason, two undelivered decisions and a cost difference of 0.25 are each a field of the report; it is labelled simulated, readable against a declared three and not readable against the count plus one, and its digest pins the plan it was declared under                                                                                                                                                                                                                      |
+| 16        | passes | `FX-M6-4`: three candidates are reconstructed, including the refused one the lineage does not hold; one admitted trial stands against a crashed attempt left incomplete; the gate reasons are read back from the ledger and compared with the report the service returned; the policy digest is corroborated and the search-policy digest reported; the chain verifies against the audit's own head, and the reconstruction is deterministic and plain data                                                                    |
+| 22        | passes | the bundle completes: twenty-two entries validate, eighteen pass with identities whose digests recompute, four are failed with their defects named, and none is blocked                                                                                                                                                                                                                                                                                                                                                        |
+
+Five findings are carried rather than repaired silently. A gate verdict now records the reason it was
+reached with, because the fact that a gate stopped a candidate and the reason it did are different
+statements and only the second explains a rejection; the reason is evidence, so it changes no count
+under the mapping of Section 5.3. The audit names candidates the lineage cannot, because a refused
+proposal never compiles and a reader listing compiled candidates would lose exactly the candidates
+that were turned away. A non-fill is an intended entry that did not fill, so an observation that
+intended nothing is neither a fill nor a non-fill and a quiet period is not reported as divergence,
+and a non-fill that gives no reason is refused rather than reported, because a report that cannot say
+why is not diagnosable. The temporal contract is an explicit object rather than a convention, because
+a declaration is part of identity: a contract whose `execution_eligibility` differs is a different
+contract whatever the instants do, and the two halves of the comparison are reported separately
+because they fail differently. And the environment assertion is over the environment the boundary
+defines rather than over the operator's shell, because `EODHD_API_KEY` is set on this workstation and
+the design states plainly that a machine with live credentials is protected procedurally: the fixture
+asserts that discovery imports and reaches no adapter in the stripped environment, and reports the
+ambient case instead of failing on it.
+
+Three limits are named. The dependency assertion is evidence and not proof, which the design says
+itself: a dynamic import, an indirect callback or a shared execution stack can evade a check made
+over module names, and the stronger control is the shape of the worker environment, which no
+milestone builds yet because the layout's `config.py` is unbuilt, so the worker allowlist is
+procedural today. The design's environment assertion also asks that a configuration loader refuse a
+credential in a policy file, and no policy-file loader exists in the package: `policy.py` owns the
+policy object, its digests and its freeze rules, so that half is not testable and is not claimed,
+while the checkable half is that the policy's field set declares no credential field at all. And the
+shadow half is fed observed bars rather than bound to a live adapter, because the design names no
+adapter and Section 14's matrix records the choice as a platform decision, so the report is evidence
+about integration and operational behaviour and not about profitability. The declaration that the
+observation count was set before the period started is procedural; what is checkable, and checked, is
+that the plan's digest travels with the report, so what a report was declared against is known.
+
+Two placements are the plan's own rather than new modules. The boundary assertions are tests, because
+the design states them as four tests and a production module would be test surface in production
+code; the audit is a derived view of the ledger, which the layout already owns as the bundle being a
+derived artifact. The facade grew from 231 exports to 249.
+
+The discovery suites report 271 passed over `python/tests/unit/discovery` and the acceptance tree and
+82 passed over `python/tests/integration -k discovery`, the bundle check passes its nineteen cases,
+and `ruff check` and `ruff format --check` are clean over 54 files. `make` remains unusable in this
+environment, so every gate above was run directly, and `check_typos` cannot run here because no
+`typos` binary is present.
+
 ## 13. The five release tests
 
 The second review's tests, in the form the fixtures will take. Each preserves its evidence: the
@@ -868,34 +931,35 @@ the event store's manifest.
 
 ## 15. The acceptance-evidence bundle skeleton
 
-Twenty-two entries, every one `blocked`, in the identity scheme of Section 4.3. The fixture column
-names the artifact that will produce the entry; M1.7 writes the fixtures and M6.5 completes the
-status.
+Twenty-two entries in the identity scheme of Section 4.3, at the status the bundle records. The
+fixture column names the artifact that produced the entry; M1.7 wrote the fixtures and M6.5 completed
+the status, so eighteen entries pass with identities whose digests recompute, four are failed with
+their defects named, and none is blocked.
 
-| Criterion | Requirement, in one line                                                  | Fixture   | Milestone | Status  |
-| --------- | ------------------------------------------------------------------------- | --------- | --------- | ------- |
-| 1         | One candidate round-trips through compile, run, evidence and ledger       | `FX-M3-1` | M3        | Passed  |
-| 2         | Every number recomputes from the ledger and the snapshot                  | `FX-M4-1` | M4        | Blocked |
-| 3         | No candidate can execute generated code                                   | `FX-M3-2` | M3        | Passed  |
-| 4         | No fill before declared eligibility, and the test can fail                | `FX-M2-1` | M2        | Failed  |
-| 5         | Planted defects are caught by the gates                                   | `FX-M4-2` | M4        | Blocked |
-| 6         | Corporate-action accounting reconciles in value and in cash               | `FX-M2-2` | M2        | Failed  |
-| 7         | Inventory complete, four counts separate, illegal transitions refused     | `FX-M4-3` | M4        | Blocked |
-| 8         | Over-budget search refused before the first backtest, with its arithmetic | `FX-M4-4` | M4        | Blocked |
-| 9         | Confirmation set cannot influence selection at campaign level             | `FX-M4-5` | M4        | Blocked |
-| 10        | Every number recomputes over the whole reproducibility envelope           | `FX-M4-6` | M4        | Blocked |
-| 11        | The gate is calibrated on seven classes of control                        | `FX-M4-7` | M4        | Blocked |
-| 12        | The execution boundary is tested, including the capability environment    | `FX-M6-1` | M6        | Blocked |
-| 13        | Replay and shadow share one temporal contract                             | `FX-M6-2` | M6        | Blocked |
-| 14        | A campaign can be inconclusive and say why                                | `FX-M5-1` | M5        | Blocked |
-| 15        | Shadow divergence is measurable and reported as divergence                | `FX-M6-3` | M6        | Blocked |
-| 16        | The whole search is auditable after the fact                              | `FX-M6-4` | M6        | Blocked |
-| 17        | Selection cannot read locked evaluation data, and lineage labelling holds | `FX-M5-2` | M5        | Blocked |
-| 18        | The ledger protocol holds under interruption, concurrency and repetition  | `FX-M4-8` | M4        | Blocked |
-| 19        | The interpreter matches independently specified strategies                | `FX-M3-3` | M3        | Passed  |
-| 20        | Feature values have parity between research and decision time             | `FX-M3-4` | M3        | Passed  |
-| 21        | Allocation is deterministic with no undocumented fallback                 | `FX-M3-5` | M3        | Passed  |
-| 22        | Acceptance evidence is a bundle, not an assertion                         | `FX-M1-3` | M1, M6    | Blocked |
+| Criterion | Requirement, in one line                                                  | Fixture   | Milestone | Status |
+| --------- | ------------------------------------------------------------------------- | --------- | --------- | ------ |
+| 1         | One candidate round-trips through compile, run, evidence and ledger       | `FX-M3-1` | M3        | Passed |
+| 2         | Every number recomputes from the ledger and the snapshot                  | `FX-M4-1` | M4        | Failed |
+| 3         | No candidate can execute generated code                                   | `FX-M3-2` | M3        | Passed |
+| 4         | No fill before declared eligibility, and the test can fail                | `FX-M2-1` | M2        | Failed |
+| 5         | Planted defects are caught by the gates                                   | `FX-M4-2` | M4        | Passed |
+| 6         | Corporate-action accounting reconciles in value and in cash               | `FX-M2-2` | M2        | Failed |
+| 7         | Inventory complete, four counts separate, illegal transitions refused     | `FX-M4-3` | M4        | Passed |
+| 8         | Over-budget search refused before the first backtest, with its arithmetic | `FX-M4-4` | M4        | Passed |
+| 9         | Confirmation set cannot influence selection at campaign level             | `FX-M4-5` | M4        | Passed |
+| 10        | Every number recomputes over the whole reproducibility envelope           | `FX-M4-6` | M4        | Failed |
+| 11        | The gate is calibrated on seven classes of control                        | `FX-M4-7` | M4        | Passed |
+| 12        | The execution boundary is tested, including the capability environment    | `FX-M6-1` | M6        | Passed |
+| 13        | Replay and shadow share one temporal contract                             | `FX-M6-2` | M6        | Passed |
+| 14        | A campaign can be inconclusive and say why                                | `FX-M5-1` | M5        | Passed |
+| 15        | Shadow divergence is measurable and reported as divergence                | `FX-M6-3` | M6        | Passed |
+| 16        | The whole search is auditable after the fact                              | `FX-M6-4` | M6        | Passed |
+| 17        | Selection cannot read locked evaluation data, and lineage labelling holds | `FX-M5-2` | M5        | Passed |
+| 18        | The ledger protocol holds under interruption, concurrency and repetition  | `FX-M4-8` | M4        | Passed |
+| 19        | The interpreter matches independently specified strategies                | `FX-M3-3` | M3        | Passed |
+| 20        | Feature values have parity between research and decision time             | `FX-M3-4` | M3        | Passed |
+| 21        | Allocation is deterministic with no undocumented fallback                 | `FX-M3-5` | M3        | Passed |
+| 22        | Acceptance evidence is a bundle, not an assertion                         | `FX-M1-3` | M1, M6    | Passed |
 
 Criterion 22 appears against two milestones because it is satisfied twice: the skeleton and its
 validator exist at M1, and the completed bundle is verified at M6. `FX-M1-3` is that skeleton and its
@@ -909,13 +973,13 @@ tree.
 
 What a reviewer or a maintainer runs, in the order that makes a failure informative.
 
-| Step                       | Command                                                                                                                                                                              | Establishes                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Unit tests for the package | `python/.venv/Scripts/python.exe -m pytest python/tests/unit/discovery -q`                                                                                                           | Module behaviour, schema refusals, compiler stages                                                                                                                                                                                                                                                                                                                 |
-| Composition fixtures       | `python/.venv/Scripts/python.exe -m pytest python/tests/integration -q -k discovery`                                                                                                 | That each Section 14 row's entry point composes from Python, which is `test_discovery_composition.py`, `test_discovery_engine_composition.py`, `test_discovery_timing_contract.py`, `test_discovery_corporate_action_accounting.py`, `test_discovery_feature_parity.py`, `test_discovery_generated_code_refusals.py` and `test_discovery_round_trip.py` at present |
-| Bundle validation          | `python/.venv/Scripts/python.exe -m pytest python/tests/acceptance -q -k discovery_bundle`                                                                                           | That the bundle is well formed against its schema and the two documents it is drawn from. `test_discovery_bundle.py` checks structure; identity recomputation and receipt resolution join it at M4 and M6                                                                                                                                                          |
-| Reproducibility baseline   | `python/.venv/Scripts/python.exe -m pytest python/tests/integration/test_optimization.py::test_two_runs_of_one_study_produce_the_same_result_digest -q -s`, run twice                | That one study over the bundled data reproduces its result digest, in the run and across processes                                                                                                                                                                                                                                                                 |
-| Document gates             | `scripts/check-markdown-tables.py`, `markdownlint-cli2 --config .markdownlint.jsonc`, `.pre-commit-hooks/check_docs_conventions.sh`, the character hooks, and the offline link check | That the documents are consistent. Not evidence about behaviour                                                                                                                                                                                                                                                                                                    |
+| Step                       | Command                                                                                                                                                                              | Establishes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit tests for the package | `python/.venv/Scripts/python.exe -m pytest python/tests/unit/discovery -q`                                                                                                           | Module behaviour, schema refusals, compiler stages                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Composition fixtures       | `python/.venv/Scripts/python.exe -m pytest python/tests/integration -q -k discovery`                                                                                                 | That each Section 14 row's entry point composes from Python, which is `test_discovery_composition.py`, `test_discovery_engine_composition.py`, `test_discovery_timing_contract.py`, `test_discovery_corporate_action_accounting.py`, `test_discovery_feature_parity.py`, `test_discovery_generated_code_refusals.py`, `test_discovery_round_trip.py` and `test_discovery_search.py` at present, with `test_discovery_boundary.py`, `test_discovery_shadow.py` and `test_discovery_audit.py` added at M6 |
+| Bundle validation          | `python/.venv/Scripts/python.exe -m pytest python/tests/acceptance -q -k discovery_bundle`                                                                                           | That the bundle is well formed against its schema and the two documents it is drawn from. `test_discovery_bundle.py` checks structure, the identity recomputation and receipt resolution M4 added, and the completed statuses M6 writes                                                                                                                                                                                                                                                                 |
+| Reproducibility baseline   | `python/.venv/Scripts/python.exe -m pytest python/tests/integration/test_optimization.py::test_two_runs_of_one_study_produce_the_same_result_digest -q -s`, run twice                | That one study over the bundled data reproduces its result digest, in the run and across processes                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Document gates             | `scripts/check-markdown-tables.py`, `markdownlint-cli2 --config .markdownlint.jsonc`, `.pre-commit-hooks/check_docs_conventions.sh`, the character hooks, and the offline link check | That the documents are consistent. Not evidence about behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 The last row is listed so that it is not mistaken for the others. Document hygiene is a precondition
 for review, and it is not an entry in the bundle.

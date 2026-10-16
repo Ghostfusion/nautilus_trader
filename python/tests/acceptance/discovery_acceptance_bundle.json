@@ -263,14 +263,29 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 12",
       "fixture": "FX-M6-1",
       "milestone": "M6",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null,
-      "dependency": "the boundary tests and the capability environment of M6"
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:7255cd496eb032f5cff78907f8db514957edd6d3cd67422e173ff55c240f5b80",
+        "components": {
+          "fixture": "FX-M6-1",
+          "test_module": "python/tests/integration/test_discovery_boundary.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "four tests pass"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_boundary.py, the four fx_m6_1 tests",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_boundary.py -q -k fx_m6_1",
+      "expected": "the discovery import graph reaches no adapter module, the sandbox venue is the only execution client a worker is given, no adapter credential reaches the environment discovery is run in or a worker is handed, and a candidate naming an execution path is refused with the refusal recorded",
+      "observed": "four tests pass. The import graph is resolved in a clean interpreter and holds no nautilus_trader.adapters module, and none of the 249 exported symbols names an execution client or an order submission. The sandbox exports its execution client factory and config and no data client. The 91 variables of the repository's canonical list are read from scripts/strip-adapter-env.bash, none reaches the stripped environment discovery imports in, and a databento-key variable set in the operator's shell is reported rather than asserted on, because the design states that a machine with live credentials is protected procedurally. A proposal declaring data.venue is refused as BLOCK_UNKNOWN_FIELD and one declaring universe.module_path as CODE_REFERENCE_REFUSED, both refusals are recorded, and the audit reads them back with no executed experiment",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:bdfd7c7d96da3ea25df227e664d8e796b5678234c52e596deb0bb7957560fbe0",
+        "note": "no run receipt exists for this fixture: it resolves an import graph, reads an environment and compiles two proposals, and runs no backtest"
+      },
+      "dependency": null,
+      "defect": null
     },
     {
       "criterion": 13,
@@ -278,14 +293,29 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 13",
       "fixture": "FX-M6-2",
       "milestone": "M6",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null,
-      "dependency": "the shadow run of M6, which the replay is compared against"
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:b8bc86640a1d1c26b3fe1d7b43cba9d0329eac817ba316ef1774733c1bba1ef1",
+        "components": {
+          "fixture": "FX-M6-2",
+          "test_module": "python/tests/integration/test_discovery_shadow.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "the declared field set is the specification's data block, the candidate decides at the session open and declares next_session_open, and the feed's eligible instant is the first observed session instant at or after the decision"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_shadow.py, test_fx_m6_2_a_shadow_run_records_the_field_set_and_timestamps_of_its_backtest",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_shadow.py -q -k fx_m6_2",
+      "expected": "the replay's recorded decision and eligibility instants and the shadow's recorded ones share one declared field set and one pair of instants, and the comparison fails when a declaration or an instant differs",
+      "observed": "the declared field set is the specification's data block, the candidate decides at the session open and declares next_session_open, and the feed's eligible instant is the first observed session instant at or after the decision. The replay's fill records that same instant, so the two readings agree on both the declarations and the pair: this is the stronger half of criterion 13, since the feed derives the instant from the declaration and the observed series rather than from the run. Two negative cases pass as well: a reading declaring same_session_close reports execution_eligibility as the differing field, and one at a later instant reports the timestamps as differing. A decision taken at the session close, where the eligible instant falls in the following period, is the deferred case and is carried by criterion 4",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:c618089e649acab15b91f4a6dbb766bb23239849cb3235ac7a276dc10dfc6b42",
+        "note": "no run receipt exists for this fixture: it drives the interpreter in an in-process engine over fixture bars and records no registration with the ledger, so it cites no receipt"
+      },
+      "dependency": null,
+      "defect": null
     },
     {
       "criterion": 14,
@@ -323,14 +353,29 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 15",
       "fixture": "FX-M6-3",
       "milestone": "M6",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null,
-      "dependency": "a shadow period with live data and simulated fills, in M6"
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:9e013202c5e4844c427a99e20c07718eacab16e47f0ff8603d1ad688cc14d9fe",
+        "components": {
+          "fixture": "FX-M6-3",
+          "test_module": "python/tests/integration/test_discovery_shadow.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "one decision arrived a second late, one intended entry did not fill with the reason recorded, the decisions after it were never delivered, and the observed cost exceeded the modelled one by 0"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_shadow.py, test_fx_m6_3_a_shadow_period_reports_its_divergence_rather_than_summarising_it",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_shadow.py -q -k fx_m6_3",
+      "expected": "the report carries the eligible-decision count, the missing observations, each signal discrepancy with its magnitude, each simulated non-fill with its reason and the difference between the modelled and the observed cost, is labelled simulated, and is readable only against the count declared before the period started",
+      "observed": "one decision arrived a second late, one intended entry did not fill with the reason recorded, the decisions after it were never delivered, and the observed cost exceeded the modelled one by 0.25. The report states three of the decisions as observed, the undelivered count, the discrepancy with its magnitude, the non-fill with its reason and the cost difference, and it carries the label simulated. It is readable against a declaration of three and not readable against a declaration of the count plus one, whose reason names both numbers",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:c618089e649acab15b91f4a6dbb766bb23239849cb3235ac7a276dc10dfc6b42",
+        "note": "no run receipt exists for this fixture: the period it reports is observed data shaped as a feed, and the fixture runs no registration, so it cites no receipt"
+      },
+      "dependency": null,
+      "defect": null
     },
     {
       "criterion": 16,
@@ -338,14 +383,29 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 16",
       "fixture": "FX-M6-4",
       "milestone": "M6",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null,
-      "dependency": "a completed search to audit, in M6"
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:59a5b56f62b6e7eee988cfc2598f37a7d3efff5e9b9874206676f182285d8dcb",
+        "components": {
+          "fixture": "FX-M6-4",
+          "test_module": "python/tests/integration/test_discovery_audit.py",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "the campaign's three candidates are reconstructed in ledger order, including the one the validator refused and which the lineage does not hold; the compiled candidate's execution verified and admitted one statistical trial while the mutation's crashed and was left incomplete; the gate service's verdicts are read back from the ledger with the reasons the report returned, and the granted, admitted, unusable and proposal counts are the four separate numbers the mapping defines"
+        }
+      },
+      "test_or_fixture": "python/tests/integration/test_discovery_audit.py, the two fx_m6_4 tests",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_audit.py -q -k fx_m6_4",
+      "expected": "a reader with the ledger, the policy digest and the engine version reconstructs which candidates existed, which ran, which were judged, under which policy, and why each was rejected",
+      "observed": "the campaign's three candidates are reconstructed in ledger order, including the one the validator refused and which the lineage does not hold; the compiled candidate's execution verified and admitted one statistical trial while the mutation's crashed and was left incomplete; the gate service's verdicts are read back from the ledger with the reasons the report returned, and the granted, admitted, unusable and proposal counts are the four separate numbers the mapping defines. The declared policy digest is corroborated against the recorded one and the two search-policy digests are reported. The chain verifies against the audit's own head, and the reconstruction is deterministic and plain data",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+        "note": "no run receipt exists for this fixture: it exercises the ledger, the gates and the audit over declared artifacts and runs no backtest, so the receipt it cites is the one the completed registration carries"
+      },
+      "dependency": null,
+      "defect": null
     },
     {
       "criterion": 17,
@@ -453,14 +513,29 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 22",
       "fixture": "FX-M1-3",
       "milestone": "M1, M6",
-      "status": "blocked",
-      "identity": null,
-      "test_or_fixture": null,
-      "procedure": null,
-      "expected": null,
-      "observed": null,
-      "receipts": null,
-      "dependency": "the completed bundle and its verification at M6.5"
+      "status": "passed",
+      "identity": {
+        "digest": "sha256:004282542010b88cfaa358e26388db72b0f00292e9b24c21dab67b9fcc6ea8d3",
+        "components": {
+          "fixture": "FX-M1-3",
+          "test_module": "python/tests/acceptance/test_discovery_bundle.py and python/tests/acceptance/discovery_acceptance_bundle.json",
+          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+          "data_snapshot": "twenty-two entries validate; eighteen pass with identities whose digests recompute from their components; four are failed with their defects named, being criteria 2 and 10 against decision M1"
+        }
+      },
+      "test_or_fixture": "python/tests/acceptance/test_discovery_bundle.py and python/tests/acceptance/discovery_acceptance_bundle.json",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/acceptance -q -k discovery_bundle",
+      "expected": "the bundle is well formed against its schema, every entry's identity recomputes from the components it declares, every receipt resolves, and every criterion is passed, failed or blocked with its dependency named",
+      "observed": "twenty-two entries validate; eighteen pass with identities whose digests recompute from their components; four are failed with their defects named, being criteria 2 and 10 against decision M1.3's unreachable run identity, criterion 4 against the settlement bridge, and criterion 6 against the absent dividend cash path; none is blocked, because no criterion is now without the evidence to evaluate it. The bundle resolves its receipts against the content the caller retains, and a tampered identity or a missing dependency is a finding",
+      "receipts": {
+        "run": null,
+        "artifacts": [],
+        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "policy_digest": "sha256:bdfd7c7d96da3ea25df227e664d8e796b5678234c52e596deb0bb7957560fbe0",
+        "note": "the bundle is a derived artifact: its entries cite the receipts the ledger holds, and this entry cites the check that recomputes them"
+      },
+      "dependency": null,
+      "defect": null
     }
   ]
 }

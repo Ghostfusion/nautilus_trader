@@ -176,7 +176,9 @@ from nautilus_trader.discovery.ledger import AttemptOutcome as AttemptOutcome
 from nautilus_trader.discovery.ledger import AttemptRecord as AttemptRecord
 from nautilus_trader.discovery.ledger import BundleFinding as BundleFinding
 from nautilus_trader.discovery.ledger import BundleVerification as BundleVerification
+from nautilus_trader.discovery.ledger import CampaignAudit as CampaignAudit
 from nautilus_trader.discovery.ledger import CampaignInventory as CampaignInventory
+from nautilus_trader.discovery.ledger import CandidateJudgement as CandidateJudgement
 from nautilus_trader.discovery.ledger import ChainVerification as ChainVerification
 from nautilus_trader.discovery.ledger import CountName as CountName
 from nautilus_trader.discovery.ledger import Counts as Counts
@@ -186,6 +188,7 @@ from nautilus_trader.discovery.ledger import EnvelopeKind as EnvelopeKind
 from nautilus_trader.discovery.ledger import EnvelopeReference as EnvelopeReference
 from nautilus_trader.discovery.ledger import EventKind as EventKind
 from nautilus_trader.discovery.ledger import EvidencePackage as EvidencePackage
+from nautilus_trader.discovery.ledger import GateVerdictEntry as GateVerdictEntry
 from nautilus_trader.discovery.ledger import IdempotencyKey as IdempotencyKey
 from nautilus_trader.discovery.ledger import LedgerEvent as LedgerEvent
 from nautilus_trader.discovery.ledger import LineageRecord as LineageRecord
@@ -198,6 +201,7 @@ from nautilus_trader.discovery.ledger import ReproducibilityEnvelope as Reproduc
 from nautilus_trader.discovery.ledger import RunIdentity as RunIdentity
 from nautilus_trader.discovery.ledger import RunReceipt as RunReceipt
 from nautilus_trader.discovery.ledger import TrialMapping as TrialMapping
+from nautilus_trader.discovery.ledger import audit_campaign as audit_campaign
 from nautilus_trader.discovery.ledger import bundle_identity as bundle_identity
 from nautilus_trader.discovery.ledger import counts_from_events as counts_from_events
 from nautilus_trader.discovery.ledger import non_deterministic_digest as non_deterministic_digest
@@ -253,6 +257,20 @@ from nautilus_trader.discovery.schema import count_condition_leaves as count_con
 from nautilus_trader.discovery.schema import decimal_of as decimal_of
 from nautilus_trader.discovery.schema import parse_specification as parse_specification
 from nautilus_trader.discovery.schema import scan_for_code_references as scan_for_code_references
+from nautilus_trader.discovery.shadow import SHADOW_SCHEMA as SHADOW_SCHEMA
+from nautilus_trader.discovery.shadow import SIMULATED_LABEL as SIMULATED_LABEL
+from nautilus_trader.discovery.shadow import NonFill as NonFill
+from nautilus_trader.discovery.shadow import ShadowError as ShadowError
+from nautilus_trader.discovery.shadow import ShadowObservation as ShadowObservation
+from nautilus_trader.discovery.shadow import ShadowPlan as ShadowPlan
+from nautilus_trader.discovery.shadow import ShadowRefusalCode as ShadowRefusalCode
+from nautilus_trader.discovery.shadow import ShadowReport as ShadowReport
+from nautilus_trader.discovery.shadow import SignalDiscrepancy as SignalDiscrepancy
+from nautilus_trader.discovery.shadow import TemporalContract as TemporalContract
+from nautilus_trader.discovery.shadow import TemporalParity as TemporalParity
+from nautilus_trader.discovery.shadow import TemporalReading as TemporalReading
+from nautilus_trader.discovery.shadow import shadow_period as shadow_period
+from nautilus_trader.discovery.shadow import temporal_parity as temporal_parity
 from nautilus_trader.discovery.strategy import AllocationRequest as AllocationRequest
 from nautilus_trader.discovery.strategy import CrossSectionEntry as CrossSectionEntry
 from nautilus_trader.discovery.strategy import CrossSectionRow as CrossSectionRow
@@ -296,6 +314,8 @@ __all__ = [
     "REQUIRED_REFERENCE_KINDS",
     "SEARCH_POLICY_ID",
     "SEARCH_POLICY_VERSION",
+    "SHADOW_SCHEMA",
+    "SIMULATED_LABEL",
     "SPECIFICATION_KEY",
     "SPECIFICATION_SCHEMA_ID",
     "SPECIFICATION_SCHEMA_VERSION",
@@ -339,7 +359,9 @@ __all__ = [
     "CalibrationCase",
     "CalibrationOutcome",
     "CalibrationReport",
+    "CampaignAudit",
     "CampaignInventory",
+    "CandidateJudgement",
     "CandidateState",
     "ChainVerification",
     "Change",
@@ -396,6 +418,7 @@ __all__ = [
     "GateReport",
     "GateService",
     "GateVerdict",
+    "GateVerdictEntry",
     "GateVerdictRecord",
     "Gene",
     "GenerationPlan",
@@ -411,6 +434,7 @@ __all__ = [
     "Lifecycle",
     "LineageRecord",
     "Mechanism",
+    "NonFill",
     "Objective",
     "OutcomeRecord",
     "ParsedSpecification",
@@ -449,8 +473,17 @@ __all__ = [
     "SearchRefusal",
     "Selection",
     "SelectionBlock",
+    "ShadowError",
+    "ShadowObservation",
+    "ShadowPlan",
+    "ShadowRefusalCode",
+    "ShadowReport",
+    "SignalDiscrepancy",
     "SignalRecord",
     "Specification",
+    "TemporalContract",
+    "TemporalParity",
+    "TemporalReading",
     "TrackingAssumptions",
     "TransitionRecord",
     "TransitionRule",
@@ -462,6 +495,7 @@ __all__ = [
     "WorkerEnvironmentCheck",
     "allocate_targets",
     "assess_admission",
+    "audit_campaign",
     "build_memberships",
     "build_panel",
     "bundle_identity",
@@ -499,7 +533,9 @@ __all__ = [
     "scan_for_code_references",
     "select_cross_section",
     "selectable",
+    "shadow_period",
     "specification_digest_of",
+    "temporal_parity",
     "transition_rule",
     "trial_mapping",
     "validate_specification",

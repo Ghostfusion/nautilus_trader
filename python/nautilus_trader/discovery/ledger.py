@@ -1297,6 +1297,59 @@ class LineageRecord:
         return digest_of(canonical_mapping(self.to_dict()))
 
 
+@dataclass(frozen=True)
+class GateVerdictEntry:
+    """
+    One gate's verdict as the ledger recorded it.
+
+    A verdict is evidence rather than multiplicity, and it is recorded with the reason the gate
+    reached it, so a reader can reconstruct not only that a candidate was rejected but why. The
+    evidence digest is the digest of the evidence the verdict was reached on, which binds the reason
+    and the inputs it explains to the same record.
+
+    Parameters
+    ----------
+    candidate_id : str
+        The candidate the verdict is about.
+    gate : str
+        The gate's name, from the gate service's vocabulary.
+    status : str
+        The verdict, from the gate service's vocabulary.
+    reason : str, default ""
+        Why the gate reached it.
+    evidence_digest : str, default ""
+        The digest of the evidence the verdict was reached on.
+    sequence : int, default 0
+        The event's position in the chain.
+
+    """
+
+    candidate_id: str
+    gate: str
+    status: str
+    reason: str = ""
+    evidence_digest: str = ""
+    sequence: int = 0
+
+    def to_dict(self) -> dict[str, object]:
+        """
+        Return the verdict as plain data.
+
+        Returns
+        -------
+        dict[str, object]
+
+        """
+        return {
+            "candidate_id": self.candidate_id,
+            "gate": self.gate,
+            "status": self.status,
+            "reason": self.reason,
+            "evidence_digest": self.evidence_digest,
+            "sequence": self.sequence,
+        }
+
+
 def research_family_id(
     *,
     snapshot: str,
@@ -1597,6 +1650,38 @@ class CampaignInventory:
             key: AttemptRecord(**record)  # type: ignore[arg-type]
             for key, record in folded.items()
         }
+
+    def gate_verdicts(self) -> tuple[GateVerdictEntry, ...]:
+        """
+        Return every gate verdict, in the order the gates reached them.
+
+        A verdict is recorded for each gate that ran and for the one that stopped the chain, so this
+        is the judgement history of the campaign rather than of one candidate. A reader that wants
+        one candidate's severs it on `candidate_id`; the entries are returned in chain order because
+        the last verdict for a candidate is the one that stopped its evaluation.
+
+        Returns
+        -------
+        tuple[GateVerdictEntry, ...]
+
+        """
+        read: list[GateVerdictEntry] = []
+        for event in self.events():
+            if event.kind is not EventKind.GATE_VERDICT:
+                continue
+            payload = event.payload
+            read.append(
+                GateVerdictEntry(
+                    candidate_id=event.candidate_id,
+                    gate=str(payload.get("gate", "")),
+                    status=str(payload.get("status", "")),
+                    reason=str(payload.get("reason", "")),
+                    evidence_digest=str(payload.get("evidence_digest", "")),
+                    sequence=event.sequence,
+                ),
+            )
+
+        return tuple(read)
 
     def receipts(self) -> Mapping[str, RunReceipt]:
         """
@@ -2052,9 +2137,13 @@ class CampaignInventory:
         gate: str,
         status: str,
         evidence_digest: str,
+        reason: str = "",
     ) -> LedgerEvent:
         """
         Record a gate's verdict, which is evidence rather than multiplicity.
+
+        The reason is recorded with the verdict, because a reader reconstructing why a candidate was
+        rejected needs the gate's own explanation rather than only the fact that it stopped there.
 
         Parameters
         ----------
@@ -2066,6 +2155,8 @@ class CampaignInventory:
             The verdict, from the gate's own vocabulary.
         evidence_digest : str
             The digest of the evidence the verdict was reached on.
+        reason : str, default ""
+            Why the gate reached the verdict.
 
         Returns
         -------
@@ -2076,7 +2167,12 @@ class CampaignInventory:
             EventKind.GATE_VERDICT,
             key="",
             candidate_id=candidate_id,
-            payload={"gate": gate, "status": status, "evidence_digest": evidence_digest},
+            payload={
+                "gate": gate,
+                "status": status,
+                "evidence_digest": evidence_digest,
+                "reason": reason,
+            },
         )
 
     def record_custody_event(
@@ -2523,6 +2619,316 @@ def trial_mapping(
         unusable=unusable,
         data_roles=roles,
         effective_trials=effective_trials,
+    )
+
+
+def _judgement_outcome(
+    *,
+    refusals: tuple[str, ...],
+    attempts: tuple[str, ...],
+    admitted: int,
+    verdicts: tuple[GateVerdictEntry, ...],
+) -> str:
+    """
+    Derive one candidate's summary outcome from the facts the ledger retains.
+
+    The rule is stated rather than inferred from the fields, because a reader wants one word and the
+    fields behind it are all present: the last verdict's status when a gate judged the candidate,
+    otherwise whether it ran and was admitted, otherwise whether it was refused, otherwise that it
+    was only proposed.
+    """
+    if verdicts:
+        return verdicts[-1].status
+    if attempts:
+        return "admitted" if admitted else "ran"
+
+    return "refused" if refusals else "proposed"
+
+
+@dataclass(frozen=True)
+class CandidateJudgement:
+    """
+    One candidate's history, as the ledger retains it.
+
+    The four facts criterion 16 asks for are separate fields rather than one summary: the refusals
+    the validator recorded, the attempts that ran and how each closed, how many of them entered the
+    statistical inventory, and the gate verdicts with their reasons. `outcome` is the derived
+    one-word answer, and every fact behind it remains readable.
+
+    Parameters
+    ----------
+    candidate_id : str
+        The candidate.
+    generation : int, default 0
+        The generation of the search it was proposed in.
+    parent_id : str, default ""
+        The candidate it was mutated from, or the empty string when it has none.
+    refusals : tuple[str, ...], default ()
+        The refusal codes recorded for it, in the order they were recorded.
+    attempts : tuple[str, ...], default ()
+        The idempotency keys of its executions, in key order.
+    outcomes : tuple[str, ...], default ()
+        How those attempts closed, in the same order.
+    admitted : int, default 0
+        How many of its attempts entered the statistical inventory.
+    verdicts : tuple[GateVerdictEntry, ...], default ()
+        The gate verdicts reached about it, in the order the gates reached them.
+    outcome : str, default ""
+        The derived summary: the last verdict's status, `admitted`, `ran`, `refused` or `proposed`.
+
+    """
+
+    candidate_id: str
+    generation: int = 0
+    parent_id: str = ""
+    refusals: tuple[str, ...] = ()
+    attempts: tuple[str, ...] = ()
+    outcomes: tuple[str, ...] = ()
+    admitted: int = 0
+    verdicts: tuple[GateVerdictEntry, ...] = ()
+    outcome: str = ""
+
+    @property
+    def reasons(self) -> tuple[str, ...]:
+        """
+        Why the gates reached the verdicts they did, in the order they were reached.
+        """
+        return tuple(verdict.reason for verdict in self.verdicts)
+
+    def to_dict(self) -> dict[str, object]:
+        """
+        Return the judgement as plain data.
+
+        Returns
+        -------
+        dict[str, object]
+
+        """
+        return {
+            "candidate_id": self.candidate_id,
+            "generation": self.generation,
+            "parent_id": self.parent_id,
+            "refusals": list(self.refusals),
+            "attempts": list(self.attempts),
+            "outcomes": list(self.outcomes),
+            "admitted": self.admitted,
+            "verdicts": [verdict.to_dict() for verdict in self.verdicts],
+            "outcome": self.outcome,
+        }
+
+
+@dataclass(frozen=True)
+class CampaignAudit:
+    """
+    A whole campaign as the ledger, the policy digest and the engine version reconstruct it.
+
+    This is a derived view, not a new record: it reads the chain, the lineage, the registrations and
+    the verdicts and states what they show. The policy digest and the engine version are inputs
+    rather than ledger contents, and the audit reports what the ledger does and does not corroborate
+    instead of asserting that they agree: the receipts' build identities are reported as recorded,
+    and the seed, binary and configuration join of decision M1.3 remains the open item it is.
+
+    Parameters
+    ----------
+    campaign_id : str
+        The campaign the inventory was opened for.
+    family_id : str
+        The research family that campaign belongs to.
+    events : int, default 0
+        How many events the chain holds.
+    head : str, default ""
+        The digest of the last event, which is what a checkpoint holds.
+    counts : Counts
+        The four counts under the versioned mapping.
+    policy_digest : str, default ""
+        The policy digest the reader is holding, or the empty string when none was declared.
+    recorded_policy_digest : str, default ""
+        The policy digest the inventory was opened with.
+    search_policy_digests : tuple[str, ...], default ()
+        The digests the generations recorded, in the order they were recorded.
+    engine_version : str, default ""
+        The engine version the reader is holding, or the empty string when none was declared.
+    build_identities : tuple[str, ...], default ()
+        The build identities the reconciled receipts carry, in sorted order.
+    candidates : tuple[CandidateJudgement, ...], default ()
+        Every candidate the ledger names, in first-seen order.
+
+    """
+
+    campaign_id: str
+    family_id: str
+    events: int = 0
+    head: str = ""
+    counts: Counts = field(default_factory=Counts)
+    policy_digest: str = ""
+    recorded_policy_digest: str = ""
+    search_policy_digests: tuple[str, ...] = ()
+    engine_version: str = ""
+    build_identities: tuple[str, ...] = ()
+    candidates: tuple[CandidateJudgement, ...] = ()
+
+    @property
+    def policy_matches(self) -> bool | None:
+        """
+        Whether the declared policy digest is the one the inventory was opened with, or None.
+
+        None means the reader declared none, which is the honest answer rather than a failed match:
+        a policy digest is an input to the audit, not something the ledger can invent.
+        """
+        if not self.policy_digest:
+            return None
+
+        return self.policy_digest == self.recorded_policy_digest
+
+    @property
+    def judged(self) -> tuple[CandidateJudgement, ...]:
+        """
+        The candidates a gate judged, in ledger order.
+        """
+        return tuple(candidate for candidate in self.candidates if candidate.verdicts)
+
+    def to_dict(self) -> dict[str, object]:
+        """
+        Return the audit as plain data.
+
+        Returns
+        -------
+        dict[str, object]
+
+        """
+        return {
+            "campaign_id": self.campaign_id,
+            "family_id": self.family_id,
+            "events": self.events,
+            "head": self.head,
+            "counts": self.counts.to_dict(),
+            "policy_digest": self.policy_digest,
+            "recorded_policy_digest": self.recorded_policy_digest,
+            "policy_matches": self.policy_matches,
+            "search_policy_digests": list(self.search_policy_digests),
+            "engine_version": self.engine_version,
+            "build_identities": list(self.build_identities),
+            "candidates": [candidate.to_dict() for candidate in self.candidates],
+        }
+
+    def digest(self) -> str:
+        """
+        Return the digest of the audit.
+
+        Returns
+        -------
+        str
+            The `sha256:<hex>` digest.
+
+        """
+        return digest_of(canonical_mapping(self.to_dict()))
+
+
+def audit_campaign(
+    inventory: CampaignInventory,
+    *,
+    policy_digest: str = "",
+    engine_version: str = "",
+) -> CampaignAudit:
+    """
+    Reconstruct a whole campaign from what the ledger retained.
+
+    A reader with the ledger, the policy digest and the engine version can reconstruct which
+    candidates existed, which ran, which were judged, under which policy, and why each was rejected.
+    Every candidate the ledger names is reported, including one that was only refused: the lineage
+    holds the compiled ones, and a refusal, a verdict or an attempt names the rest.
+
+    Parameters
+    ----------
+    inventory : CampaignInventory
+        The campaign's inventory.
+    policy_digest : str, default ""
+        The policy digest the reader holds, compared against the recorded one.
+    engine_version : str, default ""
+        The engine version the reader holds, reported beside the receipts' build identities.
+
+    Returns
+    -------
+    CampaignAudit
+
+    """
+    events = inventory.events()
+
+    refusals: dict[str, list[str]] = {}
+    verdicts: dict[str, list[GateVerdictEntry]] = {}
+    search_policies: list[str] = []
+
+    for event in events:
+        if event.kind is EventKind.SPECIFICATION_REFUSED:
+            refusals.setdefault(event.candidate_id, []).append(str(event.payload.get("code", "")))
+        elif event.kind is EventKind.GATE_VERDICT:
+            verdicts.setdefault(event.candidate_id, []).append(
+                GateVerdictEntry(
+                    candidate_id=event.candidate_id,
+                    gate=str(event.payload.get("gate", "")),
+                    status=str(event.payload.get("status", "")),
+                    reason=str(event.payload.get("reason", "")),
+                    evidence_digest=str(event.payload.get("evidence_digest", "")),
+                    sequence=event.sequence,
+                ),
+            )
+        elif event.kind is EventKind.SEARCH_POLICY_RECORDED:
+            search_policies.append(str(event.payload.get("search_policy_digest", "")))
+
+    attempts: dict[str, list[AttemptRecord]] = {}
+    for _, record in sorted(inventory.attempts().items()):
+        attempts.setdefault(record.candidate_id, []).append(record)
+
+    lineage = {record.candidate_id: record for record in inventory.lineage()}
+    named: dict[str, None] = dict.fromkeys(lineage)
+    for source in (refusals, verdicts, attempts):
+        for candidate_id in source:
+            named.setdefault(candidate_id, None)
+
+    candidates: list[CandidateJudgement] = []
+    for candidate_id in named:
+        record = lineage.get(candidate_id)
+        records = tuple(attempts.get(candidate_id, ()))
+        reached = tuple(verdicts.get(candidate_id, ()))
+        codes = tuple(refusals.get(candidate_id, ()))
+        admitted = sum(1 for attempt in records if attempt.admitted)
+        keys = tuple(attempt.key for attempt in records)
+        outcomes = tuple(
+            attempt.outcome.value for attempt in records if attempt.outcome is not None
+        )
+        candidates.append(
+            CandidateJudgement(
+                candidate_id=candidate_id,
+                generation=0 if record is None else record.generation,
+                parent_id="" if record is None else record.parent_id,
+                refusals=codes,
+                attempts=keys,
+                outcomes=outcomes,
+                admitted=admitted,
+                verdicts=reached,
+                outcome=_judgement_outcome(
+                    refusals=codes,
+                    attempts=keys,
+                    admitted=admitted,
+                    verdicts=reached,
+                ),
+            ),
+        )
+
+    return CampaignAudit(
+        campaign_id=inventory.campaign_id,
+        family_id=inventory.family_id,
+        events=len(events),
+        head=inventory.checkpoint(),
+        counts=inventory.counts(),
+        policy_digest=policy_digest,
+        recorded_policy_digest=inventory.policy_digest,
+        search_policy_digests=tuple(search_policies),
+        engine_version=engine_version,
+        build_identities=tuple(
+            sorted({receipt.build_identity for receipt in inventory.receipts().values()}),
+        ),
+        candidates=tuple(candidates),
     )
 
 

@@ -683,6 +683,7 @@ class GateService:
             gate=record.gate.value,
             status=record.verdict.value,
             evidence_digest=evidence.digest(),
+            reason=record.reason,
         )
 
     def _gate_data_integrity(

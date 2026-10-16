@@ -457,11 +457,11 @@ def test_a_paraphrased_requirement_is_detected() -> None:
 
 def test_the_bundle_recomputes_its_identities_and_resolves_its_receipts() -> None:
     """
-    Test the M4 and M5 halves: an entry's identity digest recomputes from the components it declares.
+    Test the recomputation half of the bundle: an entry's identity digest recomputes from its parts.
 
     An identity held as prose is named rather than recomputed, and both kinds are reported rather
-    than silently accepted: the entries the earlier milestones produced carry a sentence until the
-    bundle is completed at M6.5, and every entry from M4 onwards, including the search milestones,
+    than silently accepted: the seven entries whose fixtures predate the component scheme carry a
+    sentence, and every entry from M4 onwards, including the search, shadow and audit milestones,
     carries components whose digest the check recomputes. A receipt's digest recomputes from its own
     fields, and an artifact the entry cites is resolved against the content the caller retains.
     """
@@ -478,14 +478,26 @@ def test_the_bundle_recomputes_its_identities_and_resolves_its_receipts() -> Non
         for entry in document["entries"]
         if isinstance(entry["identity"], dict)
     ]
-    assert set(recomputed) == {2, 5, 7, 8, 9, 10, 11, 14, 17, 18}
+    assert set(recomputed) == {2, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 22}
 
-    # A tampered identity and a missing dependency are both findings, so the check has teeth.
+    # A tampered identity and a block that names no dependency are both findings, so the check has
+    # teeth on both halves. The bundle is complete, so the second case constructs the block it asks
+    # about instead of relying on one being left in the document.
     tampered = load_bundle()
     entry = tampered["entries"][0]
     entry["identity"] = {"digest": "sha256:" + "0" * 64, "components": {"fixture": "FX-M3-1"}}
     assert not verify_bundle(tampered).ok
 
     blocked = load_bundle()
-    blocked["entries"][11].pop("dependency")
+    held = blocked["entries"][11]
+    held["status"] = "blocked"
+    held["dependency"] = "the boundary tests of the execution boundary"
+    for field in EVIDENCE_FIELDS:
+        held[field] = None
+
+    assert verify_bundle(blocked).ok, [
+        finding.describe() for finding in verify_bundle(blocked).findings
+    ]
+
+    held.pop("dependency")
     assert not verify_bundle(blocked).ok
