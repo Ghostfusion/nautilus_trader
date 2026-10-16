@@ -40,8 +40,11 @@ themselves are laid out, see [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.
 - **cost**: Anything that reduces a trade's result, such as commission, the spread, or the effect of your own order on the price.
 - **crowding**: The state in which many traders run the same trade, so the opportunity is thin and can vanish when they all leave.
 - **crypto**: A digital asset such as Bitcoin that exists only as records on a computer network.
+- **custody**: Keeping data aside and allowing it to be read only under a recorded, counted permission rather than by convention.
 - **data snooping**: Searching the same data repeatedly until something looks good by luck, then reporting only the lucky result.
+- **deflated Sharpe ratio**: The chance that the best of many attempts would look this good with no skill at all.
 - **derivative**: A contract whose value depends on something else, such as a share, an index or a commodity.
+- **digest**: A short fingerprint computed from a piece of data, so identical data share it and any change changes it.
 - **distribution**: The pattern describing how often each possible value occurs, such as the shape of daily returns.
 - **dividend**: A cash payment a company makes to its shareholders out of profit.
 - **drawdown**: The fall from a peak in value to a later low, measured as a percentage of the peak.
@@ -54,17 +57,21 @@ themselves are laid out, see [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.
 - **exposure**: How much of your money is actually at risk in a particular market or direction.
 - **factor**: A shared characteristic used to sort assets into groups, such as size, value or recent momentum.
 - **factor investing**: Building a portfolio around such characteristics instead of around single companies.
+- **feature**: A named measurement computed from market data, such as the average close over a window, which a rule reads by name.
 - **fill**: The moment an order is completed and you own or have sold the thing, usually at the price then available.
 - **fund**: A pooled pot of money that many people pay into and that a manager invests on their behalf.
 - **future**: A standard contract to buy or sell something at a fixed price on a fixed future date.
 - **gross return**: The return before costs and fees are subtracted.
 - **hedge**: A second position taken to reduce the risk of the first.
 - **holding period**: The length of time a position is kept open.
+- **holdout**: Data reserved before a search begins and read for one frozen candidate only, never for the search.
+- **hypothesis**: A stated claim about why a price might move, written so that something could show it to be false.
 - **index**: A published list of assets whose combined price is tracked as a single number, such as a stock-market index.
 - **indicator**: A number calculated from past prices, such as a moving average, used as an input to a rule.
 - **inflation**: The rate at which prices in general rise, which reduces what money can buy.
 - **information ratio**: A return above the benchmark divided by how unsteadily that extra return arrived; higher means steadier.
 - **interest rate**: The price of borrowing money, usually quoted as a percentage per year.
+- **ledger**: An append-only record of what a search did, where each entry carries a fingerprint of the entry before it.
 - **leverage**: Using borrowed money so that a given price move produces a larger gain or loss.
 - **limit order**: An instruction to buy or sell only at a stated price or better, which may never be filled.
 - **liquidity**: How easily something can be bought or sold quickly without moving its price much.
@@ -79,13 +86,16 @@ themselves are laid out, see [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.
 - **median**: The middle value when a list is sorted, so half the values sit above it and half below.
 - **momentum**: The idea that what has recently risen tends to keep rising for a while, and the strategies that trade on it.
 - **moving average**: The average of the last few prices, recalculated as time moves on, used to smooth a bumpy series.
+- **multiplicity**: The number of related attempts behind a result, which raises how good the best of them can look by luck.
 - **net return**: The return after all costs and fees have been subtracted.
+- **objective**: A named measurement a search ranks candidates by, each with its own stated direction.
 - **option**: A contract giving the right, but not the obligation, to buy or sell something at a set price before a set date.
 - **out-of-sample**: Data kept aside and not used while building a rule, then used once to test it honestly.
 - **overfitting**: Fitting rules so closely to past data that they capture noise and fail on new data.
 - **p-value**: The chance of seeing a result that strong if there were no real effect; a small value counts as evidence.
 - **pairs trading**: Trading two similar assets against each other, buying the laggard and selling the one that has run ahead.
 - **paper trading**: Practising with pretend money while recording real prices.
+- **Pareto front**: The set of options among which none is better than another on every stated objective at once.
 - **percentile**: The value below which a given share of the data falls, such as the ninetieth percentile.
 - **perpetual future**: A future-like contract with no expiry date, common in crypto markets.
 - **portfolio**: The whole collection of things you own at once.
@@ -95,19 +105,23 @@ themselves are laid out, see [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.
 - **regression**: A statistical method that estimates how one quantity relates to others.
 - **relative value**: Judging one asset against another rather than on its own, and trading the gap between them.
 - **replication**: Testing whether someone else, on different data, gets the same result.
+- **reservation**: The single grant that allows one held-back dataset to be read once, for one candidate, and never released.
 - **return**: The change in the value of what you own over a period, usually shown as a percentage.
 - **reversal**: A move in the opposite direction to the recent one, and strategies that bet on such a move.
 - **risk**: The chance that the outcome is worse than expected, usually measured by how much the value swings around.
 - **risk-adjusted return**: A return judged against the risk taken to get it, so a steady gain scores better than a wild one.
 - **rotation**: Moving money from one group of assets to another by a rule, such as following the strongest group.
+- **sandbox**: A simulated venue that fills orders against data it is given rather than sending them anywhere.
 - **seasonality**: A pattern that tends to appear at the same time of year, month or day.
 - **sector**: A group of companies in the same line of business, such as energy or health care.
+- **seed**: The number that makes a random process repeatable, so the same seed produces the same sequence of draws.
 - **share**: A unit of ownership in a company.
 - **Sharpe ratio**: A risk-adjusted measure equal to the return above the risk-free rate divided by the volatility of the return.
 - **short**: Selling something you do not own, so that you gain when its price falls.
 - **short sale**: The act of selling borrowed shares and buying them back later, profiting if the price falls.
 - **signal**: The specific instruction a rule produces, such as buy or hold, before it is turned into an order.
 - **slippage**: The difference between the price you expected and the price you actually got.
+- **specification**: A candidate strategy written as data rather than as code, in a fixed set of named blocks.
 - **spot**: Buying or selling an asset for immediate delivery, as opposed to a future.
 - **spread**: The gap between the best buy price and the best sell price, which a trader crosses on each round trip.
 - **standard deviation**: A measure of how far values typically sit from their average.
@@ -121,9 +135,11 @@ themselves are laid out, see [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.
 - **time horizon**: The length of time over which you expect to hold something or judge a result.
 - **transaction cost**: Everything paid to trade, including commission, the spread and taxes.
 - **trend following**: Buying what is rising and selling what is falling, on the idea that trends persist.
+- **trial**: One counted attempt in a search, as distinct from the computing job that ran it or the times it was rerun.
 - **turnover**: How often a portfolio's holdings are replaced, which drives how much is paid in costs.
 - **universe**: The full set of things a rule is allowed to choose from.
 - **value**: Buying assets that look cheap relative to their earnings or assets, on the idea that the price will catch up.
+- **venue**: The place orders are sent to and prices come from, whether a real exchange or a simulated one.
 - **volatility**: How much a price or return moves around, usually quoted as a yearly percentage.
 - **volume**: The number of units traded in a period, used as a sign of how much interest there is.
 - **walk-forward**: Testing a rule repeatedly by fitting it on an early slice of data and checking it on the next slice.

@@ -5,8 +5,11 @@ Date: 2026-10-07. Revision 1.
 This file is the authoring contract. Every folder under [quantconnect](quantconnect),
 [backtrader](backtrader), [freqtrade](freqtrade), [fastquant](fastquant),
 [paperswithbacktest](paperswithbacktest), [quant-trading](quant-trading),
-[research-process](research-process) and [project](project)
-holds one `README.md` written to the template below and obeying the rules below. If you are
+[research-process](research-process), [project](project) and
+[strategy-discovery](strategy-discovery) holds one `README.md` written to the template below and
+obeying the rules below. A page in [strategy-discovery](strategy-discovery) describes a piece of
+machinery rather than a trade, so its provenance rows answer the same seven questions about that
+machinery, and its "what it trades" row says what the part acts on. If you are
 reading the collection rather than writing it, [HOW_TO_READ_A_TUTORIAL.md](HOW_TO_READ_A_TUTORIAL.md)
 explains the sections in plain words.
 
