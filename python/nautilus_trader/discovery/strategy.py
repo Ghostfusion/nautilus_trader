@@ -671,6 +671,25 @@ class InterpreterRunInputs:
     stop_loss_bps: int
     sectors: tuple[tuple[str, str], ...] = ()
 
+    def __post_init__(self) -> None:
+        """
+        Refuse the two inputs whose wrong type a run would not fail on.
+
+        The interpreter reads its plan, its memberships, its instrument identifiers and its
+        sectors when it is constructed, so a wrong type there fails in the caller's own frame.
+        The venue is not read until the first decision, and the stop distance not until the
+        target pipeline is enabled, which the engine calls as the run starts: an exception raised
+        there is reported as a log line and the run completes, so a run built from a wrong type
+        would decide nothing and report success. Both are checked here, so that the caller is the
+        one who finds out.
+        """
+        if not isinstance(self.venue, Venue):
+            raise TypeError(f"venue must be a Venue, was {type(self.venue).__name__}")
+        if not isinstance(self.stop_loss_bps, int):
+            raise TypeError(
+                f"stop_loss_bps must be an int, was {type(self.stop_loss_bps).__name__}",
+            )
+
 
 class DiscoveryInterpreterConfig(StrategyConfig):
     """

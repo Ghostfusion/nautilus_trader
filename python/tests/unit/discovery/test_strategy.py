@@ -23,6 +23,7 @@ portfolio size, and a held position leaving the selection.
 
 The interpreter is not tested here. It is a strategy, so it runs inside an engine, and its tests
 live where the repository keeps engine runs, in `tests/integration/test_discovery_round_trip.py`.
+The interpreter's run inputs are tested here, because refusing them runs no engine.
 """
 
 from __future__ import annotations
@@ -32,13 +33,20 @@ from typing import Any
 
 import pytest
 
+from nautilus_trader.discovery.compile import compile_specification
+from nautilus_trader.discovery.features import build_memberships
 from nautilus_trader.discovery.schema import SelectionBlock
 from nautilus_trader.discovery.strategy import AllocationRequest
 from nautilus_trader.discovery.strategy import CrossSectionRow
+from nautilus_trader.discovery.strategy import InterpreterRunInputs
 from nautilus_trader.discovery.strategy import allocate_targets
 from nautilus_trader.discovery.strategy import rebalance_period_key
 from nautilus_trader.discovery.strategy import select_cross_section
 from nautilus_trader.model import Target
+from nautilus_trader.model import Venue
+from tests.unit.discovery.fixtures import fixture_policy
+from tests.unit.discovery.fixtures import fixture_registry
+from tests.unit.discovery.fixtures import legal_payload
 
 
 # The allocation fixture's declared values, named so a case reads as the decision it exercises.
@@ -669,3 +677,47 @@ def test_the_rebalance_period_is_the_declared_frequency_s_period() -> None:
 
     with pytest.raises(ValueError, match="rebalance frequency must be one of"):
         rebalance_period_key(monday, "quarterly")
+
+
+def run_inputs(**overrides: Any) -> InterpreterRunInputs:
+    """
+    Return the run inputs fixture, with the given fields overridden.
+    """
+    compiled = compile_specification(legal_payload(), fixture_policy(), fixture_registry())
+
+    assert compiled.plan is not None
+
+    fields: dict[str, Any] = {
+        "plan": compiled.plan,
+        "memberships": build_memberships("fixture-universe", "discovery.fixture", [(A, 0, None)]),
+        "instrument_ids": (A,),
+        "venue": Venue("XNAS"),
+        "commission_rate": Decimal(0),
+        "stop_loss_bps": 100,
+    }
+
+    return InterpreterRunInputs(**{**fields, **overrides})
+
+
+def test_the_run_inputs_refuse_a_venue_that_is_not_a_venue() -> None:
+    """
+    Test that a venue named as a string is refused where the caller built the inputs.
+
+    The interpreter reads the venue at the run's first decision, so the wrong type would otherwise
+    surface there, where the engine reports the exception as a log line and completes the run: the
+    run would decide nothing and report success.
+    """
+    with pytest.raises(TypeError, match="venue must be a Venue, was str"):
+        run_inputs(venue="XNAS")
+
+
+def test_the_run_inputs_refuse_a_stop_distance_that_is_not_an_integer() -> None:
+    """
+    Test that a stop distance given as a `Decimal` is refused where the caller built the inputs.
+
+    The interpreter hands the stop distance to the target pipeline when the engine calls it as the
+    run starts, and the pipeline refuses the type there, so the refusal would be a log line rather
+    than an error.
+    """
+    with pytest.raises(TypeError, match="stop_loss_bps must be an int, was Decimal"):
+        run_inputs(stop_loss_bps=Decimal(100))
