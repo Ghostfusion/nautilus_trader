@@ -147,12 +147,25 @@ export function mount(root, ctx) {
 
   const ran = campaign.stages.filter((stage) => stage.ran).length;
   const reachedLater = campaign.stages.filter((stage) => !stage.ran).map((stage) => stage.id);
+  // A ladder that stopped is not the same as a stage that refused: the campaign carried on, and what
+  // stops is the reading. The verdict names which of the two happened rather than leaving a reader to
+  // reconcile "no stage refused" with "11 of 13".
+  const ladderStopped = campaign.stoppedAt !== null;
+  const verdict = !campaign.ok
+    ? { value: 'a stage refused', note: 'see the refusals below', tone: 'bad' }
+    : ladderStopped
+      ? {
+          value: `the ladder stopped at ${campaign.stoppedAt}`,
+          note: 'no stage refused, but the reading stopped and the stages that depend on a judged candidate did not run',
+          tone: 'warn',
+        }
+      : { value: 'every stage ran', note: 'nothing refused and no gate stopped the reading', tone: 'ok' };
 
   root.appendChild(
     ui.panel(
-      { title: 'The campaign', tone: campaign.ok ? 'ok' : 'warn' },
+      { title: 'The campaign', tone: campaign.ok && !ladderStopped ? 'ok' : 'warn' },
       ui.metrics(
-        ui.metric('verdict', campaign.ok ? 'no stage refused' : 'a stage refused', campaign.ok ? 'the campaign reached every stage it should' : 'see the refusals below', campaign.ok ? 'ok' : 'bad'),
+        ui.metric('verdict', verdict.value, verdict.note, verdict.tone),
         ui.metric('stages run', `${ran} of ${campaign.stages.length}`, reachedLater.length > 0 ? `not reached: ${reachedLater.join(', ')}` : 'every stage ran', reachedLater.length > 0 ? 'warn' : 'ok'),
         ui.metric('gate ladder', campaign.stoppedAt === null ? 'no gate stopped it' : `stopped at ${campaign.stoppedAt}`, campaign.stoppedAt === null ? 'all six gates passed' : 'the reading stops at the first no', campaign.stoppedAt === null ? 'ok' : 'warn'),
         ui.metric('ledger', `${campaign.ledger.entries} entries`, campaign.ledger.verified ? 'the chain verifies' : 'the chain does not verify', campaign.ledger.verified ? 'ok' : 'bad'),
