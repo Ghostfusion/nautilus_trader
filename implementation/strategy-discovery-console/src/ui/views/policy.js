@@ -23,11 +23,13 @@ import {
   SECTORS,
 } from '../../data/policy.js';
 import { cite, valueOf } from '../../data/source.js';
-import { fieldAt, resolveField } from '../../engine/candidate.js';
+import { admittedValue, fieldAt, resolveField } from '../../engine/candidate.js';
 import {
   REFUSAL_CODES as POLICY_REFUSAL_NAMES,
   SET_NAMES,
+  boundFor,
   defaultPolicy,
+  describeBound,
   freeze,
   validatePolicy,
 } from '../../engine/policy.js';
@@ -117,9 +119,28 @@ function coerce(entry, typed) {
     return Number.isFinite(number) ? number : typed;
   }
   if (entry.reads === 'declared_list') {
+    if (Array.isArray(typed)) return typed;
     return typed.split(',').map((item) => item.trim()).filter((item) => item !== '');
   }
   return typed;
+}
+
+/**
+ * What the selected field admits, said before the reader types rather than after a refusal names one.
+ *
+ * The note is the declaration that decides the wording of a refusal, which is the same thing a reader
+ * needs in order to avoid producing one.
+ */
+function admittedNote(policy, field, entry) {
+  if (entry === null) return 'no block declares this path';
+  const name = valueOf(entry.declaration ?? '');
+  const members = policy.sets?.[name];
+  if (Array.isArray(members) && members.length > 0 && entry.reads.startsWith('declared')) {
+    return `${name}: ${members.join(', ')}`;
+  }
+  const bound = boundFor(policy, field);
+  if (bound !== null) return `admitted: ${describeBound(bound)}`;
+  return 'a name or a number';
 }
 
 /** Build the whole view into the empty root, and wire the view's own handlers. */
@@ -127,8 +148,9 @@ export function mount(root, ctx) {
   const { ui, data } = ctx;
   const layer = data.layer(meta.id);
 
+  const opening = defaultPolicy(consoleInputs());
   const state = {
-    policy: defaultPolicy(consoleInputs()),
+    policy: opening,
     published: freeze(defaultPolicy(consoleInputs())).digest,
     boundName: 'portfolio.max_position_weight',
     lower: 0.005,
@@ -136,7 +158,9 @@ export function mount(root, ctx) {
     setName: 'rebalance_frequencies',
     member: 'daily',
     field: 'rebalance.frequency',
-    typed: 'hourly',
+    // The resolver opens on a value the policy covers: the refusal is for the reader to produce, and
+    // the four demonstrations below produce each of the four codes on demand.
+    typed: admittedValue(opening, 'rebalance.frequency'),
   };
 
   const model = ui.stack();
@@ -144,7 +168,7 @@ export function mount(root, ctx) {
   const outcome = ui.stack();
   const demonstrated = ui.stack();
 
-  /** Rebuild everything the local state decides. */
+  /** Rebuild everything the local state decides, and the verdict on the value the resolver holds. */
   function render() {
     ui.clear(model);
     model.appendChild(freezePanel());
@@ -156,6 +180,10 @@ export function mount(root, ctx) {
     ui.clear(refusals);
     refusals.appendChild(refusalPanel());
     refusals.appendChild(demonstrated);
+
+    // The verdict follows the field, the value, and the declarations it resolves against, so editing
+    // a set or a bound moves it too rather than leaving the previous field's verdict on screen.
+    showOutcome();
   }
 
   /** The freeze: the declarations, their fingerprint, and what the fingerprint covers. */
@@ -323,7 +351,7 @@ export function mount(root, ctx) {
             options: [...SET_FIELDS, ...BOUND_FIELDS],
             onChange: (value) => {
               state.field = value;
-              state.typed = BOUND_FIELDS.includes(value) ? '2500' : 'hourly';
+              state.typed = admittedValue(state.policy, value);
               render();
             },
           }),
@@ -337,7 +365,7 @@ export function mount(root, ctx) {
             state.typed = value;
             showOutcome();
           },
-        })),
+        }), admittedNote(state.policy, state.field, entry)),
       ),
       outcome,
       ui.note(

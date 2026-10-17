@@ -27,6 +27,7 @@ import {
   NOT_MODELLED,
   REFUSAL_CODES,
   STAGES,
+  admittedValue,
   conditionDepth,
   countConditionLeaves,
   emptySpecification,
@@ -766,5 +767,87 @@ describe('one field at a time', () => {
   test('resolveField refuses a field no block declares, as the programming error it is', () => {
     // A path the twelve blocks do not hold is a wiring mistake in the console, not a refusal.
     expect(() => resolveField(policy(), 'portfolio.something_else', 1)).toThrow();
+  });
+});
+
+describe('admittedValue', () => {
+  /** Every declared field with its dotted path, flattened as the engine's own field table is. */
+  function fieldPaths() {
+    const paths = [];
+    for (const block of BLOCKS()) {
+      for (const entry of block.fields) {
+        if (entry.fields) {
+          for (const inner of entry.fields) {
+            paths.push({ path: `${block.name}.${entry.category}.${inner.name}`, reads: inner.reads });
+          }
+        } else {
+          paths.push({ path: `${block.name}.${entry.name}`, reads: entry.reads });
+        }
+      }
+    }
+    return paths;
+  }
+
+  test('every field a declaration governs opens on a value the schema admits', () => {
+    // The policy view's resolver opens here, so a refusal on screen is one the reader produced rather
+    // than the state the screen starts in. A field with no declared set and no bound has no value to
+    // open on, and the reader meets the refusal by typing, which is what this counts.
+    const current = policy();
+    const governed = fieldPaths().filter((entry) =>
+      ['declared', 'declared_list', 'bounded', 'bounded_int'].includes(entry.reads),
+    );
+    // The fields carrying a declaration or a bound are the whole surface a resolver can be pointed at,
+    // not a handful: this asserts the filter reached them before the loop below does the real work.
+    expect(governed.length).toBeGreaterThan(25);
+    const opens = governed.filter((entry) => {
+      const value = admittedValue(current, entry.path);
+      return value !== '' && !(Array.isArray(value) && value.length === 0);
+    });
+    expect(opens.length).toBe(governed.length);
+    for (const entry of governed) {
+      const result = resolveField(current, entry.path, admittedValue(current, entry.path), ['close', 'volume']);
+      expect(`${entry.path} ${result.ok ? 'admitted' : `${result.code} ${result.reason}`}`).toBe(
+        `${entry.path} admitted`,
+      );
+    }
+  });
+
+  test('the value follows the policy, so a narrowed set moves it', () => {
+    // The first member in the source's order, which is the order the set editor shows.
+    expect(admittedValue(policy(), 'rebalance.frequency')).toBe('daily');
+    expect(admittedValue(policy(), 'identity.family')).toBe('cross_sectional_rank');
+    const narrowed = policy();
+    narrowed.sets = { ...narrowed.sets, rebalance_frequencies: ['weekly'] };
+    expect(admittedValue(narrowed, 'rebalance.frequency')).toBe('weekly');
+  });
+
+  test('a list field opens on a list, because that is what its reader takes', () => {
+    const current = policy();
+    expect(admittedValue(current, 'universe.asset_classes')).toEqual(['EQUITY']);
+    expect(resolveField(current, 'universe.asset_classes', ['EQUITY'], ['close', 'volume']).ok).toBe(true);
+    expect(resolveField(current, 'universe.asset_classes', 'EQUITY', ['close', 'volume']).ok).toBe(false);
+  });
+
+  test('a bounded field opens at the lower end of its own bound', () => {
+    const current = policy();
+    expect(admittedValue(current, 'selection.percentile')).toBe(0.01);
+    expect(admittedValue(current, 'portfolio.max_position_weight')).toBe(0.005);
+    expect(resolveField(current, 'selection.percentile', 0.01, ['close', 'volume']).ok).toBe(true);
+    // A field whose declaration names a bound the field's own path does not: `features.lookback` is
+    // governed by `feature.lookback`, so looking the bound up by path alone finds nothing.
+    expect(admittedValue(current, 'features.lookback')).toBe(1);
+    expect(resolveField(current, 'features.lookback', 1, ['close', 'volume']).ok).toBe(true);
+  });
+
+  test('a value outside the declared set still refuses, which is the point of the control', () => {
+    const result = resolveField(policy(), 'rebalance.frequency', 'hourly', ['close', 'volume']);
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('value_not_declared');
+    expect(admittedValue(policy(), 'rebalance.frequency')).not.toBe('hourly');
+  });
+
+  test('a field with no declared set and no bound opens on nothing rather than on a guess', () => {
+    expect(admittedValue(policy(), 'identity.hypothesis')).toBe('');
+    expect(() => admittedValue(policy(), 'portfolio.something_else')).toThrow();
   });
 });

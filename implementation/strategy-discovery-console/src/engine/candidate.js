@@ -246,6 +246,31 @@ export function fieldAt(path) {
   return flatFields().find((entry) => entry.path === path) ?? null;
 }
 
+/**
+ * One value the schema admits for a field: the first member of the declared set the field names, or
+ * the lower end of the bound that governs it, or the bound's first choice.
+ *
+ * A control that resolves a value should open on a value the policy already covers, so a refusal on
+ * screen is one the reader caused rather than the state the screen starts in. The value follows the
+ * policy: a set the caller reorders or empties moves the value with it, and a bound whose lower end
+ * is outside its own range is the bound's defect, not this function's to correct.
+ */
+export function admittedValue(policy, path) {
+  const entry = fieldAt(path);
+  if (entry === null) throw new TypeError(`no block declares the field ${path}`);
+  const name = valueOf(entry.declaration ?? '');
+  const members = policy?.sets?.[name];
+  if (Array.isArray(members) && members.length > 0 && entry.reads.startsWith('declared')) {
+    return entry.reads === 'declared_list' ? [members[0]] : members[0];
+  }
+  // A bounded field names its bound in the declaration, and that name is not always the field's own
+  // path: `features.lookback` is governed by `feature.lookback`, `exit.threshold` by `condition.value`.
+  const bound = boundFor(policy, name) ?? boundFor(policy, path);
+  if (bound === null) return entry.reads === 'declared_list' ? [] : '';
+  if (bound.kind === 'choice') return bound.choices[0];
+  return bound.lower;
+}
+
 /** An empty candidate: the twelve blocks with nothing declared, ready to be built block by block. */
 export function emptySpecification() {
   return {
