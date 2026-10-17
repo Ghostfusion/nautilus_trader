@@ -359,8 +359,8 @@ export function mount(root, ctx) {
           const source = sourceOf(limit.resolved);
           return ui.stack(
             ui.metric(LIMIT_LABELS[limit.id] ?? limit.id, 'closed', documented.resolved, 'ok'),
+            ui.note(`the module's own text at ${source.path}:${source.line}`, 'muted'),
             ui.note(`the page records it: ${valueOf(limit.page)}  [${cite(limit.page)}]`),
-            ui.note(`${source.path}:${source.line}`, 'muted'),
           );
         }),
       ),
