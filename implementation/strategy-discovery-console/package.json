@@ -1,0 +1,15 @@
+{
+  "name": "strategy-discovery-console",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A browser console for the strategy discovery layer implementing docs/design/strategy_discovery_design.md",
+  "scripts": {
+    "build": "bun build src/main.js --target=browser --format=iife --outfile=app.js",
+    "test": "bun test",
+    "serve": "bun run tools/serve.mjs",
+    "extract": "bun run tools/extract-layers.mjs",
+    "verify": "bun run tools/check-facts.mjs"
+  },
+  "devDependencies": {}
+}
