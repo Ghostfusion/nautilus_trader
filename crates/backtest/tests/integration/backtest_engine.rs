@@ -7797,12 +7797,16 @@ fn test_trailing_final_tick_order_settles_with_latency(
         1,
         "expected a single netting position to remain open",
     );
+    // The order the trailing quote submitted stays unexecuted. Its arrival is past the last
+    // observation the run has, so settling it would fill it at the price that quote already
+    // carried, which is a price from before the order existed. The shutdown still reaches that
+    // arrival, which is why the snapshot timestamps below are unchanged; upstream settles the same
+    // case, and the divergence is the one design Section 15 criterion 4 requires.
     assert_eq!(
         open[0].quantity,
-        Quantity::from("3.000"),
-        "expected all three quotes (including the trailing one) to fill",
+        Quantity::from("2.000"),
+        "expected the two quotes the run's own data reached the order to, and not the trailing one",
     );
-    let end_ns = UnixNanos::from(final_quote_ts) + DurationNanos::from_secs(1);
     assert_eq!(
         open[0]
             .events
@@ -7812,7 +7816,6 @@ fn test_trailing_final_tick_order_settles_with_latency(
         vec![
             (Price::from("1001.00"), UnixNanos::from(2_000_000_000)),
             (Price::from("2001.00"), UnixNanos::from(final_quote_ts)),
-            (Price::from("2001.00"), end_ns),
         ],
     );
 
@@ -7838,6 +7841,9 @@ fn test_trailing_final_tick_order_settles_with_latency(
         );
     }
 
+    // The run still ends at the trailing arrival: the drain reaches it, and what it does not do
+    // there is execute the order that arrives at it.
+    let end_ns = UnixNanos::from(final_quote_ts) + DurationNanos::from_secs(1);
     let bt_result = engine.get_result();
     assert_eq!(
         bt_result.total_orders, 3,
