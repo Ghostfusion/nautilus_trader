@@ -12,8 +12,8 @@
  * THE HONESTY OF THIS COMPOSITION
  * - It is one deterministic path, not a measurement. Every stage calls the layer's own engine with
  *   the campaign's declared inputs; where a stage would need something the repository does not have
- *   (a live feed, a model call, an unbuilt configuration module) the stage says so in its `detail`
- *   rather than substituting a value.
+ *   (a live feed, a model call, a worker environment behind the capability allowlist) the stage says
+ *   so in its `detail` rather than substituting a value.
  * - When the gate ladder stops, the stage that depends on a judged candidate - the shadow period -
  *   is reported as NOT REACHED rather than run, because the design's rule is that the reading stops
  *   at the first no. The stages that fed the ladder have already happened, so they stay.
@@ -645,7 +645,7 @@ export function runCampaign(options = {}) {
       verdict: planted.clean ? 'no credential found' : 'a credential was found',
       tone: planted.clean ? 'ok' : 'warn',
       detail:
-        'the layer holds no live execution adapter and no credential, so nothing in it can authenticate an order; a market-data adapter is a different kind of thing, which the shadow period takes as a declared feed rather than binding to one, and the allowlist that would make the worker capabilities explicit is procedural, because the layout configuration module is unbuilt',
+        'the layer holds no live execution adapter and no credential, so nothing in it can authenticate an order; a market-data adapter is a different kind of thing, which the shadow period takes as a declared feed rather than binding to one, and the allowlist that would make the worker capabilities explicit is declared and checked in `discovery/config.py` and reported by `discovery/cli.py`, but nothing provisions the worker environment it describes',
       facts: [
         ['credential names in the canonical list', String(credentials().length)],
         ['clean environment', clean.clean ? 'clean' : 'not clean'],

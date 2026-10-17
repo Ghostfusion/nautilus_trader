@@ -271,7 +271,7 @@ export function mount(root, ctx) {
         `The development results the search reads are declared by the campaign. The four acceptance criteria that do not pass (${failing.map((row) => row.id).join(', ')}) all bear on parts this console cannot exercise: the engine-side run manifest, the settlement bridge, the corporate-action entitlement stage and the engine digest recomputation.`,
         'The shadow feed is declared rather than bound to a live adapter, which the plan records as a platform decision rather than a property of the code.',
         'The digests here are SHA-256 over a canonical serialisation. The engine\u2019s canonical digest is blake3, so no digest on this page can be compared with one recorded in the repository.',
-        'The policy file loader does not exist, so no stage refuses a credential placed in a policy file; the worker capability allowlist is procedural, because the layout\u2019s configuration module is unbuilt.',
+        'The policy file loader exists and refuses a credential placed in a policy file, and the command front end reports that refusal by code. What no module does is provision the worker environment the capability allowlist describes, so that shape is still procedural.',
       ]),
     ),
   );

@@ -13,9 +13,10 @@
  * Two things the model does not claim, because the repository does not state them. The import-graph
  * check is evidence rather than proof: a dynamic import, an indirect callback or a shared execution
  * stack evades a check made over module names, which is why the module is a regression check. And the
- * stronger control, the capability allowlist as the shape of a worker environment, has no
- * implementation to model: `config.py` is unbuilt, so `capacities()` reports the sandbox surface and
- * names the allowlist as procedural, without pretending to check it.
+ * stronger control, the capability allowlist as the shape of a worker environment, is a declaration
+ * with no environment behind it: `config.py` declares and checks the allowlist and `cli.py` reports
+ * it, so `capacities()` names both halves and reports the environment as unbuilt rather than
+ * pretending either checks the packages a worker holds.
  *
  * Every returned value is plain JSON data. A refusal is a value: `{ ok: false, code, path, reason }`.
  */

@@ -109,7 +109,7 @@ export function mount(root, ctx) {
         'It makes no claim about profitability. The design states the deliverable is evidence, and it stops at a shadow stage.',
       ]),
       ui.note(
-        'The command-line entry point the plan names in its layout is unbuilt, while the configuration document is now `discovery/config.py`: the console says which half of a control that module enforces and which half remains procedural.',
+        'Every module the plan names in its layout exists, including the command-line entry point, `discovery/cli.py`: it reports the configuration document the loader admits rather than running a campaign, so the console says which half of a control a module enforces and which half remains procedural.',
       ),
     ),
   );

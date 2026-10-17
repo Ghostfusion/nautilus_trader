@@ -53,9 +53,10 @@ The work is four artifacts of one subject, and the pages in this group cite all 
   to settle at the last known price. One needs the corporate-action stage to credit the entitlement
   a held position was owed, and until it does, the plan withholds its equity-readiness statement
   rather than misstating a distribution.
-- Two modules named in the plan's layout are unbuilt: the configuration module and the command line
-  entry point. The pages that would use them describe the behaviour as procedural rather than
-  configured, and say why.
+- Every module the plan's layout names is built, including the configuration document and the
+  command front end, which were added after the milestones. What none of them builds is the worker
+  environment the capability allowlist describes, so a page that shows a control enforced where it is
+  declared and procedural where it is not says which half is which.
 - The shadow half is fed observed data rather than bound to a live adapter, which the plan records
   as a platform decision rather than as a property of the code.
 
