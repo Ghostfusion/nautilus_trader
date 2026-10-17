@@ -90,10 +90,11 @@ blocked. The four are reported in the interface, on the layer they touch and in 
 | 6         | Corporate actions to credit an entitlement              | The stage adjusts prices and does not credit what a holder was owed    |
 | 10        | A rerun shown identical from the record alone           | The engine's canonical digest cannot be recomputed from retained bytes |
 
-Two modules the plan names in its layout are unbuilt: the configuration module and the command-line
-entry point. Where a layer would read a configuration file, the console says the control is
-procedural today, and the same is true of the worker capability allowlist and the half of the
-environment assertion that needs a policy-file loader.
+One module the plan names in its layout is unbuilt: the command-line entry point. The configuration
+document exists as `discovery/config.py`, which declares the campaign, the policy document it runs
+under and the worker capability allowlist, refuses a credential in that policy file, and checks the
+digest the declaration pins. What no module builds is the worker environment the allowlist describes,
+so the console reports the declaration where it exists and the procedural half where it does not.
 
 ## Validation
 

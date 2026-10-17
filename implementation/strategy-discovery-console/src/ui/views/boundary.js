@@ -193,10 +193,11 @@ export function mount(root, ctx) {
           ),
         ),
         ui.note(
-          `The stronger control is ${capability.allowlist.why}. Criterion 12's mechanism names ` +
-            `${valueOf(CAPABILITY.mechanism)}, and the plan carries it as part of the M6.2 deliverable ` +
-            `along with the assertions that did run: ${valueOf(CAPABILITY.deliverable)}. Nothing here ` +
-            'checks a package set, because the repository has none to check.',
+          `The stronger control is ${capability.allowlist.why}. ${capability.allowlist.declared}. ` +
+            `Criterion 12's mechanism names ${valueOf(CAPABILITY.mechanism)}, and the plan carries it as ` +
+            `part of the M6.2 deliverable along with the assertions that did run: ` +
+            `${valueOf(CAPABILITY.deliverable)}. Nothing here provisions a worker environment, so this ` +
+            'panel reports the declaration rather than a package set it measured.',
           'warn',
         ),
       ),

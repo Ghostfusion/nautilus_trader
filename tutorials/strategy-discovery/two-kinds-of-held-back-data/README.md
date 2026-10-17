@@ -233,9 +233,11 @@ acceptance criterion with the test that exercises it and the result it observed.
   and `confirmation_access_without_reservation`; the refusals they would name are reported under other
   codes, so a reader counting codes finds a vocabulary wider than the behaviour.
 - The worker check inspects an environment mapping a caller hands it, and the design's worker allowlist is
-  procedural because the configuration module the plan's layout names is unbuilt. The design also asks a
-  configuration loader to refuse a credential in a policy file, and no such loader exists, so that half is
-  not testable and is not claimed.
+  declared and checked in `config.py` rather than provisioned: the module refuses an entry naming a live
+  adapter and measures a worker's packages against the allowlist, and no module builds the worker
+  environment that allowlist describes. The design also asks a configuration loader to refuse a credential
+  in a policy file, which the configuration document now does, so the half that had no loader is carried
+  by tests of its own.
 - Withdrawal keeps the spent reservation, which is the point of it, but it means an error found after a
   read permanently costs the campaign its one confirmation result; nothing restores it, and the design's
   honest alternatives are new data or a new pre-registered protocol.
@@ -272,7 +274,8 @@ candidate is better.
   halves, the detectable quarantine case, and what boundary tests cannot prove.
 - [The plan](../../../docs/design/strategy_discovery_implementation.md): the M4 finding that a successor
   inherits its family's spent reservation through a declared input read from its predecessor's inventory
-  rather than from a shared file, the M6 limits on the worker allowlist, and the criterion 9 entry.
+  rather than from a shared file, the worker allowlist limit, which `config.py` now revises by declaring
+  and checking the allowlist, and the criterion 9 entry.
 - [The ledger](../../../python/nautilus_trader/discovery/ledger.py), [the gate
   service](../../../python/nautilus_trader/discovery/gates.py) and [the evolution
   module](../../../python/nautilus_trader/discovery/evolve.py): the `DataRole` vocabulary and its

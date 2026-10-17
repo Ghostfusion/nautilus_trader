@@ -2,15 +2,15 @@
 
 Date: 2026-10-16. Revision 1.
 
-| Field                     | Value                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What it trades            | Nothing is bought or sold: the part acts on the reach of the discovery process itself, checking that no order path and no credential can leave it                                                                                                                                                                                                                                                                                             |
-| How often it trades       | Once per test run, at the end of the discovery work: the four assertions are made in one pass and nothing is bought or sold                                                                                                                                                                                                                                                                                                                   |
-| What you need             | Nothing but this page; the exercise needs only a written list and a pencil                                                                                                                                                                                                                                                                                                                                                                    |
-| Where the rules come from | [The execution boundary in the design](../../../docs/design/strategy_discovery_design.md), Section 12, and the four assertions in [the boundary fixture](../../../python/tests/integration/test_discovery_boundary.py)                                                                                                                                                                                                                        |
-| The underlying research   | No paper behind it: the boundary is this repository's own design, [strategy_discovery_design.md](../../../docs/design/strategy_discovery_design.md), Section 4 invariant 9 and Section 12                                                                                                                                                                                                                                                     |
-| How well it held up       | Mixed: the four assertions run and the boundary criterion passes, with the import graph resolved in a clean interpreter rather than over source text, but the dependency check is evidence rather than proof, the worker allowlist is procedural because the layout's configuration module is unbuilt, and half of the environment assertion, that a loader refuse a credential in a policy file, has no loader to test, so it is not claimed |
-| Also appears in           | [What a candidate is](../what-a-candidate-is/README.md), where the refusals this page records are produced, and the [group index](../README.md)                                                                                                                                                                                                                                                                                               |
+| Field                     | Value                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What it trades            | Nothing is bought or sold: the part acts on the reach of the discovery process itself, checking that no order path and no credential can leave it                                                                                                                                                                                                                                                   |
+| How often it trades       | Once per test run, at the end of the discovery work: the four assertions are made in one pass and nothing is bought or sold                                                                                                                                                                                                                                                                         |
+| What you need             | Nothing but this page; the exercise needs only a written list and a pencil                                                                                                                                                                                                                                                                                                                          |
+| Where the rules come from | [The execution boundary in the design](../../../docs/design/strategy_discovery_design.md), Section 12, and the four assertions in [the boundary fixture](../../../python/tests/integration/test_discovery_boundary.py)                                                                                                                                                                              |
+| The underlying research   | No paper behind it: the boundary is this repository's own design, [strategy_discovery_design.md](../../../docs/design/strategy_discovery_design.md), Section 4 invariant 9 and Section 12                                                                                                                                                                                                           |
+| How well it held up       | Mixed: the four assertions run and the boundary criterion passes, with the import graph resolved in a clean interpreter rather than over source text, but the dependency check is evidence rather than proof, and the worker allowlist is declared and checked in `discovery/config.py` while nothing provisions the environment it describes, so the shape of that environment is still procedural |
+| Also appears in           | [What a candidate is](../what-a-candidate-is/README.md), where the refusals this page records are produced, and the [group index](../README.md)                                                                                                                                                                                                                                                     |
 
 ## The idea in one paragraph
 
@@ -100,7 +100,7 @@ forbidden  = { name in exports : name contains "ExecutionClient", "OrderFactory"
 ```
 
 - `exports` is what the package offers to a reader, and its count is asserted to be above two hundred;
-  the count observed is 249, grown from 231 when this work was added.
+  the count observed is 268, grown from 231 when this work was added.
 - `forbidden` is the set that would mean the package reached an execution surface of its own.
 - The assertion is that `forbidden` is empty, so the check has teeth on what the package hands out and
   not only on what it loads.
@@ -226,12 +226,15 @@ their result is recorded against criterion 12, along with the four entries that 
   design keeps it as a regression check and does not present it as proof that order submission is
   impossible.
 - The stronger control, the shape of the worker environment as an explicit capability allowlist, is
-  the one the package cannot yet build, because the layout's configuration module is unbuilt, so the
-  worker allowlist is procedural today.
-- Half of the environment assertion is not testable. The design also asks that a configuration loader
-  refuse a credential in a policy file, and no policy-file loader exists in the package; the policy
-  module owns the policy object, its digests and its freeze rules. So that half is not claimed, and
-  the half that is checkable is that the policy's field set declares no credential field at all.
+  declared and checked in `config.py` now, which refuses an entry naming a live adapter and measures a
+  worker's packages against the allowlist; what no module builds is the environment itself, so the
+  control is procedural wherever it is not enforced.
+- Half of the environment assertion, that a credential be refused in a policy file, is testable now:
+  `config.py` loads the policy document a campaign declares, refuses a credential anywhere in it by
+  variable name or by the shape of a secret without repeating the value, and checks the digest the
+  declaration pins against the document it read. What a loader cannot show is the process: whether an
+  adapter credential variable is set in the environment discovery runs in remains the fixture's own
+  assertion, and the policy object declares no credential field at all.
 - The tests cannot stop an operator from installing an adapter and running the discovery code with
   it, and they cannot make a machine with the operator's own credentials safe. If the layer is run on
   such a machine the protection is procedural, which is why the environment assertion is over the

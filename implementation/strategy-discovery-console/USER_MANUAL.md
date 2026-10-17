@@ -272,8 +272,12 @@ Two of the four need the same missing piece, which is why they are usually discu
 them is a fault in the layer this app is about; each needs a change at the engine's boundary, and the
 app reports the failure rather than a workaround.
 
-Two modules the plan names are also unbuilt: the one that reads a configuration file, and the command
-line entry point. Where a page would read a configuration, it says the control is procedural today.
+One module the plan names is still unbuilt: the command line entry point. The one that reads a
+configuration file exists now, and it does three of the things these pages describe: it declares the
+campaign and the rules it runs under, it refuses a credential found in a policy file, and it checks
+that the policy file is the one that was pre-registered. What it does not do is build the worker
+environment the allowlist describes, so where a page shows a control that is procedure rather than
+enforcement, the app says which half is which.
 
 ## 9. A note on the fingerprints
 

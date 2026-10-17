@@ -16,14 +16,14 @@ compiler and a working agent are capabilities, not evidence.
 
 ## 1. Status and scope
 
-| Item                       | State                                                                                                                                                                                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Design baseline            | `docs/design/strategy_discovery_design.md`, fourth revision, with eighteen decisions and twenty-two acceptance criteria                                                                                                  |
-| Authorised work            | M1 to M6, milestone by milestone and each on the owner's request. M1 to M5 are complete and pushed and M6 is complete; this plan authorises nothing by itself                                                            |
-| This document              | Implementation planning: workstreams, deliverables, fixtures, exits, and the two evidence skeletons                                                                                                                      |
-| Code written for discovery | The package `python/nautilus_trader/discovery/` holds fourteen modules, a prompt set and a facade of 249 exports, with the unit, integration and acceptance fixtures each milestone's exit records                       |
-| Kernel changes             | None proposed. Where one is required, this plan says so and requests it rather than working around it                                                                                                                    |
-| Release posture            | Closed for live trading. The search is enabled only behind M4's governance and M5's controls, and M6's shadow evidence is evidence about integration and operational behaviour rather than proof of future profitability |
+| Item                       | State                                                                                                                                                                                                                                                                      |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Design baseline            | `docs/design/strategy_discovery_design.md`, fourth revision, with eighteen decisions and twenty-two acceptance criteria                                                                                                                                                    |
+| Authorised work            | M1 to M6, milestone by milestone and each on the owner's request. M1 to M5 are complete and pushed and M6 is complete; this plan authorises nothing by itself                                                                                                              |
+| This document              | Implementation planning: workstreams, deliverables, fixtures, exits, and the two evidence skeletons                                                                                                                                                                        |
+| Code written for discovery | The package `python/nautilus_trader/discovery/` holds fifteen modules, a prompt set and a facade of 268 exports, `config.py` among them, which was built after M6 on the owner's request, with the unit, integration and acceptance fixtures each milestone's exit records |
+| Kernel changes             | None proposed. Where one is required, this plan says so and requests it rather than working around it                                                                                                                                                                      |
+| Release posture            | Closed for live trading. The search is enabled only behind M4's governance and M5's controls, and M6's shadow evidence is evidence about integration and operational behaviour rather than proof of future profitability                                                   |
 
 In scope: the sequencing of M1 to M6, the module and test layout, the fixture set that each
 acceptance criterion needs, the evidence model, and the failure paths when a prerequisite cannot be
@@ -795,17 +795,22 @@ ambient case instead of failing on it.
 
 Three limits are named. The dependency assertion is evidence and not proof, which the design says
 itself: a dynamic import, an indirect callback or a shared execution stack can evade a check made
-over module names, and the stronger control is the shape of the worker environment, which no
-milestone builds yet because the layout's `config.py` is unbuilt, so the worker allowlist is
-procedural today. The design's environment assertion also asks that a configuration loader refuse a
-credential in a policy file, and no policy-file loader exists in the package: `policy.py` owns the
-policy object, its digests and its freeze rules, so that half is not testable and is not claimed,
-while the checkable half is that the policy's field set declares no credential field at all. And the
-shadow half is fed observed bars rather than bound to a live adapter, because the design names no
-adapter and Section 14's matrix records the choice as a platform decision, so the report is evidence
-about integration and operational behaviour and not about profitability. The declaration that the
-observation count was set before the period started is procedural; what is checkable, and checked, is
-that the plan's digest travels with the report, so what a report was declared against is known.
+over module names, and the stronger control is the shape of the worker environment: `config.py`
+declares a capability allowlist per campaign and `check_worker_capabilities` measures the packages a
+worker holds against it, so the shape is checkable where it is declared, but nothing in the
+repository provisions the environment the declaration describes, so the shape itself is still
+procedural. The design's environment assertion also asks that a configuration loader refuse a
+credential in a policy file, which `config.py` now does: it reads the policy document the campaign
+declares, refuses a credential anywhere in it by variable name or by the shape of a secret without
+repeating the value, and checks the digest the declaration pins against the document it read, so
+that half is testable where it was not claimed before. The other half of the same assertion is not
+about a file at all: that no adapter credential variable is set in the process discovery runs in
+remains the boundary fixture's own test. And the shadow half is fed observed bars rather than bound
+to a live adapter, because the design names no adapter and Section 14's matrix records the choice as
+a platform decision, so the report is evidence about integration and operational behaviour and not
+about profitability. The declaration that the observation count was set before the period started is
+procedural; what is checkable, and checked, is that the plan's digest travels with the report, so
+what a report was declared against is known.
 
 Two placements are the plan's own rather than new modules. The boundary assertions are tests, because
 the design states them as four tests and a production module would be test surface in production

@@ -98,13 +98,15 @@ export const ASSERTIONS = [
     ),
     cannotShow: [
       fact(
-        "the stronger control is the shape of the worker environment, which no milestone builds yet " +
-          "because the layout's `config.py` is unbuilt, so the worker allowlist is procedural today",
+        'the stronger control is the shape of the worker environment, and nothing in the repository ' +
+          'provisions the environment the declaration describes, so the shape itself is still procedural',
         PLAN,
         798,
-        'over module names, and the stronger control is the shape of the worker environment, which no\n' +
-          "milestone builds yet because the layout's `config.py` is unbuilt, so the worker allowlist is\n" +
-          'procedural today. The design\'s environment assertion also asks that a configuration loader refuse a',
+        'over module names, and the stronger control is the shape of the worker environment: `config.py`\n' +
+          'declares a capability allowlist per campaign and `check_worker_capabilities` measures the packages a\n' +
+          'worker holds against it, so the shape is checkable where it is declared, but nothing in the\n' +
+          'repository provisions the environment the declaration describes, so the shape itself is still\n' +
+          'procedural.',
       ),
     ],
   },
@@ -127,21 +129,23 @@ export const ASSERTIONS = [
     ),
     cannotShow: [
       fact(
-        'the design also asks that a configuration loader refuse a credential in a policy file, and no ' +
-          'policy-file loader exists in the package: `policy.py` owns the policy object, its digests and ' +
-          'its freeze rules, so that half is not testable and is not claimed',
+        'the design also asks that a configuration loader refuse a credential in a policy file, which the ' +
+          'configuration document now does, but that is a statement about a document rather than about the ' +
+          "process: that no adapter credential variable is set in the environment discovery runs in is the " +
+          "fixture's own assertion",
         PLAN,
-        800,
-        "procedural today. The design's environment assertion also asks that a configuration loader refuse a\n" +
-          'credential in a policy file, and no policy-file loader exists in the package: `policy.py` owns the\n' +
-          'policy object, its digests and its freeze rules, so that half is not testable and is not claimed,',
+        803,
+        'credential in a policy file, which `config.py` now does: it reads the policy document the campaign\n' +
+          'declares, refuses a credential anywhere in it by variable name or by the shape of a secret without\n' +
+          'repeating the value, and checks the digest the declaration pins against the document it read, so\n' +
+          'that half is testable where it was not claimed before.',
       ),
       fact(
         'the tests cannot make a machine with the operator\'s own credentials safe: the assertion is over ' +
           'the environment the boundary defines rather than over the shell the operator sits at, and the ' +
           'fixture reports the ambient case rather than failing on it',
         README,
-        235,
+        238,
         '- The tests cannot stop an operator from installing an adapter and running the discovery code with\n' +
           "  it, and they cannot make a machine with the operator's own credentials safe. If the layer is run on\n" +
           '  such a machine the protection is procedural, which is why the environment assertion is over the\n' +
@@ -173,14 +177,14 @@ export const ASSERTIONS = [
         'a refusal names the box and not the idea, so a candidate turned away for a field it should not ' +
           'have named has learned nothing about whether its hypothesis was any good',
         README,
-        268,
+        271,
         'The second thing to notice is that a refusal names the box and not the idea, so a candidate turned away\n' +
           'for a field it should not have named has learned nothing about whether its hypothesis was any good.',
       ),
       fact(
         'a passing boundary says nothing about whether any candidate is any good',
         README,
-        245,
+        248,
         '- A passing boundary says nothing about whether any candidate is any good. It shows that the layer\n' +
           '  cannot send an order and has nothing to authenticate one with; whether a tested idea earns anything\n' +
           '  after costs is a question the account-stage measurements answer, not this one.',
@@ -213,10 +217,10 @@ export const DEPENDENCY = {
     'assert [name for name in exports if any(part in name for part in SUBMISSION_EXPORTS)] == []',
   ),
   observedExports: fact(
-    249,
+    268,
     README,
     103,
-    '  the count observed is 249, grown from 231 when this work was added.',
+    '  the count observed is 268, grown from 231 when this work was added.',
   ),
   cleanInterpreter: fact(
     'A separate interpreter is started, the discovery package is imported in it, and it prints every ' +
@@ -364,13 +368,22 @@ export const CAPABILITY = {
     749,
     '| M6.2       | Assert the execution boundary                            | `FX-M6-1`: dependency assertion, capability allowlist, no credential, negative submission test     |',
   ),
-  unbuilt: fact(
-    "the stronger control is the shape of the worker environment, which no milestone builds yet because " +
-      "the layout's `config.py` is unbuilt, so the worker allowlist is procedural today",
+  declared: fact(
+    '`discovery/config.py` declares a capability allowlist per campaign, refuses an entry that names a ' +
+      'live adapter, and `check_worker_capabilities` measures the packages a worker holds against it',
     PLAN,
-    799,
-    "milestone builds yet because the layout's `config.py` is unbuilt, so the worker allowlist is\n" +
-      "procedural today. The design's environment assertion also asks that a configuration loader refuse a",
+    798,
+    'over module names, and the stronger control is the shape of the worker environment: `config.py`\n' +
+      'declares a capability allowlist per campaign and `check_worker_capabilities` measures the packages a\n' +
+      'worker holds against it, so the shape is checkable where it is declared, but nothing in the',
+  ),
+  unbuilt: fact(
+    'the shape of the worker environment, which is declared and checked in `discovery/config.py` but ' +
+      'provisioned by nothing, so the shape itself is still procedural',
+    PLAN,
+    801,
+    'repository provisions the environment the declaration describes, so the shape itself is still\n' +
+      'procedural. The design\'s environment assertion also asks that a configuration loader refuse a',
   ),
 };
 

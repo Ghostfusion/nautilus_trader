@@ -168,9 +168,10 @@ export function executedSurface(graph) {
  * What a worker is given: the sandbox execution client and its config, and no data client. The
  * asymmetry is the capability, so the same list decides both halves.
  *
- * The allowlist the design asks for has no implementation in the repository - the layout's
- * configuration module is unbuilt - so the returned `allowlist.built` is false and `allowlist.why`
- * carries the plan's own sentence. Nothing here checks a package set, because there is none to check.
+ * The allowlist the design asks for is declared and checked in `discovery/config.py`, so
+ * `allowlist.declared` names what exists and an entry naming a live adapter is refused there. What
+ * no module builds is the environment the declaration describes, so `allowlist.built` stays false
+ * and `allowlist.why` carries the plan's own sentence about the shape that is still procedural.
  */
 export function capacities(exports) {
   const offered = [...(exports ?? SANDBOX_EXPORTS)].map(String).sort();
@@ -188,6 +189,7 @@ export function capacities(exports) {
     allowlist: {
       built: false,
       why: valueOf(CAPABILITY.unbuilt),
+      declared: valueOf(CAPABILITY.declared),
       asked: valueOf(CAPABILITY.asked),
     },
   };

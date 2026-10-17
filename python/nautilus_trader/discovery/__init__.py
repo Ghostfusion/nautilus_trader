@@ -54,6 +54,25 @@ from nautilus_trader.discovery.compile import compile_specification as compile_s
 from nautilus_trader.discovery.compile import compose_plan as compose_plan
 from nautilus_trader.discovery.compile import engine_version as engine_version
 from nautilus_trader.discovery.compile import specification_digest_of as specification_digest_of
+from nautilus_trader.discovery.config import ADAPTER_PREFIX as ADAPTER_PREFIX
+from nautilus_trader.discovery.config import CONFIG_SCHEMA as CONFIG_SCHEMA
+from nautilus_trader.discovery.config import SECTOR_PAIR_LENGTH as SECTOR_PAIR_LENGTH
+from nautilus_trader.discovery.config import CampaignDeclaration as CampaignDeclaration
+from nautilus_trader.discovery.config import ConfigError as ConfigError
+from nautilus_trader.discovery.config import ConfigRefusalCode as ConfigRefusalCode
+from nautilus_trader.discovery.config import CredentialFinding as CredentialFinding
+from nautilus_trader.discovery.config import CredentialKind as CredentialKind
+from nautilus_trader.discovery.config import DiscoveryConfig as DiscoveryConfig
+from nautilus_trader.discovery.config import PolicyDeclaration as PolicyDeclaration
+from nautilus_trader.discovery.config import SearchDeclaration as SearchDeclaration
+from nautilus_trader.discovery.config import WorkerCapabilityCheck as WorkerCapabilityCheck
+from nautilus_trader.discovery.config import WorkerDeclaration as WorkerDeclaration
+from nautilus_trader.discovery.config import check_worker_capabilities as check_worker_capabilities
+from nautilus_trader.discovery.config import load_config as load_config
+from nautilus_trader.discovery.config import load_policy as load_policy
+from nautilus_trader.discovery.config import parse_config as parse_config
+from nautilus_trader.discovery.config import parse_policy as parse_policy
+from nautilus_trader.discovery.config import scan_for_credentials as scan_for_credentials
 from nautilus_trader.discovery.custody import ConfirmationCustody as ConfirmationCustody
 from nautilus_trader.discovery.custody import ConfirmationVerdict as ConfirmationVerdict
 from nautilus_trader.discovery.custody import CustodyError as CustodyError
@@ -292,8 +311,10 @@ from nautilus_trader.discovery.validate import validate_specification as validat
 
 
 __all__ = [
+    "ADAPTER_PREFIX",
     "AGENT_PROTOCOL_VERSION",
     "BUNDLE_SCHEMA",
+    "CONFIG_SCHEMA",
     "COUNTS_MAPPING",
     "ENVELOPE_SCHEMA",
     "EQUIVALENCE_IGNORED_PATHS",
@@ -314,6 +335,7 @@ __all__ = [
     "REQUIRED_REFERENCE_KINDS",
     "SEARCH_POLICY_ID",
     "SEARCH_POLICY_VERSION",
+    "SECTOR_PAIR_LENGTH",
     "SHADOW_SCHEMA",
     "SIMULATED_LABEL",
     "SPECIFICATION_KEY",
@@ -360,6 +382,7 @@ __all__ = [
     "CalibrationOutcome",
     "CalibrationReport",
     "CampaignAudit",
+    "CampaignDeclaration",
     "CampaignInventory",
     "CandidateJudgement",
     "CandidateState",
@@ -372,12 +395,16 @@ __all__ = [
     "ConditionAny",
     "ConditionLeaf",
     "ConditionNode",
+    "ConfigError",
+    "ConfigRefusalCode",
     "ConfirmationCustody",
     "ConfirmationVerdict",
     "Contamination",
     "ControlClass",
     "CountName",
     "Counts",
+    "CredentialFinding",
+    "CredentialKind",
     "CrossSectionEntry",
     "CrossSectionRow",
     "CustodyError",
@@ -388,6 +415,7 @@ __all__ = [
     "DecisionRecord",
     "Deduplication",
     "DevelopmentResult",
+    "DiscoveryConfig",
     "DiscoveryInterpreter",
     "DiscoveryInterpreterConfig",
     "DiscoveryLedger",
@@ -444,6 +472,7 @@ __all__ = [
     "PboExclusion",
     "PboRow",
     "PboState",
+    "PolicyDeclaration",
     "PortfolioBlock",
     "Prompt",
     "ProvenanceBlock",
@@ -468,6 +497,7 @@ __all__ = [
     "RunIdentity",
     "RunReceipt",
     "RunRequest",
+    "SearchDeclaration",
     "SearchDiagnosis",
     "SearchPolicy",
     "SearchRefusal",
@@ -492,6 +522,8 @@ __all__ = [
     "ValidationResult",
     "ValidationWarning",
     "WarningCode",
+    "WorkerCapabilityCheck",
+    "WorkerDeclaration",
     "WorkerEnvironmentCheck",
     "allocate_targets",
     "assess_admission",
@@ -500,6 +532,7 @@ __all__ = [
     "build_panel",
     "bundle_identity",
     "canonical_mapping",
+    "check_worker_capabilities",
     "classify",
     "compile_specification",
     "compose_plan",
@@ -516,10 +549,14 @@ __all__ = [
     "genome_of",
     "inherited_reservations",
     "invoke",
+    "load_config",
+    "load_policy",
     "minimum_track_record_length",
     "mutate",
     "non_deterministic_digest",
     "pareto_front",
+    "parse_config",
+    "parse_policy",
     "parse_specification",
     "rebalance_period_key",
     "recombine",
@@ -531,6 +568,7 @@ __all__ = [
     "run_calibration",
     "run_experiment",
     "scan_for_code_references",
+    "scan_for_credentials",
     "select_cross_section",
     "selectable",
     "shadow_period",

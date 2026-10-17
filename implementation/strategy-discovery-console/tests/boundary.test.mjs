@@ -160,11 +160,13 @@ describe('the capability assertion', () => {
     expect(capability.holds).toBe(false);
   });
 
-  test('reports the capability allowlist as unbuilt rather than checking it', () => {
-    // The design asks for an allowlist and no configuration module exists, so nothing is claimed.
+  test('reports the capability allowlist as declared and checked but not provisioned', () => {
+    // The declaration and the check exist in `discovery/config.py`; what no module builds is the
+    // worker environment it describes, so the console claims the declaration, not a measurement.
     const capability = capacities();
     expect(capability.allowlist.built).toBe(false);
-    expect(capability.allowlist.why).toContain('procedural today');
+    expect(capability.allowlist.why).toContain('procedural');
+    expect(capability.allowlist.declared).toContain('check_worker_capabilities');
   });
 });
 

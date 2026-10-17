@@ -231,9 +231,9 @@ Here it matters only as a limit: see below.
   ability to re-run its proposals, even though it can still re-run the candidates it compiled.
 - The contamination label does not repair anything. A candidate measured over a period the model may
   already know is marked vulnerable and stays vulnerable, and no gate converts the first into the second.
-- The environment assertion is procedural today, not enforced by configuration: the plan records that
-  the stronger control, the shape of the worker environment, is not built because the configuration
-  module is unbuilt, so a machine with live credentials is protected by procedure alone.
+- The environment assertion is procedural where it is not enforced: the stronger control, the shape of the
+  worker environment, is declared and checked in `discovery/config.py`, but no module provisions that
+  environment, so a machine with live credentials is protected by procedure alone.
 - A brief that leaked a field would defeat the separation. The prompts refuse an undeclared field for
   exactly this reason, so the render refusal is load-bearing rather than tidy; a reader who edits a
   template to accept one more field has changed the role's authority, not just its wording.
@@ -274,7 +274,7 @@ held-back data has nothing to route around. The separation is made of missing ob
 - The plan, [strategy_discovery_implementation.md](../../../docs/design/strategy_discovery_implementation.md),
   Section 11, which names the two carried limits (four of the five roles are not candidate producers,
   and agents cannot be reproduced by recall) and Section 12.1, which records that the worker allowlist
-  is procedural today.
+  is declared and checked in `config.py` while the environment it describes is not provisioned.
 - [The agent unit tests](../../../python/tests/unit/discovery/test_agents.py) and
   [the search integration test](../../../python/tests/integration/test_discovery_search.py), which
   exercise the role declarations, the render refusals, the digest tracking, the classifier, the replay
