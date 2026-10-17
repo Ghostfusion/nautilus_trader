@@ -100,6 +100,7 @@ export function mount(root, ctx) {
     key: 'k3',
     fields: defaultFields('proposal_recorded'),
     refusal: null,
+    refusalSource: null,
     tamperAt: 1,
     tamperValue: 'tampered',
     useCheckpoint: true,
@@ -116,12 +117,18 @@ export function mount(root, ctx) {
     const payload = { candidateId: state.candidateId, key: state.key, ...state.fields };
     const result = append(state.entries, state.kind, payload);
     state.refusal = result.ok ? null : result;
+    state.refusalSource = 'form';
     if (result.ok) state.entries = result.entries;
     render();
   }
 
-  function demonstration(kind, payload) {
+  /**
+   * Demonstrate one refusal from the rule's own button. The outcome is remembered with the code that
+   * produced it, because it is shown next to that button rather than in the append form above.
+   */
+  function demonstration(code, kind, payload) {
     state.refusal = append(state.entries, kind, payload);
+    state.refusalSource = code;
     render();
   }
 
@@ -214,11 +221,12 @@ export function mount(root, ctx) {
           ui.button('Restore the opening chain', () => {
             state.entries = seedChain();
             state.refusal = null;
+            state.refusalSource = null;
             state.checkpoint = verifyChain(state.entries).head;
             render();
           }),
         ),
-        state.refusal === null
+        state.refusalSource !== 'form' || state.refusal === null
           ? null
           : ui.note(
               `${state.refusal.code}: ${state.refusal.reason}`,
@@ -367,18 +375,30 @@ export function mount(root, ctx) {
     );
   }
 
+  /** The outcome of the demonstration the reader pressed, shown at the button they pressed. */
+  function demonstrationOutcome(code) {
+    if (state.refusalSource !== code) return null;
+    if (state.refusal === null || state.refusal.ok === true) {
+      return ui.note(`${code}: accepted, which this rule is supposed to refuse`, 'bad');
+    }
+    return ui.note(
+      `${state.refusal.code}: ${state.refusal.reason}`,
+      state.refusal.code === 'REWRITE_REFUSED' ? 'bad' : 'warn',
+    );
+  }
+
   function renderRefusals() {
     ui.clear(refusals);
     const demonstrations = {
       REWRITE_REFUSED: () =>
-        demonstration('compilation_recorded', {
+        demonstration('REWRITE_REFUSED', 'compilation_recorded', {
           candidateId: state.entries.find((item) => item.kind === 'compilation_recorded')?.candidateId ?? 'alpha',
           specification_digest: 'sha256:spec-again',
           new_configuration: true,
         }),
       MISSING_REQUIRED_FIELD: () =>
-        demonstration('gate_verdict', { candidateId: 'alpha', gate: 'G0' }),
-      KIND_NOT_IN_VOCABULARY: () => demonstration('', {}),
+        demonstration('MISSING_REQUIRED_FIELD', 'gate_verdict', { candidateId: 'alpha', gate: 'G0' }),
+      KIND_NOT_IN_VOCABULARY: () => demonstration('KIND_NOT_IN_VOCABULARY', '', {}),
     };
 
     for (const [code, rule] of Object.entries(REFUSAL_CODES)) {
@@ -389,6 +409,7 @@ export function mount(root, ctx) {
           ui.note(rule.condition),
           ui.note(`the module's own text: ${message}`, 'muted'),
           ui.button(`Demonstrate ${code}`, demonstrations[code]),
+          demonstrationOutcome(code),
         ),
       );
     }
