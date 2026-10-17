@@ -29,10 +29,10 @@ import {
 const NAMES = credentials();
 
 describe('the canonical credential list', () => {
-  test('holds the 91 names the page records, first and last as transcribed', () => {
+  test('holds the 92 names the page records, first and last as transcribed', () => {
     // If this drifted, the console's list table and the drift check would disagree with the script.
     expect(NAMES.length).toBe(valueOf(CREDENTIALS.count));
-    expect(NAMES).toBeArrayOfSize(91);
+    expect(NAMES).toBeArrayOfSize(92);
     expect(NAMES[0]).toBe(valueOf(CREDENTIALS.first));
     expect(NAMES[NAMES.length - 1]).toBe(valueOf(CREDENTIALS.last));
   });
@@ -82,7 +82,7 @@ describe('the environment assertion', () => {
   test('reports the list size against the floor and the three anchors', () => {
     // The size half of the assertion, so a shortened list is caught here rather than by the count table.
     const check = checkEnvironment({}, NAMES);
-    expect(check.list.size).toBe(91);
+    expect(check.list.size).toBe(92);
     expect(check.list.floor).toBe(80);
     expect(check.list.holds).toBe(true);
     expect(check.list.anchors.every((anchor) => anchor.named)).toBe(true);

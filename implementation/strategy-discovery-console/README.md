@@ -72,7 +72,7 @@ what you type into the page. Two consequences are worth stating plainly.
   itself, and labels every value `sha256:`. The SHA-256 is checked against the published NIST
   vectors and against an independent implementation for every input length through two blocks.
 - **Every transcription is checked.** The console quotes the tutorials, transcribes the bounds, the
-  refusal codes, the gate ladder and the acceptance record, and lists ninety-one credential names.
+  refusal codes, the gate ladder and the acceptance record, and lists ninety-two credential names.
   Each of those values is stored inside a `fact(value, path, line, text)` wrapper that records the
   file, the line and the verbatim supporting text, and `tools/check-facts.mjs` fails - by hand and
   inside `bun test` - when that text is no longer in the file. A `Mixed` grade or a failed criterion

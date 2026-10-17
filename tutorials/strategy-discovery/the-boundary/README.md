@@ -112,12 +112,12 @@ named    = the names declared in ADAPTER_ENV_VARS of scripts/strip-adapter-env.b
 stripped = { name: value in the process environment : name is not in named }
 ```
 
-- `named` is the canonical list, read out of the script rather than copied into the test; it holds 91
+- `named` is the canonical list, read out of the script rather than copied into the test; it holds 92
   names, the first `AX_API_KEY` and the last `TWS_USERNAME`.
 - `stripped` is the environment the boundary defines, which is the operator's environment with those
   names removed.
 - The assertion is that `named` holds more than 80 names, that three of them are present by name, and
-  that in `stripped` discovery imports and reaches no adapter. The count of 91 is the arithmetic, and
+  that in `stripped` discovery imports and reaches no adapter. The count of 92 is the arithmetic, and
   the three named variables are `BINANCE_API_KEY`, `DATABENTO_API_KEY` and `EODHD_API_KEY`.
 
 The capability assertion is one more empty set:
@@ -173,7 +173,7 @@ the boundary fixture.
 
 The recorded result of those four tests is what the assertions above describe: the graph resolved in a
 clean interpreter holds no adapter module and no export names an execution surface; the sandbox
-exports its execution client factory and config and no data client; the 91 variables of the canonical
+exports its execution client factory and config and no data client; the 92 variables of the canonical
 list reach neither the stripped environment discovery imports in nor a worker's; and the two
 candidates that name a venue or a module path are refused and recorded, and the refusals are read back
 from the audit. The milestone that produced them also reports 271 passing tests across the discovery
@@ -256,7 +256,7 @@ room.
    names a venue.
 2. Write five environment variable names that look like credentials to you. An honest list might be
    `BINANCE_API_KEY`, `DATABENTO_API_KEY`, `EODHD_API_KEY`, `PATH` and `TWS_USERNAME`.
-3. Mark each one that the canonical list would name. The list holds 91 names, and three of them are
+3. Mark each one that the canonical list would name. The list holds 92 names, and three of them are
    `BINANCE_API_KEY`, `DATABENTO_API_KEY` and `EODHD_API_KEY`.
 4. Now suppose `EODHD_API_KEY` is set in your own shell. Write one sentence saying what the
    environment assertion does and does not show about that.
@@ -279,7 +279,7 @@ for a field it should not have named has learned nothing about whether its hypot
 - [The boundary fixture](../../../python/tests/integration/test_discovery_boundary.py), the four
   assertions, the clean-interpreter graph reader, the credential-list reader and the two refusal cases.
 - [The canonical credential list](../../../scripts/strip-adapter-env.bash), `ADAPTER_ENV_VARS` with its
-  91 names and the comment that says when to add another.
+  92 names and the comment that says when to add another.
 - [The sandbox package](../../../python/nautilus_trader/adapters/sandbox/__init__.py), whose export
   list is the execution client a worker is given and holds no data-client factory.
 - [The acceptance bundle](../../../python/tests/acceptance/discovery_acceptance_bundle.json), the

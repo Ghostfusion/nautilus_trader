@@ -235,22 +235,22 @@ export const DEPENDENCY = {
 export const CREDENTIALS = {
   list: fact('ADAPTER_ENV_VARS=(', SCRIPT, 16, 'ADAPTER_ENV_VARS=('),
   count: fact(
-    91,
+    92,
     README,
     116,
     '  names, the first `AX_API_KEY` and the last `TWS_USERNAME`.',
   ),
   countSentence: fact(
-    'the canonical list, read out of the script rather than copied into the test; it holds 91 names, ' +
+    'the canonical list, read out of the script rather than copied into the test; it holds 92 names, ' +
       'the first `AX_API_KEY` and the last `TWS_USERNAME`',
     README,
     115,
-    '- `named` is the canonical list, read out of the script rather than copied into the test; it holds 91\n' +
+    '- `named` is the canonical list, read out of the script rather than copied into the test; it holds 92\n' +
       '  names, the first `AX_API_KEY` and the last `TWS_USERNAME`.',
   ),
   floor: fact(80, TEST, 202, 'assert len(named) > 80'),
   first: fact('AX_API_KEY', SCRIPT, 17, '  AX_API_KEY'),
-  last: fact('TWS_USERNAME', SCRIPT, 107, '  TWS_USERNAME'),
+  last: fact('TWS_USERNAME', SCRIPT, 108, '  TWS_USERNAME'),
   anchors: [
     fact('BINANCE_API_KEY', TEST, 203, 'assert "BINANCE_API_KEY" in named'),
     fact('DATABENTO_API_KEY', TEST, 204, 'assert "DATABENTO_API_KEY" in named'),
