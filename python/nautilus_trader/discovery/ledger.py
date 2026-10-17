@@ -35,13 +35,13 @@ additive, and an incomplete record explicitly incomplete rather than absent or c
 Reconciliation is the check that earns the layer its place, and it fails closed. It compares the
 receipt a run emitted against the manifest it claims and against the research artifact that cites
 it, and a disagreement in the seed, the build identity, the configuration digest or the artifact
-digest leaves the registration unverified rather than counted. Two limitations are named rather
-than worked around: the engine's own run manifest has no Python binding, so the manifest a receipt
-is checked against is the one its caller supplies until the narrow upstream change of decision
-M1.3 exists, and the engine's canonical digest is computed by the extension from the document it
-holds, so a retained document's blake3 digest cannot be recomputed in Python; the ledger records
-both the digest and the document's SHA-256, and the recomputation check verifies the latter while
-naming the former as unavailable.
+digest leaves the registration unverified rather than counted. The manifest a receipt is checked
+against is the engine's own record of the run: the runner reads it from the engine and the
+registration retains it beside the receipt, so a recomputation checks the receipt against what the
+run recorded rather than against a document the caller supplies. The engine's canonical digest is
+verified from the retained bytes with the extension's own hashing step,
+`CanonicalBacktestResult.digest_of_bytes`, so the recomputation recomputes the digest rather than
+only the document's SHA-256.
 """
 
 from __future__ import annotations
@@ -56,6 +56,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from nautilus_trader.backtest import CanonicalBacktestResult
 from nautilus_trader.discovery.schema import canonical_mapping
 from nautilus_trader.optimization.significance import TrialDependence
 from nautilus_trader.optimization.space import digest_of
@@ -305,7 +306,7 @@ class EvidencePackage:
             "registry_digest": self.registry_digest,
             "experiment_digest": self.experiment_digest,
             "canonical_digest": self.canonical_digest,
-            "canonical_bytes_sha256": digest_of({"bytes": self.canonical_bytes.hex()}),
+            "canonical_bytes_sha256": f"sha256:{hashlib.sha256(self.canonical_bytes).hexdigest()}",
             "metric_values": {
                 name: float(value) if math.isfinite(value) else str(value)
                 for name, value in self.metric_values.items()
@@ -1403,7 +1404,7 @@ _REQUIRED_FIELDS: Mapping[EventKind, tuple[str, ...]] = {
     EventKind.EQUIVALENCE_MERGE: ("merged_into", "rule"),
     EventKind.JOB_SUBMITTED: (),
     EventKind.EXECUTION_ATTEMPT_CLOSED: ("outcome",),
-    EventKind.REGISTRATION_VERIFIED: ("receipt", "receipt_digest"),
+    EventKind.REGISTRATION_VERIFIED: ("receipt", "receipt_digest", "manifest"),
     EventKind.TRIAL_ADMITTED: ("receipt_digest",),
     EventKind.REGISTRATION_INCOMPLETE: ("reason",),
     EventKind.DUPLICATE_REGISTRATION: ("reason",),
@@ -1700,6 +1701,29 @@ class CampaignInventory:
             payload = event.payload.get("receipt")
             if isinstance(payload, dict):
                 read[event.key] = RunReceipt(**payload)  # type: ignore[arg-type]
+
+        return read
+
+    def manifests(self) -> Mapping[str, Mapping[str, object]]:
+        """
+        Return every verified registration's manifest, keyed by its idempotency key.
+
+        The manifest is retained rather than re-read, because the check a recomputation makes is
+        against what the run recorded, and the run is not repeated to make it.
+
+        Returns
+        -------
+        Mapping[str, Mapping[str, object]]
+
+        """
+        read: dict[str, Mapping[str, object]] = {}
+
+        for event in self.events():
+            if event.kind is not EventKind.REGISTRATION_VERIFIED:
+                continue
+            payload = event.payload.get("manifest")
+            if isinstance(payload, dict):
+                read[event.key] = payload
 
         return read
 
@@ -2113,7 +2137,11 @@ class CampaignInventory:
                 key.value,
                 EventKind.REGISTRATION_VERIFIED,
                 candidate_id=candidate_id,
-                payload={"receipt": receipt.to_dict(), "receipt_digest": receipt.digest()},
+                payload={
+                    "receipt": receipt.to_dict(),
+                    "receipt_digest": receipt.digest(),
+                    "manifest": dict(manifest),
+                },
             )
             self._transition(
                 key.value,
@@ -3272,10 +3300,12 @@ def recompute(
     what it admitted, and the retained artifacts are the content the two cite. A claim that only one
     side supports is a disagreement, and a reference whose content is gone is unresolved.
 
-    Two inputs cannot be recomputed here and are named with the dependency that blocks each, so a
-    caller reports a blocked check rather than passing on the parts it could do: the engine's
-    canonical digest is computed by the extension from the document it holds, and the engine-side
-    manifest a receipt is checked against has no Python binding until decision M1.3 is implemented.
+    The engine's canonical digest is recomputed from the retained bytes with the extension's own
+    hashing step, so a document that was retained is checked against the digest it was recorded
+    under rather than against its SHA-256 alone. Each receipt is then reconciled against the
+    manifest the registration retained beside it: a receipt whose manifest is absent, or whose run
+    id, manifest digest, build identity, configuration digest or seed disagrees with it, is
+    reported as a check that cannot pass rather than passed over.
 
     Parameters
     ----------
@@ -3343,6 +3373,11 @@ def recompute(
             recorded_bytes,
             "" if not retained else f"sha256:{hashlib.sha256(retained).hexdigest()}",
         )
+        compare(
+            f"canonical_digest_bytes:{candidate}",
+            recorded_canonical,
+            "" if not retained else CanonicalBacktestResult.digest_of_bytes(retained),
+        )
 
     declarations = {
         str(event.payload.get("non_deterministic", ""))
@@ -3368,18 +3403,7 @@ def recompute(
             )
         unresolved = envelope.unresolved()
 
-    blocked.extend(
-        (
-            (
-                "the engine's canonical blake3 digest, which the extension computes from the "
-                "document it holds and no Python surface recomputes from retained bytes"
-            ),
-            (
-                "the engine-side run manifest a receipt is checked against, which has no Python "
-                "binding until decision M1.3 is implemented"
-            ),
-        ),
-    )
+    blocked.extend(_blocked_receipt_checks(receipts, inventory.manifests()))
     blocked.extend(unavailable)
 
     return Recomputation(
@@ -3389,6 +3413,37 @@ def recompute(
         non_deterministic=non_deterministic_digest(),
         counts=inventory.counts(),
     )
+
+
+def _blocked_receipt_checks(
+    receipts: Mapping[str, RunReceipt],
+    manifests: Mapping[str, Mapping[str, object]],
+) -> list[str]:
+    """
+    Return the reasons the retained receipts cannot be checked against their manifests.
+
+    A receipt whose registration retained no manifest is reported rather than skipped, because the
+    check's purpose is to catch a record citing a run it cannot be checked against, and an absent
+    manifest is exactly the case where it cannot tell. A receipt whose manifest disagrees with it
+    names the field that disagrees, so the check fails closed rather than passing on the parts that
+    agree.
+    """
+    blocked: list[str] = []
+
+    for key, receipt in receipts.items():
+        manifest = manifests.get(key)
+        if manifest is None:
+            blocked.append(
+                f"the run manifest of the receipt {key}, which the registration retained none of",
+            )
+            continue
+        reconciliation = reconcile_receipt(receipt, manifest=manifest)
+        blocked.extend(
+            f"the receipt {key} against its manifest: {reconciliation.detail[name]}"
+            for name in reconciliation.mismatched
+        )
+
+    return blocked
 
 
 # The fields every bundle entry carries, in the identity scheme of design Section 4.3.

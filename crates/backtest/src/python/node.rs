@@ -135,6 +135,25 @@ impl BacktestNode {
             .map_err(to_pyruntime_err)
     }
 
+    /// Returns the engine's own manifest of the run for the given run config.
+    ///
+    /// The manifest's keys are the field names a receipt carries, so a receipt stored beside an
+    /// artifact reconciles against what the run itself recorded rather than against a copy of it
+    /// that its caller supplied.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no engine exists for the run config ID.
+    #[pyo3(name = "get_run_manifest")]
+    fn py_get_run_manifest(
+        &self,
+        run_config_id: &str,
+    ) -> PyResult<std::collections::HashMap<String, String>> {
+        self.run_manifest(run_config_id)
+            .map(|manifest| manifest.to_declaration().into_iter().collect())
+            .map_err(to_pyruntime_err)
+    }
+
     /// Returns the cache for the given run config engine.
     ///
     /// # Errors

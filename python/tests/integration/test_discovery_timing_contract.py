@@ -468,22 +468,24 @@ def test_market_data_between_bars_releases_a_deferred_intent_at_its_own_price() 
     assert lifecycle.fill_ts < TS_START + MINUTE_NS
 
 
-def test_a_deferred_intent_with_no_subsequent_market_data_is_filled_at_shutdown() -> None:
+def test_a_deferred_intent_with_no_subsequent_market_data_is_not_filled() -> None:
     """
-    Test the fabricated fill: a deferred intent is drained at shutdown against the last close.
+    Test that no fill is fabricated: a deferred intent the data never reached stays unexecuted.
 
-    No bar follows the only bar in the run, so no market data can release the command. The run
-    nevertheless reports a fill at the arrival timestamp, priced at the last known close, and the
-    strategy is not notified of it. This is the case table's missing-bar and holiday case, and the
-    engine's behaviour is the opposite of the declared expectation that no fill is fabricated.
+    No bar follows the only bar in the run, so no market data can release the command, and the run
+    ends before the command's arrival. The run reports the order as it stands, priced by nothing,
+    and leaves the account undebited, because a fill at a close observed before the order existed
+    is not a fill the simulator can defend. This is the case table's missing-bar and holiday case,
+    which the engine now meets rather than the opposite.
     """
     lifecycle = run(bars_data=bars(offsets=(0,)), latency_ns=SECOND_NS)
 
-    assert lifecycle.order_status == "FILLED"
+    # The order reached the venue's queue and nothing ever promoted it: the deferred arrival stayed
+    # in the future for the whole run, so the venue never acknowledged the order at all.
+    assert lifecycle.order_status == "SUBMITTED"
     assert lifecycle.fill_observed_by_strategy is False
-    assert lifecycle.fill_ts == TS_START + SECOND_NS
-    assert lifecycle.fill_px == CLOSES[0]
-    assert lifecycle.account_total == "989975.00 USD"
+    assert lifecycle.position_ts is None
+    assert lifecycle.account_total == "1000000.00 USD"
 
 
 def test_out_of_order_input_is_sorted_rather_than_refused() -> None:
@@ -830,7 +832,9 @@ def test_the_bridge_submits_at_arrival_so_the_fill_precedes_the_declared_eligibi
 
     `submit_once` holds no clock and no timer, so the order set is submitted at the delivery
     instant, and with no latency model the fill is stamped there. The fill therefore precedes the
-    artifact's own declared eligibility, which is the case table's next-session case failing.
+    artifact's own declared eligibility, which is why the compiler emits the latency deferral of the
+    accepted mechanism and never this pattern alone: the bridge resolves availability, and its
+    caller owns any waiting.
     """
     lifecycle = run_bridge(tmp_path)
 

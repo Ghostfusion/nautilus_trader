@@ -65,6 +65,23 @@ const PYTHON_VERSIONS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Returns the identity of the engine build that is running: its version and the commit it was
+/// built from.
+///
+/// A run records this so a later reader can tell whether the same binary produced its result,
+/// which is why the commit is carried rather than only the version.
+#[must_use]
+pub fn build_identity() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    let commit = env!("NAUTILUS_BUILD_GIT_COMMIT");
+
+    if commit.is_empty() {
+        format!("nautilus_trader {version}")
+    } else {
+        format!("nautilus_trader {version} at {commit}")
+    }
+}
+
 /// Records that the final artifact uses mimalloc as its Rust global allocator.
 ///
 /// This only affects version header metadata. The final artifact must declare mimalloc as its

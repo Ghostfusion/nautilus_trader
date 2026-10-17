@@ -853,7 +853,7 @@ fn canonicalize_value(value: &mut Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn canonicalize_document(value: &mut Value) -> anyhow::Result<()> {
+pub(crate) fn canonicalize_document(value: &mut Value) -> anyhow::Result<()> {
     value.sort_all_objects();
     sort_named_arrays(value, false);
     normalize_identities(value);

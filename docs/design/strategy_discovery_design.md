@@ -301,13 +301,13 @@ acceptance testing, and that implementation of the full pipeline is not yet appr
 finding as a documentation defect and adds no architectural change. What it adds is a demand for
 evidence, and every part of that demand is adopted.
 
-| What the second review requires                                                       | Disposition                                                                                                                                                       | Where             |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| Five release tests, with their pass conditions                                        | Adopted as the first acceptance package, with the pass conditions that were sharper than this document's own wording                                              | Section 15        |
-| An explicit, versioned mapping from ledger events to each statistical method's inputs | Adopted: the deflated Sharpe ratio, PBO and the admission assessment each name their inputs, and an unavailable input is a non-approval rather than a guess       | Section 7.7; SD6  |
-| Confirmation data must be operationally protected, not merely named                   | Adopted: transitions, reservations, candidate identity and access events are recorded together, and a verdict binds to the candidate identity it was produced for | Section 11.3      |
-| An acceptance-evidence bundle, one entry per criterion                                | Adopted: the entry fields are specified, and a criterion is not passed because its section exists                                                                 | Section 15.1      |
-| Settlement timing and corporate-action accounting stay hard blockers                  | Retained unchanged, and named in the milestone exit conditions                                                                                                    | Sections 11.1, 16 |
+| What the second review requires                                                       | Disposition                                                                                                                                                                                                                                                                                                                                          | Where             |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| Five release tests, with their pass conditions                                        | Adopted as the first acceptance package, with the pass conditions that were sharper than this document's own wording                                                                                                                                                                                                                                 | Section 15        |
+| An explicit, versioned mapping from ledger events to each statistical method's inputs | Adopted: the deflated Sharpe ratio, PBO and the admission assessment each name their inputs, and an unavailable input is a non-approval rather than a guess                                                                                                                                                                                          | Section 7.7; SD6  |
+| Confirmation data must be operationally protected, not merely named                   | Adopted: transitions, reservations, candidate identity and access events are recorded together, and a verdict binds to the candidate identity it was produced for                                                                                                                                                                                    | Section 11.3      |
+| An acceptance-evidence bundle, one entry per criterion                                | Adopted: the entry fields are specified, and a criterion is not passed because its section exists                                                                                                                                                                                                                                                    | Section 15.1      |
+| Settlement timing and corporate-action accounting stay hard blockers                  | Settlement timing is retained as a hard blocker for the bridge path and the compiler's refusal half, and corporate-action accounting is settled in the fork's own stage: a dividend credits the entitlement of the positions holding the instrument and a split restates quantity and price basis, with the accounting fixture reconciling both legs | Sections 11.1, 16 |
 
 It also states plainly what this document's own checks do and do not establish, and the design agrees
 rather than argues. Markdown linting, the documentation conventions hook, table normalisation, the
@@ -495,7 +495,11 @@ Each is either work for this design or a deliberate refusal recorded in Section 
    all of which are Rust-only. The bindings expose the panel, its rows and values, and the membership
    series, and nothing else.
 8. Fundamental data of any kind, and any adapter for it.
-9. A cash-flow path for dividends: a dividend adjusts prices and does not credit the account.
+9. A cash-flow path for dividends: a dividend adjusts prices and does not credit the account. This
+   fork closes that absence in its own corporate-action stage, which credits a dividend's entitlement
+   to the positions holding the instrument at the action's effective instant, and rests a split's
+   quantity and price basis; upstream still has no such path, so a strategy that depends on it is a
+   fork-only capability rather than a portable one.
 10. Runtime turnover or drawdown accounting in the portfolio; both are post-run statistics.
 11. A cross-sectional portfolio constructor that turns weights into targets. The target pipeline
     sizes a single signal through the risk sizing implementation, which is by design, and the

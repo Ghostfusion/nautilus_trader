@@ -17,13 +17,16 @@ Corporate-action accounting in value and in cash, as design criterion 6 requires
 
 The criterion reconciles cash, quantity, position value and account equity across a dividend, a
 split, a position held through an ex-date, and positions opened and closed around an action
-boundary. The fixture records what the engine does, and does not adjust the expectation to fit it:
-a dividend reaches the module as data and is applied to prices, and nothing credits an account.
+boundary. The fixture reads the venue account, the position the cache holds and the prices the
+orders filled at, and it states the reconciliation as arithmetic rather than as a comparison of two
+adjusted price series.
 
-The reconciliation is stated as arithmetic rather than as a comparison of two adjusted price
-series. The value leg reconciles, because the adjustment series carries both actions. The cash leg
-does not, because there is no cash line to reconcile it against, and the shortfall is exactly the
-distribution the position was entitled to.
+The scenario is one coherent total-return reading. The position is opened at 400.00 before both
+actions, the ex-date pays 2.50 on the shares held then, the four-for-one split restates the quantity
+at 400 and divides the price basis by four, and the raw series falls from 400.00 to 100.00 where the
+split takes effect. The value leg is the adjustment series: 400.00 times the split factor of one
+quarter, less the 2.50 per share dividend, is 97.50. The cash leg is the account: the purchase, the
+distribution credited at the ex-date, and the sale of the shares the split left.
 """
 
 from __future__ import annotations
@@ -59,16 +62,21 @@ VENUE = INSTRUMENT.venue
 BAR_TYPE = BarType.from_str(f"{INSTRUMENT_ID}-1-MINUTE-LAST-EXTERNAL")
 
 MINUTE_NS = 60_000_000_000
+SECOND_NS = 1_000_000_000
 TS_START = 1_704_067_200_000_000_000
-SPLIT_NS = TS_START + MINUTE_NS + 30_000_000_000
-DIVIDEND_NS = TS_START + 2 * MINUTE_NS + 30_000_000_000
+# The ex-date falls between the first and the second bar, and the split takes effect between the
+# second and the third, where the raw series' own change is.
+DIVIDEND_NS = TS_START + 30 * SECOND_NS
+SPLIT_NS = TS_START + MINUTE_NS + 30 * SECOND_NS
 ANNOUNCE_NS = TS_START - 10 * MINUTE_NS
 
-# Two bars before the split and two after it, at the raw series the venue published.
-RAW_PRICES = ("400.00", "400.00", "200.00", "200.00")
+# Two bars before the split and two after it, at the raw series the venue published. A four-for-one
+# split divides the published price by four, so the raw series moves from 400.00 to 100.00.
+RAW_PRICES = ("400.00", "400.00", "100.00", "100.00")
 SHARES = 100
 STARTING_BALANCE = "1_000_000 USD"
-# The distribution the 100 shares were entitled to: 2.50 per share.
+# The distribution the 100 shares were entitled to at the ex-date: 2.50 per share. The ex-date
+# precedes the split, so the entitlement is the quantity held before it.
 DISTRIBUTION = Decimal("250.00")
 SPLIT_RATIO = Decimal(4)
 
@@ -131,11 +139,14 @@ class AccountingStrategy(Strategy):
         self._bars_seen += 1
         if not self._entered:
             self._entered = True
-            self._submit(OrderSide.BUY)
+            self._submit(OrderSide.BUY, Quantity.from_int(SHARES))
             return
         if self._exit_on_last_bar and self._bars_seen == len(RAW_PRICES) and not self._exited:
             self._exited = True
-            self._submit(OrderSide.SELL)
+            # The exit sells the position the run holds, which is the opened quantity restated by
+            # any split that took effect while it was open.
+            held = self.portfolio.net_position(INSTRUMENT_ID)
+            self._submit(OrderSide.SELL, Quantity.from_int(int(held or 0)))
 
     def on_corporate_action(self, action: CorporateAction) -> None:
         """
@@ -143,12 +154,12 @@ class AccountingStrategy(Strategy):
         """
         self.actions.append(action)
 
-    def _submit(self, side: OrderSide) -> None:
+    def _submit(self, side: OrderSide, quantity: Quantity) -> None:
         self.submit_order(
             self.order_factory.market(
                 instrument_id=INSTRUMENT_ID,
                 order_side=side,
-                quantity=Quantity.from_int(SHARES),
+                quantity=quantity,
             ),
         )
 
@@ -178,24 +189,27 @@ def bars() -> list[Bar]:
 
 def actions() -> list[CorporateAction]:
     """
-    Build the split and the dividend, announced before they take effect.
+    Build the dividend and the split, announced before they take effect.
+
+    The ex-date comes first, so the entitlement is paid on the shares the position held before the
+    split restated it, and the raw series' own change follows at the split's effective instant.
     """
     return [
-        CorporateAction(
-            INSTRUMENT_ID,
-            CorporateActionType.SPLIT,
-            SPLIT_RATIO,
-            None,
-            SPLIT_NS,
-            ANNOUNCE_NS,
-            ANNOUNCE_NS,
-        ),
         CorporateAction(
             INSTRUMENT_ID,
             CorporateActionType.DIVIDEND,
             Decimal("2.50"),
             None,
             DIVIDEND_NS,
+            ANNOUNCE_NS,
+            ANNOUNCE_NS,
+        ),
+        CorporateAction(
+            INSTRUMENT_ID,
+            CorporateActionType.SPLIT,
+            SPLIT_RATIO,
+            None,
+            SPLIT_NS,
             ANNOUNCE_NS,
             ANNOUNCE_NS,
         ),
@@ -254,82 +268,79 @@ def test_the_value_leg_adjusts_a_raw_price_for_both_actions() -> None:
     assert series.split_factor(TS_START) == Decimal("0.25")
     assert series.dividends(TS_START) == Decimal("2.50")
     assert series.adjust(Price.from_str(RAW_PRICES[0]), TS_START).as_decimal() == Decimal("97.50")
-    # After both actions the series is the raw series again.
-    assert series.split_factor(DIVIDEND_NS) == Decimal(1)
-    assert series.dividends(DIVIDEND_NS) == Decimal(0)
+    # Once both actions have taken effect the series is the raw series again.
+    after_both = TS_START + len(RAW_PRICES) * MINUTE_NS
+    assert series.split_factor(after_both) == Decimal(1)
+    assert series.dividends(after_both) == Decimal(0)
 
 
 def test_both_action_records_reach_the_module() -> None:
     """
-    Test that the action data is delivered while no cash line is created for it.
+    Test that the action data is delivered to the strategy.
 
-    Both records arrive at their effective instants, so the module is not blind to the action and
-    the absence of a cash line is not an absence of data.
+    Both records arrive at their effective instants, so the accounting the other cases read is the
+    engine's rather than an absence of the data the engine was given.
     """
     accounting = run()
 
     assert accounting.actions == 2
 
 
-def test_a_held_dividend_credits_no_cash() -> None:
+def test_a_held_dividend_credits_its_entitlement() -> None:
     """
-    Test that the cash line records the purchase and nothing else.
+    Test that the cash line records the purchase and the distribution.
 
-    The 100 shares cost 40,000, which is the whole of the movement: the 250 the position was
-    entitled to at the ex-date is not credited, so the cash reconciliation the criterion requires
-    has nothing to reconcile the distribution against.
+    The 100 shares cost 40,000, and the position was entitled to 250 at the ex-date, so the cash the
+    criterion reconciles against is the purchase less the distribution the shares were paid.
     """
     accounting = run()
 
     assert accounting.order_prices == (RAW_PRICES[0],)
-    assert accounting.cash_delta == Decimal("-40000.00")
-    assert accounting.cash_delta != Decimal("-40000.00") + DISTRIBUTION
+    assert accounting.cash_delta == Decimal("-40000.00") + DISTRIBUTION
 
 
-def test_the_split_leaves_the_position_quantity_unchanged() -> None:
+def test_the_split_restates_the_position_quantity() -> None:
     """
-    Test that the split is a price adjustment and not a quantity adjustment.
+    Test that the split restates the quantity rather than the price alone.
 
-    A four-for-one split would leave the same 100 shares as 400 without changing their value. The
-    position keeps its quantity and its price is the post-split one, so the quantity leg of the
-    reconciliation is neither adjusted nor reconciled.
+    A four-for-one split leaves the same 100 shares as 400, so the position carries the notional it
+    held at the pre-split price into the post-split series.
     """
     accounting = run()
 
-    assert accounting.quantity == Decimal(SHARES)
-    assert accounting.quantity != Decimal(SHARES) * SPLIT_RATIO
+    assert accounting.quantity == Decimal(SHARES) * SPLIT_RATIO
 
 
-def test_an_entry_and_exit_around_the_boundary_omits_the_distribution() -> None:
+def test_an_entry_and_exit_around_the_boundary_carries_the_distribution() -> None:
     """
-    Test the round trip: the price change is realised and the distribution is not.
+    Test the round trip: the price movement realises nothing and the distribution is carried.
 
-    The position is opened before both actions and closed after them, at 400.00 and then 200.00, so
-    the realised movement is 20,000 on 100 shares. A total-return account of the same position
-    would carry 19,750, because the shares were held through an ex-date that paid 2.50 each. The
-    difference is the omitted distribution, and it is the whole of the criterion's cash failure.
+    The position is opened before both actions and closed after them, at 400.00 on 100 shares and
+    then at 100.00 on the 400 the split left, so the price movement realises nothing and the 250 the
+    shares were paid at the ex-date is the whole of what a total-return account of the same position
+    carries. The quantity is zero at the end because the exit sells what the split left.
     """
     accounting = run(exit_on_last_bar=True)
-    realised = Decimal(SHARES) * (Decimal(RAW_PRICES[2]) - Decimal(RAW_PRICES[0]))
-    total_return = realised + DISTRIBUTION
 
-    assert accounting.order_prices == (RAW_PRICES[0], RAW_PRICES[2])
-    assert accounting.cash_delta == realised
+    assert accounting.order_prices == (RAW_PRICES[0], RAW_PRICES[-1])
+    assert accounting.cash_delta == DISTRIBUTION
     assert accounting.quantity == Decimal(0)
-    assert accounting.cash_delta != total_return
 
 
-def test_the_accounting_is_identical_without_the_action_data() -> None:
+def test_the_action_data_changes_the_cash_the_run_reports() -> None:
     """
-    Test that the action data changes no number the run reports.
+    Test that the action data changes the numbers, which is what makes the accounting the engine's.
 
-    The same scenario without the action records produces the same cash movement and the same
-    quantity, which is what makes the omission a property of the accounting rather than of the
-    fixture's data.
+    The same scenario without the action records is never restated and never credited, so the exit
+    sells the 100 shares that were opened and the fall in the raw series is realised in place of the
+    distribution.
     """
     with_actions = run(exit_on_last_bar=True)
     without_actions = run(exit_on_last_bar=True, with_actions=False)
+    realised = Decimal(SHARES) * (Decimal(RAW_PRICES[-1]) - Decimal(RAW_PRICES[0]))
 
-    assert with_actions.cash_delta == without_actions.cash_delta
-    assert with_actions.quantity == without_actions.quantity
+    assert with_actions.cash_delta == DISTRIBUTION
+    assert without_actions.cash_delta == realised
+    assert with_actions.quantity == Decimal(0)
+    assert without_actions.quantity == Decimal(0)
     assert without_actions.actions == 0

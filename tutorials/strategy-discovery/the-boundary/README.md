@@ -179,22 +179,22 @@ candidates that name a venue or a module path are refused and recorded, and the 
 from the audit. The milestone that produced them also reports 271 passing tests across the discovery
 unit and acceptance trees and 82 across the discovery integration tests.
 
-The bundle as a whole holds twenty-two entries: eighteen pass with identities whose digests recompute,
-four are failed with their defects named, and none is blocked. The four that fail are not about this
-page's subject, but they are part of the same record, and each is carried by the missing piece rather
-than by the symptom it shows:
+The bundle as a whole holds twenty-two entries: all twenty-two pass with identities whose digests
+recompute, none is failed and none is blocked. Four of them were failed until this change, and they
+are recorded here as what closed them rather than as what is still absent, because the record that
+reports a failure is the same record that has to report the pass replacing it:
 
-| Criterion | What it requires                                                                                | The missing piece                                                                                                                                                                                                         |
-| --------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2         | A rerun is identical, and what is not deterministic is named                                    | the canonical blake3 digest and the seed, build and configuration join cannot be recomputed in Python, because the engine computes the digest from the document it holds and the manifest of decision M1.3 has no binding |
-| 4         | A signal cannot fill before its declared eligibility time, and the test that proves it can fail | the decision-bridge projection resolves eligibility and defers nothing, and the shutdown drain settles a deferred intent against the last known close without notifying the strategy                                      |
-| 6         | Corporate-action accounting reconciles in value and in cash                                     | the corporate-action stage credits no entitlement: a held position moves only by its purchase cost and the distribution it was entitled to is credited to nothing, so the cash leg cannot reconcile                       |
-| 10        | Every number recomputes                                                                         | the engine's canonical digest cannot be recomputed from retained bytes, and the engine-side run manifest of decision M1.3 is unreachable from Python, so the envelope is not complete over its whole span                 |
+| Criterion | What it requires                                                                                | What closed it                                                                                                                                                                                                                                                       |
+| --------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2         | A rerun is identical, and what is not deterministic is named                                    | the engine's canonical digest recomputes from retained bytes through `CanonicalBacktestResult.digest_of_bytes`, and the run manifest is the engine's own through `BacktestNode.get_run_manifest`, retained beside the receipt so a recomputation reconciles against it |
+| 4         | A signal cannot fill before its declared eligibility time, and the test that proves it can fail | the shutdown drain reaches each deferred arrival and settles everything there except a single market order that would increase the position at a price the run observed before that order existed, which stays unexecuted; the bridge path remains the one case the table names |
+| 6         | Corporate-action accounting reconciles in value and in cash                                     | the corporate-action stage settles each action at its own effective instant, credits a dividend's entitlement to the positions that hold the instrument in their settlement currency, and restates a split's quantity and price basis, so the cash leg reconciles      |
+| 10        | Every number recomputes                                                                         | the canonical digest recomputes from the bytes the store retains, and each receipt is reconciled against the manifest its registration retained, so no input is unavailable                                                                                            |
 
-Two of those four, criteria 2 and 10, wait on the same absent join, the run identity that would tie a
-seed, a build and a configuration together at the engine's own boundary. What the passing tests do not
-show is what the design says itself: they are necessary and not sufficient, and an import-graph check
-is evidence rather than proof.
+Criteria 2 and 10 shared the absent join, the run identity that would tie a seed, a build and a
+configuration together at the engine's own boundary, and that join now exists. What the passing tests
+do not show is what the design says itself: they are necessary and not sufficient, and an import-graph
+check is evidence rather than proof.
 
 ## How this project relates to it
 

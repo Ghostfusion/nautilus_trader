@@ -99,12 +99,13 @@ class RunRequest:
 @dataclass(frozen=True)
 class ExperimentOutcome:
     """
-    What one experiment produced: the artifact, the engine's record of it, and its evidence.
+    What one experiment produced: the artifact, its evidence, and the engine's own manifest.
     """
 
     experiment: Experiment
     run: CanonicalRun
     package: EvidencePackage
+    manifest: dict[str, str]
 
 
 def experiment_for(plan: CompiledPlan) -> Experiment:
@@ -169,6 +170,7 @@ def run_experiment(request: RunRequest) -> ExperimentOutcome:
         node.add_strategy(config.id, request.strategy)
         results = node.run()
         canonical = node.get_engine_canonical_result(config.id)
+        manifest = node.get_run_manifest(config.id)
     finally:
         node.dispose()
 
@@ -184,4 +186,4 @@ def run_experiment(request: RunRequest) -> ExperimentOutcome:
         RunIdentity.of(request.plan, snapshot=request.snapshot, seed=request.seed),
     )
 
-    return ExperimentOutcome(experiment=experiment, run=run, package=package)
+    return ExperimentOutcome(experiment=experiment, run=run, package=package, manifest=manifest)

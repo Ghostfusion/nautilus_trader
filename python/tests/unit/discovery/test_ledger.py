@@ -491,11 +491,11 @@ def test_the_recomputation_agrees_across_the_two_stores(tmp_path: Path) -> None:
     assert recomputed.non_deterministic == non_deterministic_digest()
     assert recomputed.counts.statistical_trials == 1
 
-    # Three inputs cannot be recomputed here, and each names the dependency that blocks it: the
-    # engine's canonical digest, the manifest of decision M1.3, and the retained artifact, which
-    # needs the store that holds it.
-    assert len(recomputed.unavailable) == 3
-    assert any("M1.3" in entry for entry in recomputed.unavailable)
+    # One input cannot be recomputed here, and it names the store that blocks it: the retained
+    # artifact. The engine's canonical digest is recomputed from the bytes the ledger holds, and
+    # the receipt is reconciled against the manifest the registration retained beside it, so
+    # neither of those is reported as unavailable any more.
+    assert len(recomputed.unavailable) == 1
     assert any("retained canonical artifact" in entry for entry in recomputed.unavailable)
     with pytest.raises(ValueError, match="not complete"):
         recomputed.require()

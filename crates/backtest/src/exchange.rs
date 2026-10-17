@@ -59,8 +59,8 @@ use nautilus_model::{
         InstrumentStatus, OrderBookDelta, OrderBookDeltas, OrderBookDepth, QuoteTick, TradeTick,
     },
     enums::{
-        AccountType, AggressorSide, BookType, InstrumentCloseType, OmsType, OrderStatus,
-        PositionAdjustmentType,
+        AccountType, AggressorSide, BookType, InstrumentCloseType, OmsType, OrderSide, OrderStatus,
+        OrderType, PositionAdjustmentType,
     },
     events::{FundingSettlement, OrderEventAny, OrderUpdated, PositionAdjusted, PositionEvent},
     identifiers::{AccountId, InstrumentId, Venue},
@@ -105,7 +105,7 @@ impl InflightCommand {
 
     fn matches_scope(&self, ts_now: UnixNanos, scope: SettlementScope) -> bool {
         match scope {
-            SettlementScope::All => true,
+            SettlementScope::All | SettlementScope::Deferred => true,
             SettlementScope::Data(instrument_id) => {
                 self.command.ts_init() == ts_now
                     || instrument_id.is_some_and(|id| self.command.instrument_id() == id)
@@ -181,6 +181,9 @@ pub struct SimulatedExchange {
     last_raw_id: u32,
     pending_funding_rates: BTreeMap<(UnixNanos, InstrumentId), FundingRateUpdate>,
     funding_settlements: BTreeSet<(UnixNanos, InstrumentId)>,
+    /// Corporate actions the exchange has been given before their effective instant, held in
+    /// event-time order until the clock reaches them.
+    pending_corporate_actions: BTreeMap<UnixNanos, Vec<CorporateAction>>,
     leverages: AHashMap<InstrumentId, Decimal>,
     margin_model: Option<MarginModelHandle>,
     modules: Vec<SimulationModuleHandle>,
@@ -296,6 +299,7 @@ impl SimulatedExchange {
             last_raw_id: 0,
             pending_funding_rates: BTreeMap::new(),
             funding_settlements: BTreeSet::new(),
+            pending_corporate_actions: BTreeMap::new(),
             leverages: config.leverages,
             margin_model: config.margin_model,
             modules: config.modules,
@@ -1279,20 +1283,93 @@ impl SimulatedExchange {
         Ok(())
     }
 
-    /// Routes a corporate action to the matching engine.
+    /// Queues a corporate action, which takes effect at its own effective instant.
+    ///
+    /// Corporate-action data is announced in advance, so the exchange is given it at the position
+    /// the announcement holds in the data stream rather than at the instant it takes effect. An
+    /// action that is already due settles here; one that is not is held until
+    /// [`Self::settle_due_corporate_actions`] reaches its effective instant, because a position the
+    /// action predates is not one it is owed on.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an action that is already due fails to settle.
+    pub fn process_corporate_action(
+        &mut self,
+        action: &CorporateAction,
+        now: UnixNanos,
+    ) -> anyhow::Result<()> {
+        if action.effective_ns <= now {
+            return self.settle_corporate_action(action);
+        }
+
+        self.pending_corporate_actions
+            .entry(action.effective_ns)
+            .or_default()
+            .push(action.clone());
+
+        Ok(())
+    }
+
+    /// Settles every queued corporate action whose effective instant the given time has reached.
+    ///
+    /// Actions settle in event-time order, so an earlier split's restatement is the basis of a
+    /// later action's entitlement, and repeated calls settle each action once.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a delisting fails to close its position.
+    pub fn settle_due_corporate_actions(&mut self, now: UnixNanos) -> anyhow::Result<()> {
+        if self.pending_corporate_actions.is_empty() {
+            return Ok(());
+        }
+
+        let due: Vec<UnixNanos> = self
+            .pending_corporate_actions
+            .range(..=now)
+            .map(|(effective_ns, _)| *effective_ns)
+            .collect();
+
+        for effective_ns in due {
+            let Some(actions) = self.pending_corporate_actions.remove(&effective_ns) else {
+                continue;
+            };
+
+            for action in actions {
+                self.settle_corporate_action(&action)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Settles one corporate action at its effective instant.
     ///
     /// A `Delisting` closes any open position through the existing instrument close path, using
-    /// the most recent quote or trade price as the close price; every other action kind is
-    /// auxiliary data and is ignored here.
+    /// the most recent quote or trade price as the close price. A `Dividend` credits its holders
+    /// with the cash they are entitled to, and a `Split` restates the quantity and the price basis
+    /// of the positions that are open. A `SymbolChange` is auxiliary data and is ignored here.
     ///
     /// # Errors
     ///
     /// Returns an error if processing the instrument close fails.
-    pub fn process_corporate_action(&mut self, action: &CorporateAction) -> anyhow::Result<()> {
-        if action.action != CorporateActionType::Delisting {
-            return Ok(());
+    pub fn settle_corporate_action(&mut self, action: &CorporateAction) -> anyhow::Result<()> {
+        match action.action {
+            CorporateActionType::Delisting => self.process_delisting(action),
+            CorporateActionType::Dividend => {
+                self.settle_dividend(action);
+                Ok(())
+            }
+            CorporateActionType::Split => {
+                self.settle_split(action);
+                Ok(())
+            }
+            CorporateActionType::SymbolChange => Ok(()),
         }
+    }
 
+    /// Closes any open position in the instrument a delisting names.
+    fn process_delisting(&mut self, action: &CorporateAction) -> anyhow::Result<()> {
         let Some(close_price) = self
             .matching_engines
             .get(&action.instrument_id)
@@ -1312,6 +1389,253 @@ impl SimulatedExchange {
             action.effective_ns,
             action.effective_ns,
         ))
+    }
+
+    /// Credits every open position in the instrument with the cash a dividend entitles it to.
+    ///
+    /// A dividend pays `action.value` per share on the quantity each position holds at the action's
+    /// effective instant, in the position's own settlement currency, and the credit reaches the
+    /// venue account through the same path a funding settlement uses, so the account state is
+    /// published as it is for any other balance change. The positions themselves are left alone:
+    /// the price series the run replays already carries the ex-date drop, so a distribution
+    /// recognized as realized PnL as well would be counted twice.
+    fn settle_dividend(&mut self, action: &CorporateAction) {
+        let Some(entitlements) = self.position_entitlements(action) else {
+            return;
+        };
+
+        for entitlement in entitlements {
+            if !self.adjust_account(entitlement) {
+                log::error!(
+                    "Cannot settle dividend for {}: the account refused the credit of {}",
+                    action.instrument_id,
+                    entitlement
+                );
+                return;
+            }
+        }
+    }
+
+    /// Restates the quantity and the price basis of every open position a split covers.
+    ///
+    /// A split multiplies the shares a position holds by `action.value` and divides its average
+    /// open price by the same factor, so the position's notional is unchanged by the action, its
+    /// market value follows the restated quantity and its realized PnL at a later exit is the
+    /// return of the restated basis rather than a loss manufactured by the action. The restatement
+    /// is applied to the cache, which is what the portfolio and a strategy read, and no position
+    /// event is published for it: the only restatement event the model carries is built from a
+    /// fill, and this action is not one. A replay that rebuilds positions from recorded events
+    /// therefore rebuilds the quantity as it was opened, which is named as a limit rather than left
+    /// to be discovered.
+    fn settle_split(&self, action: &CorporateAction) {
+        if action.value <= Decimal::ZERO {
+            log::error!(
+                "Cannot settle split for {}: the share ratio {} must be positive",
+                action.instrument_id,
+                action.value
+            );
+            return;
+        }
+
+        let Some(exec_client) = &self.exec_client else {
+            log::warn!(
+                "Cannot settle split for {}: execution client is not registered",
+                action.instrument_id
+            );
+            return;
+        };
+        let account_id = exec_client.account_id();
+        let open_positions = self.venue_positions(action.instrument_id, account_id);
+
+        if open_positions.is_empty() {
+            return;
+        }
+
+        let mut restated = Vec::with_capacity(open_positions.len());
+        for position in open_positions {
+            let Some(quantity) = position
+                .quantity
+                .as_decimal()
+                .checked_mul(action.value)
+                .and_then(|value| Quantity::from_decimal(value).ok())
+            else {
+                log::error!(
+                    "Cannot settle split for position {}: restated quantity is invalid",
+                    position.id
+                );
+                return;
+            };
+            let Some(peak_quantity) = position
+                .peak_qty
+                .as_decimal()
+                .checked_mul(action.value)
+                .and_then(|value| Quantity::from_decimal(value).ok())
+            else {
+                log::error!(
+                    "Cannot settle split for position {}: restated peak quantity is invalid",
+                    position.id
+                );
+                return;
+            };
+            let mut adjusted = position.clone();
+            adjusted.signed_qty = if adjusted.signed_qty < 0.0 {
+                -quantity.as_f64()
+            } else {
+                quantity.as_f64()
+            };
+            adjusted.quantity = quantity;
+            adjusted.peak_qty = peak_quantity;
+            adjusted.avg_px_open /= action.value.as_f64();
+            restated.push((position, adjusted));
+        }
+
+        let mut cache = self.cache.borrow_mut();
+        for (index, (_, adjusted)) in restated.iter().enumerate() {
+            if let Err(e) = cache.update_position(adjusted) {
+                log::error!("Cannot update position {} after split: {e}", adjusted.id);
+
+                // Inclusive of `index`: the failed update commits the restated position to the
+                // cache before attempting to persist it, so the position whose update returned
+                // the error also needs restoring.
+                for (original, _) in restated[..=index].iter().rev() {
+                    if let Err(rollback_error) = cache.update_position(original) {
+                        log::error!(
+                            "Cannot roll back position {} after failed split: {rollback_error}",
+                            original.id
+                        );
+                    }
+                }
+                return;
+            }
+        }
+    }
+
+    /// The cash each open position in the instrument is entitled to for a dividend.
+    ///
+    /// Returns the entitlements aggregated by settlement currency and sorted by currency code, or
+    /// `None` when the execution client is not registered, an entitlement overflows, or the
+    /// aggregation would exceed `Money` bounds. A position that is short is debited, because a
+    /// holder of a short position owes the distribution its counterparty is paid.
+    fn position_entitlements(&self, action: &CorporateAction) -> Option<Vec<Money>> {
+        let Some(exec_client) = &self.exec_client else {
+            log::warn!(
+                "Cannot settle dividend for {}: execution client is not registered",
+                action.instrument_id
+            );
+            return None;
+        };
+        let account_id = exec_client.account_id();
+        let open_positions = self.venue_positions(action.instrument_id, account_id);
+        let mut entitlements: AHashMap<Currency, Money> = AHashMap::new();
+
+        for position in &open_positions {
+            let currency = position.settlement_currency;
+            let side = if position.signed_qty < 0.0 {
+                -Decimal::ONE
+            } else {
+                Decimal::ONE
+            };
+            let Some(amount) = position
+                .quantity
+                .as_decimal()
+                .checked_mul(action.value)
+                .and_then(|value| value.checked_mul(side))
+            else {
+                log::error!(
+                    "Cannot settle dividend for position {}: entitlement overflow",
+                    position.id
+                );
+                return None;
+            };
+            let Ok(entitlement) = Money::from_decimal(amount, currency) else {
+                log::error!(
+                    "Cannot settle dividend for position {}: invalid entitlement amount",
+                    position.id
+                );
+                return None;
+            };
+            let total = if let Some(current) = entitlements.get(&currency).copied() {
+                let Some(total) = current.checked_add(entitlement) else {
+                    log::error!(
+                        "Cannot settle dividend for {}: aggregate entitlement overflow",
+                        action.instrument_id
+                    );
+                    return None;
+                };
+                total
+            } else {
+                entitlement
+            };
+            entitlements.insert(currency, total);
+        }
+
+        let mut values = entitlements.into_values().collect::<Vec<_>>();
+        values.sort_unstable_by_key(|money| money.currency.code);
+        Some(values)
+    }
+
+    /// The open positions the venue holds for one instrument and account.
+    fn venue_positions(&self, instrument_id: InstrumentId, account_id: AccountId) -> Vec<Position> {
+        let cache = self.cache.borrow();
+        cache
+            .positions_open(
+                Some(&self.id),
+                Some(&instrument_id),
+                None,
+                Some(&account_id),
+                None,
+            )
+            .into_iter()
+            .map(|position| position.cloned())
+            .collect()
+    }
+
+    /// Whether the command would fill at a price the run observed before the command's arrival.
+    ///
+    /// Only a single market order does: it executes at the venue's current price, so a settlement
+    /// that reaches an arrival past the run's last observation would fill it from before the order
+    /// existed, and only where it increases the position, because closing what is open at the run's
+    /// final price is what a settlement is for. A limit order rests instead of executing, and a
+    /// modification and an order list settle as they would at any other settlement.
+    fn fills_at_a_stale_price(&self, command: &TradingCommand) -> bool {
+        let TradingCommand::SubmitOrder(submit) = command else {
+            return false;
+        };
+
+        submit.order_init.order_type == OrderType::Market
+            && !self.reduces_exposure(
+                submit.instrument_id,
+                submit.order_init.order_side,
+                submit.order_init.quantity.as_f64(),
+            )
+    }
+
+    /// Whether an order of the given side and quantity reduces the net position the venue holds for
+    /// the instrument.
+    ///
+    /// An order that opens a position where the venue holds none, or adds to one it already holds,
+    /// does not reduce it, and a reversal does not either: it reduces one side and opens the other.
+    fn reduces_exposure(
+        &self,
+        instrument_id: InstrumentId,
+        side: OrderSide,
+        quantity: f64,
+    ) -> bool {
+        let Some(exec_client) = &self.exec_client else {
+            return false;
+        };
+        let net: f64 = self
+            .venue_positions(instrument_id, exec_client.account_id())
+            .iter()
+            .map(|position| position.signed_qty)
+            .sum();
+        let signed = if side == OrderSide::Buy {
+            quantity
+        } else {
+            -quantity
+        };
+
+        (net + signed).abs() < net.abs()
     }
 
     /// Processes a funding rate update.
@@ -1776,6 +2100,13 @@ impl SimulatedExchange {
                 continue;
             }
 
+            // A settlement that reaches an arrival the run's data never reached does not execute a
+            // command that would fill at a price from before its arrival: the intent stays
+            // unexecuted and the run reports the order as it stands.
+            if scope.is_deferred() && self.fills_at_a_stale_price(&inflight.command) {
+                continue;
+            }
+
             processed_timestamps.insert(inflight.timestamp);
             self.message_queue
                 .push_back((inflight.command, inflight.rank));
@@ -1888,6 +2219,7 @@ impl SimulatedExchange {
 
         self.pending_funding_rates.clear();
         self.funding_settlements.clear();
+        self.pending_corporate_actions.clear();
         self.message_queue.clear();
         self.inflight_queue.clear();
         self.inflight_orders.clear();
@@ -2241,6 +2573,18 @@ impl SimulatedExchange {
 pub(crate) enum SettlementScope {
     All,
     Data(Option<InstrumentId>),
+    /// A settlement whose clock reaches an arrival the run's own data never reached, so a command
+    /// that would execute at the last observed price is not executed. Anything else settles as it
+    /// would at any other settlement.
+    Deferred,
+}
+
+impl SettlementScope {
+    /// Whether the settlement reaches an arrival the run's data never reached.
+    #[must_use]
+    const fn is_deferred(self) -> bool {
+        matches!(self, Self::Deferred)
+    }
 }
 
 /// Marks the window in which order events are routed to the deferred handler, and clears

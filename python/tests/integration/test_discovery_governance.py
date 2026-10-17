@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+from nautilus_trader.backtest import CanonicalBacktestResult
 from nautilus_trader.discovery.custody import ConfirmationCustody
 from nautilus_trader.discovery.custody import CustodyError
 from nautilus_trader.discovery.custody import CustodyRefusalCode
@@ -65,7 +66,11 @@ from nautilus_trader.discovery.ledger import recompute
 from nautilus_trader.discovery.ledger import research_family_id
 from nautilus_trader.discovery.ledger import trial_mapping
 from nautilus_trader.discovery.ledger import verify_bundle
+from nautilus_trader.optimization.persistence import ExperimentStore
+from nautilus_trader.optimization.report import ExperimentResult
+from nautilus_trader.optimization.runner import CanonicalRun
 from nautilus_trader.optimization.significance import TrialDependence
+from nautilus_trader.optimization.space import Experiment
 from nautilus_trader.optimization.splits import LeakagePolicy
 from nautilus_trader.optimization.splits import SplitContract
 
@@ -86,7 +91,10 @@ MANIFEST = {
     "configuration_digest": "sha256:" + "f" * 64,
     "seed": 1,
 }
-ARTIFACT = "blake3:" + "1" * 8
+# The canonical document the fixture run retained, and the digest the engine's own hashing step
+# gives it, so the recomputation verifies content it can read rather than a literal.
+CANONICAL_DOCUMENT = b'{"schema":"nautilus.canonical/v1","fixture":"FX-M4-1"}'
+ARTIFACT = CanonicalBacktestResult.digest_of_bytes(CANONICAL_DOCUMENT)
 
 SECOND = 1_000_000_000
 
@@ -156,13 +164,31 @@ def package(candidate: str = CANDIDATE, *, status: str = "completed") -> Evidenc
         registry_digest="sha256:0" * 4,
         experiment_digest="sha256:1" * 4,
         canonical_digest=ARTIFACT,
-        canonical_bytes=b"{}",
+        canonical_bytes=CANONICAL_DOCUMENT,
         metric_values={"Sharpe Ratio": 1.5},
         engine_version=MANIFEST["build_identity"],
         snapshot="snapshot-1",
         seed=1,
         status=status,
     )
+
+
+def canonical_store(directory: Path) -> ExperimentStore:
+    """Return a store that retains the canonical document the fixture run produced."""
+    store = ExperimentStore(directory)
+    store.write_result(
+        ExperimentResult(
+            run=CanonicalRun(
+                Experiment({"fixture": "FX-M4-1"}),
+                ARTIFACT,
+                {"Sharpe Ratio": 1.5},
+                CANONICAL_DOCUMENT,
+            ),
+            score=1.5,
+            constraints_satisfied=True,
+        ),
+    )
+    return store
 
 
 def envelope(*, unresolved: bool = False) -> ReproducibilityEnvelope:
@@ -599,14 +625,13 @@ def test_fx_m4_1_and_fx_m4_6_every_number_recomputes_over_the_envelope(tmp_path:
     ledger = DiscoveryLedger(tmp_path / "ledger")
     ledger.append(package())
 
-    recomputed = recompute(ledger, inventory=inventory, envelope=envelope())
-    assert recomputed.agrees is False, "two inputs cannot be recomputed here and are named"
+    store = canonical_store(tmp_path)
+    recomputed = recompute(ledger, inventory=inventory, store=store, envelope=envelope())
+    assert recomputed.agrees is True, "every number recomputes and nothing is unavailable"
     assert recomputed.disagreements == ()
     assert recomputed.unresolved == ()
     assert recomputed.counts.statistical_trials == 1
-    assert len(recomputed.unavailable) == 3
-    assert any("M1.3" in entry for entry in recomputed.unavailable)
-    assert any("blake3" in entry for entry in recomputed.unavailable)
+    assert recomputed.unavailable == ()
 
     # A reference whose content is gone makes the package incomplete rather than passing.
     incomplete = recompute(ledger, inventory=inventory, envelope=envelope(unresolved=True))
@@ -633,8 +658,7 @@ def test_fx_m4_1_and_fx_m4_6_every_number_recomputes_over_the_envelope(tmp_path:
                 "requirement_source": "design Section 15 criterion 10",
                 "fixture": "FX-M4-6",
                 "milestone": "M4",
-                "status": "blocked",
-                "dependency": "the engine-side manifest of decision M1.3",
+                "status": "passed",
                 "identity": {
                     "digest": bundle_identity(components),
                     "components": components,
@@ -642,7 +666,7 @@ def test_fx_m4_1_and_fx_m4_6_every_number_recomputes_over_the_envelope(tmp_path:
                 "test_or_fixture": "tests/x.py",
                 "procedure": "pytest tests/x.py",
                 "expected": "the numbers recompute",
-                "observed": "they recompute, with two inputs named",
+                "observed": "they recompute, with nothing unavailable",
                 "receipts": {
                     "run": {**recorded.to_dict(), "digest": recorded.digest()},
                     "artifacts": [{"reference": ARTIFACT, "digest": ARTIFACT}],

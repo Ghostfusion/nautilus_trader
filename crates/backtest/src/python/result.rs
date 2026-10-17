@@ -225,4 +225,18 @@ impl CanonicalBacktestResult {
             )
         }))
     }
+
+    /// Returns `blake3:` followed by the BLAKE3 digest of the given canonical bytes.
+    ///
+    /// The digest this class computes is taken over the canonical document it holds, so a caller
+    /// that retained those bytes can recompute it without the document.
+    #[staticmethod]
+    #[pyo3(name = "digest_of_bytes")]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "PyBackedBytes is required for generated Python bytes stubs"
+    )]
+    fn py_digest_of_bytes(bytes: PyBackedBytes) -> String {
+        format!("blake3:{}", blake3::hash(bytes.as_ref()).to_hex())
+    }
 }

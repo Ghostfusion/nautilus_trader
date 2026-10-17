@@ -68,6 +68,43 @@ pub struct BacktestNode {
     disposed: bool,
 }
 
+/// The engine's own record of the identity of one backtest run.
+///
+/// The manifest is what a research artifact is joined to: it names the run, the configuration and
+/// the seed it resolved, and the build that produced it, and it carries the digest of that
+/// declaration so a later reader checks it rather than trusts it. Its key names are the field names
+/// a receipt carries, so a receipt reconciles against it directly.
+#[derive(Debug, Clone)]
+pub struct RunManifest {
+    /// The identity of the run, which is its run configuration's ID.
+    pub run_id: String,
+    /// The build the run was produced with.
+    pub build_identity: String,
+    /// The digest of the configuration the run resolved.
+    pub configuration_digest: String,
+    /// The seed the run declared, or an empty string when it declared none.
+    pub seed: String,
+    /// The digest of this manifest's own declaration.
+    pub manifest_digest: String,
+}
+
+impl RunManifest {
+    /// Returns the manifest as the declaration a receipt reconciles against.
+    #[must_use]
+    pub fn to_declaration(&self) -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("build_identity".to_string(), self.build_identity.clone()),
+            (
+                "configuration_digest".to_string(),
+                self.configuration_digest.clone(),
+            ),
+            ("manifest_digest".to_string(), self.manifest_digest.clone()),
+            ("run_id".to_string(), self.run_id.clone()),
+            ("seed".to_string(), self.seed.clone()),
+        ])
+    }
+}
+
 impl BacktestNode {
     /// Creates a new [`BacktestNode`] instance.
     ///
@@ -147,6 +184,118 @@ impl BacktestNode {
     #[must_use]
     pub fn get_engines(&self) -> Vec<&BacktestEngine> {
         self.engines.values().collect()
+    }
+
+    /// Returns the engine's own manifest of the run for the given run config.
+    ///
+    /// The manifest is built from the run configuration this node was given rather than from a
+    /// caller's copy of it, so its configuration digest is the engine's own, and the run must have
+    /// an engine, so no manifest is emitted for a run that never happened. The configuration digest
+    /// covers the engine configuration the run resolved and the venue and data identities it
+    /// resolved, because a model handle is not serializable: what identifies it is the configuration
+    /// that selected it rather than the handle itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No engine exists for the run config ID.
+    /// - The run configuration cannot be rendered canonically.
+    pub fn run_manifest(&self, run_config_id: &str) -> anyhow::Result<RunManifest> {
+        if !self.engines.contains_key(run_config_id) {
+            anyhow::bail!("No engine exists for run config ID: {run_config_id}");
+        }
+
+        let Some(config) = self
+            .configs
+            .iter()
+            .find(|config| config.id() == run_config_id)
+        else {
+            anyhow::bail!("Unknown run config ID: {run_config_id}");
+        };
+
+        let run_id = config.id().to_string();
+        let build_identity = nautilus_common::logging::headers::build_identity();
+        let seed = config
+            .engine()
+            .random_seed
+            .map_or(String::new(), |seed| seed.to_string());
+        let configuration_digest = format!(
+            "blake3:{}",
+            blake3::hash(Self::canonical_configuration(config)?.as_bytes()).to_hex()
+        );
+
+        let declaration = BTreeMap::from([
+            ("run_id".to_string(), run_id.clone()),
+            ("build_identity".to_string(), build_identity.clone()),
+            (
+                "configuration_digest".to_string(),
+                configuration_digest.clone(),
+            ),
+            ("seed".to_string(), seed.clone()),
+        ]);
+        let manifest_digest = format!(
+            "blake3:{}",
+            blake3::hash(
+                serde_json::to_string(&declaration)
+                    .map_err(|e| anyhow::anyhow!("Cannot serialize run manifest: {e}"))?
+                    .as_bytes(),
+            )
+            .to_hex()
+        );
+
+        Ok(RunManifest {
+            run_id,
+            build_identity,
+            configuration_digest,
+            seed,
+            manifest_digest,
+        })
+    }
+
+    /// Returns the canonical declaration of a run configuration, which is what its digest covers.
+    ///
+    /// The engine configuration is serialized whole and the venue and data identities are declared
+    /// beside it, so two runs that resolved different venues, accounts or instruments carry
+    /// different digests.
+    fn canonical_configuration(config: &BacktestRunConfig) -> anyhow::Result<String> {
+        let venues = config
+            .venues()
+            .iter()
+            .map(|venue| {
+                serde_json::json!({
+                    "name": venue.name().to_string(),
+                    "oms_type": venue.oms_type().to_string(),
+                    "account_type": venue.account_type().to_string(),
+                    "starting_balances": venue.starting_balances(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let data = config
+            .data()
+            .iter()
+            .map(|data| {
+                serde_json::json!({
+                    "instrument_id": data
+                        .instrument_id()
+                        .map_or(String::new(), |instrument_id| instrument_id.to_string()),
+                    "instrument_ids": data.instrument_ids().map_or_else(Vec::new, |ids| {
+                        ids.iter().map(ToString::to_string).collect::<Vec<_>>()
+                    }),
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut value = serde_json::json!({
+            "engine": serde_json::to_value(config.engine())
+                .map_err(|e| anyhow::anyhow!("Cannot serialize engine configuration: {e}"))?,
+            "venues": venues,
+            "data": data,
+            "chunk_size": config.chunk_size(),
+        });
+
+        crate::result::canonicalize_document(&mut value)?;
+
+        serde_json::to_string(&value)
+            .map_err(|e| anyhow::anyhow!("Cannot render canonical run configuration: {e}"))
     }
 
     /// Runs all configured backtests and returns results.

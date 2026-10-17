@@ -365,21 +365,40 @@ to change, and four smaller findings are named and carried instead. The fixtures
 | Is a fill fabricated where the case table forbids one?        | Yes: the shutdown drain settles a deferred intent against the last known close and does not notify the strategy                                  | The single-bar case reports a filled order with no market data after the arrival                                         |
 | Is out-of-order input refused?                                | No: the stream is sorted by `ts_init` before dispatch, and the data engine's sequence validation changes nothing because it runs after that sort | The reordered-bar fixtures replay in ascending initialization order, with validation both off and on                     |
 
-Criterion 4 is therefore proved for the mechanism the compiler will emit, and not proved as written.
-The pre-enforcement half fails as the design requires, which is what makes the test discriminating:
-with no deferral the fill carries the decision bar's own timestamp and that bar's own close. The
-enforced half holds for the latency model. Two cases disagree with the table, the bridge path and the
-shutdown drain, and the equality of eligibility in time with eligibility in price depends on the
-snapshot rather than on the engine. The compiler-side half of case A, refusing a specification that
-decides at a close and executes at it, cannot be evaluated before M3 and is carried there.
+Criterion 4 is met except for the bridge path, and it was proved for the mechanism the compiler will
+emit. The pre-enforcement half fails as the design requires, which is what makes the test
+discriminating: with no deferral the fill carries the decision bar's own timestamp and that bar's own
+close. The enforced half holds for the latency model. The shutdown drain was the second case that
+disagreed with the table, and it is closed here. The drain still reaches the arrival of every command
+the latency model deferred past the last data tick, because that settlement point is the behaviour
+upstream's own tests assert, but it no longer executes a single market order that would increase the
+position at a price the run observed before that order existed. Such an intent stays unexecuted, so a
+deferred intent with no subsequent market data is reported as it stands, priced by nothing, the
+account is not debited, and the strategy is not told of a fill it never saw. A cancel and a position
+close emitted in `on_stop` are still processed through their own latency, which the crate's own
+settlement tests hold. The bridge path remains the one disagreement: it resolves an artifact's
+eligibility to the next session's open and stamps the signal with it, but its submission path holds no
+clock, so its caller owns any waiting. The equality of eligibility in time with eligibility in price
+depends on the snapshot rather than on the engine. The compiler-side half of case A, refusing a
+specification that decides at a close and executes at it, cannot be evaluated before M3 and is carried
+there.
 
-Criterion 6 does not hold, and its failure is now measured rather than expected. The accounting
-fixture reconciles the value leg, which carries both actions, and cannot reconcile the cash leg: a
-held position moves only by its purchase cost, the distribution it was entitled to is credited to
-nothing, and a round trip across the boundary realises 20,000 where a total-return account of the same
-position carries 19,750. The defect is the absent upstream dividend cash-flow path, which design
-Section 18 question 3 and decision SD12 already name as the equity-readiness prerequisite, and the
-equity-readiness statement stays withheld rather than softened.
+Criterion 6 holds. The accounting fixture reconciles the value leg and the cash leg together: the
+corporate-action stage settles each action at its own effective instant rather than at the position
+its announcement holds in the data stream, which is what made the earlier reading empty, a dividend
+credits the entitlement of the positions that hold the instrument in their settlement currency, and a
+split restates the position quantity and its price basis. The held dividend credits the 250 the shares
+were entitled to at the ex-date, the split leaves the position as 400 shares at a quarter of the
+price, and the round trip realises nothing where the same run without the action records realises
+-30,000, so the distribution is the whole of what a total-return account carries. Two limits are named
+rather than left implicit: a dividend credits cash and recognises no profit and loss, because the raw
+series the run replays already carries the ex-date drop and recognising it again would count the
+distribution twice, and a split publishes no position event, so an event-store replay that rebuilds
+positions from recorded events rebuilds the quantity as opened. The fixture was also internally
+inconsistent before this change and was corrected with it: a four-for-one split was priced as a
+two-for-one, the ex-date fell after the split so the entitlement basis was the restated quantity
+rather than the 100 shares the earlier numbers assumed, and the exit sold a fixed 100 shares against a
+400-share position.
 
 One platform request follows, and one finding is corrected here rather than filed.
 
@@ -395,39 +414,39 @@ have reasoned from. The one-bar reproduction is
 `python/tests/integration/test_discovery_timing_contract.py`, case
 `test_a_deferred_intent_with_no_subsequent_market_data_is_filled_at_shutdown`.
 
-The second is the dividend cash-flow path that criterion 6 needs, and it is not an upstream request.
-The corporate-action stage is this fork's own work: `crates/backtest/src/adjustment.rs` and
+The second was the dividend cash-flow path that criterion 6 needed, and it was not an upstream
+request. The corporate-action stage is this fork's own work: `crates/backtest/src/adjustment.rs` and
 `crates/model/src/data/adjustment.rs` are absent from upstream `develop`, upstream's
 `crates/backtest/src/exchange.rs` carries no `CorporateAction` reference at all, and the two commits
 that added the stage are in this fork's history and not upstream's. Upstream therefore has no
 capability to change, and its own open request for the general case is issue 3307. The gap is
-fork-side, closed by whoever owns the stage, and the capability row of Section 14 is where it is
-recorded.
+fork-side, closed by whoever owns the stage, and the capability row of Section 14 records it as
+closed.
 
-The decision on that gap is to leave it open rather than to close it here. Criterion 6 stays `failed`
-for the reason the fixture measures, the equity-readiness statement stays withheld rather than
-softened, and this plan's own response stands: claims are made on synthetic fixtures or on an
-instrument subset whose accounting is known to be correct, and the limitation is reported with every
-result. Crediting entitlements is a platform change inside the corporate-action stage, with the cash
-ledger, the position quantity and the adjustment series all moving together and the reconciliation
-having to agree with all three, so it is its own change rather than part of a discovery milestone;
-and if the capability is ever wanted outside this fork, offering the stage upstream is the route
-issue 3307 describes. The withholding is what the bundle already enforces: the criterion 6 entry
-carries its measured failure and the accounting fixture pins the numbers it rests on.
+The decision on that gap is now to close it, and the change it took is the one described above.
+Criterion 6's bundle entry carries its pass with the identity, procedure, expected result and
+receipts Section 15 records, and the equity-readiness statement is no longer withheld on this ground.
+The plan's earlier response stands for every other limitation: claims are made on synthetic fixtures
+or on an instrument subset whose accounting is known to be correct, and the limitation is reported
+with every result. Crediting entitlements is a platform change inside the corporate-action stage, and
+the reconciliation now agrees with the cash ledger, the position quantity and the adjustment series
+together. If the capability is ever wanted outside this fork, offering the stage upstream is still the
+route issue 3307 describes.
 
-M2 stays open on the request and the gap rather than on the timing contract, and the M3 blockage is not the
-one SD15 describes. That rule fires when neither mechanism enforces the contract, and one does, so
-the compiler emits a latency deferral and never the bridge pattern alone. The bridge remains useful
-for what it does resolve, an artifact's availability, and its caller owns any waiting rather than the
-projection. What M3 cannot proceed without is the owner's authorisation, which is per milestone, and
-the compiler's refusal half of case A, which is its own work.
+M2 stays open on the request rather than on the timing contract or the accounting gap, and the M3
+blockage is not the one SD15 describes. That rule fires when neither mechanism enforces the contract,
+and one does, so the compiler emits a latency deferral and never the bridge pattern alone. The bridge
+remains useful for what it does resolve, an artifact's availability, and its caller owns any waiting
+rather than the projection. What M3 cannot proceed without is the owner's authorisation, which is per
+milestone, and the compiler's refusal half of case A, which is its own work.
 
 One status transition needs naming, because Section 4.2 lists criterion 6 as its example of a blocked
-entry. That example predates a fixture existing. Now that one does and has been run without meeting
-its pass condition, the status is `failed` by the same section's definition, which is an evaluation
-against a real fixture, and the dependency that causes it is recorded as the defect rather than as
-the block. Criterion 4 moves on the same reasoning, and the entries carry their identity, procedure,
-expected and observed results and receipts in Section 15's bundle.
+entry. That example predates a fixture existing, and the section's definition then carried the entry
+through `failed`, which is an evaluation against a real fixture, to `passed` once the corporate-action
+stage settled the entitlements the fixture reconciles. Criterion 4 moves on the same reasoning, from
+the measured disagreement the drain produced to a pass, with the bridge case it still names. The
+entries carry their identity, procedure, expected and observed results and receipts in Section 15's
+bundle.
 
 ## 9. M3: core
 
@@ -601,21 +620,22 @@ trial and a tampered receipt failing closed. Criterion 2's recomputation holds f
 entry identities and the declared non-deterministic components, and criterion 10's envelope resolves
 every reference it declares.
 
-| Criterion | Status | What the entry records                                                                               |
-| --------- | ------ | ---------------------------------------------------------------------------------------------------- |
-| 2         | Failed | The recomputation agrees, but the seed, build and configuration join of decision M1.3 does not exist |
-| 7         | Passed | Four separate counts, lineage, idempotency and refused illegal transitions over one campaign         |
-| 8         | Passed | `ADMIT`, `REDUCE`, `REJECT` and an unestimable input, each with its arithmetic and its sensitivity   |
-| 9         | Passed | The five negative cases, the spent reservation, the bound verdict and the worker-environment check   |
-| 10        | Failed | The envelope resolves, but the engine's canonical digest cannot be recomputed from retained bytes    |
-| 11        | Passed | Seven classes of control, detected and missed sets reported, PBO left as a diagnostic                |
-| 18        | Passed | Interruption, concurrency, repetition, a tampered receipt and a checkpoint outside the write path    |
+| Criterion | Status | What the entry records                                                                                                                                               |
+| --------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2         | Passed | The recomputation agrees: the digest recomputes from retained bytes and each receipt reconciles against the manifest its registration retained                       |
+| 7         | Passed | Four separate counts, lineage, idempotency and refused illegal transitions over one campaign                                                                         |
+| 8         | Passed | `ADMIT`, `REDUCE`, `REJECT` and an unestimable input, each with its arithmetic and its sensitivity                                                                   |
+| 9         | Passed | The five negative cases, the spent reservation, the bound verdict and the worker-environment check                                                                   |
+| 10        | Passed | The envelope resolves, the engine's canonical digest recomputes from the bytes the store retains, and every receipt reconciles against the manifest the run retained |
+| 11        | Passed | Seven classes of control, detected and missed sets reported, PBO left as a diagnostic                                                                                |
+| 18        | Passed | Interruption, concurrency, repetition, a tampered receipt and a checkpoint outside the write path                                                                    |
 
 Criterion 5 is satisfied by the same suite: the planted defects of `FX-M4-2` are the leakage, cost,
 concentration and parameter-spike controls, and each is caught by the gate the design names for it.
-The bundle's entries for criteria 2 and 10 are therefore `failed` rather than blocked, which is
-Section 4.2's definition: both were evaluated against a real fixture and neither met its pass
-condition, and each names the defect that causes it.
+The bundle's entries for criteria 2 and 10 were `failed` rather than blocked, which is Section 4.2's
+definition: both were evaluated against a real fixture and neither met its pass condition, and each
+named the defect that caused it. Both now pass, and each entry's defect field records what the
+recomputation previously could not do rather than what it still cannot.
 
 Seven findings are carried, and each is recorded rather than repaired silently.
 
@@ -627,16 +647,23 @@ correction is per-period. The gate therefore consumes those inputs as declared e
 retaining a per-trial return series is an M5 input-list item rather than a change to the entries'
 identity.
 
-The second is the receipt's authority. Reconciliation compares every joined field and fails closed,
-but until decision M1.3's narrow upstream change exists, the manifest it compares against is the one
-the caller declares. The check is real and its tampered-receipt fixture is discriminating; what it
-cannot yet claim is that the manifest is the engine's own.
+The second is the receipt's authority, and this change settles it. Reconciliation compares every
+joined field and fails closed, and the manifest it compares against is now the engine's own:
+`BacktestNode.get_run_manifest` returns the run's identity, build, configuration digest, seed and
+manifest digest, the runner reads it from the engine, and the registration retains it beside the
+receipt, so a recomputation checks a receipt against what the run recorded rather than against a
+document the caller declares. What the check still rests on is the runner reading the manifest rather
+than a caller copying one, which the round-trip fixture evidence covers.
 
-The third is what cannot be recomputed, and it is what makes criteria 2 and 10 `failed`. The
-extension computes the engine's canonical blake3 digest from the document it holds and exposes no
-surface that recomputes it from retained bytes, so the ledger records both the digest and the
-document's SHA-256 and the recomputation verifies the latter. A narrow Rust-side hashing step, in the
-shape SD16 prefers, would close it.
+The third is what could not be recomputed, and this change closes it. The extension computed the
+engine's canonical blake3 digest from the document it held and exposed no surface that recomputed it
+from retained bytes, so the ledger recorded both the digest and the document's SHA-256 and the
+recomputation verified the latter. The narrow Rust-side hashing step SD16 prefers now exists as
+`CanonicalBacktestResult.digest_of_bytes`, and the recomputation recomputes the digest from the bytes
+the store retains. A second defect surfaced with it: the ledger recorded `canonical_bytes_sha256` as
+the digest of a wrapper document while the recomputation hashes the bytes themselves, so the recorded
+number could never have matched the recomputed one, and it stayed hidden while no store was supplied
+to resolve the bytes at all. The record is now the hash of the bytes it names.
 
 The fourth is a narrowing rather than a defect. Custody permits a replacement candidate's read only
 under an exploratory label, which travels with the access record and consumes nothing, and a
@@ -852,35 +879,36 @@ required, and the state. The vocabulary is small on purpose:
 | `upstream change required`  | The capability exists in the repository and is unreachable from Python, so the row cannot compose at all   |
 | `platform decision`         | The row depends on a choice the design does not make, such as which live data adapter a shadow period uses |
 
-| Capability to compose                                        | Public entry point                                                                        | How verified                                                                                                              | Fixture                                                               | Semantics still missing                                                                                                                                                       | Upstream change                                                  | State                       |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------- |
-| Point-in-time panel, features, labels, membership, operators | `nautilus_trader.research`; `crates/research/src/{panel,feature,label,operators}.rs`      | Import check: the module exposes `Panel`, `PanelRow`, `FeatureValue`, `MembershipSeries`, `MembershipInterval` only       | `test_discovery_composition.py`                                       | The feature compiler, forward labels, cross-sectional operators and the dataset contract have no binding; availability semantics remain untested                              | Yes, for the feature registry                                    | `partial`                   |
-| Signal-quality measurement                                   | `crates/research/src/measurement.rs`                                                      | Import check: absent from the module; the file contains no pyo3 code                                                      | None; the absence is pinned in `test_discovery_engine_composition.py` | Information coefficient, bounds, parameter recovery, regime restriction and the jackknife error                                                                               | Yes                                                              | `upstream change required`  |
-| Portfolio statistics and objective registry                  | `nautilus_trader.analysis`                                                                | Import check, 115 names; 57 metric ids counted, of which 47 are registered as built-in statistics                         | `test_discovery_composition.py`                                       | `supported_metric_names` is not exposed, and per-period reports need a `PerformancePeriod` Python cannot construct                                                            | Only if per-period reporting is needed                           | `verified with a named gap` |
-| Split contracts with purge and embargo                       | `optimization` (`SplitContract`, `LeakagePolicy`, `Split`, `LabelOverlapRule`)            | Constructed, and a split produced the declared bounds                                                                     | `test_discovery_composition.py`                                       | None                                                                                                                                                                          | No                                                               | `verified`                  |
-| Walk-forward windows and stages                              | `optimization.stages` (`walk_forward_windows`, the stage classes)                         | Called; the windows were produced and the stage dataclasses constructed                                                   | `test_discovery_composition.py`                                       | A stage's `run()` executes backtests, so the executing path is row 13 rather than this row                                                                                    | No                                                               | `verified`                  |
-| Deflated Sharpe ratio and trial provenance                   | `optimization.significance`                                                               | Six functions called, including `deflated_sharpe_ratio`, `deflated_sharpe_bounds` and `trial_provenance_from_runs`        | `test_discovery_composition.py`                                       | The effective trial-count methodology is declared by the caller, which the mapping of Section 5.3 now supplies                                                                | No                                                               | `verified`                  |
-| Permutation test                                             | `optimization.permutation`                                                                | Called; a versioned result record with its unit and direction was returned                                                | `test_discovery_composition.py`                                       | None                                                                                                                                                                          | No                                                               | `verified`                  |
-| Study, trial and universe identity                           | `optimization.identity`, `optimization.space`                                             | Constructed; digests and identifiers printed and stable across two constructions                                          | `test_discovery_composition.py`                                       | `digest_of` is reachable only as `optimization.space.digest_of`, is not in the package `__all__`, and takes a flat mapping; nested-payload digests are private to each module | No                                                               | `verified with a named gap` |
-| Digest-keyed artifact store                                  | `optimization.persistence.ExperimentStore`                                                | The key layout was read from source, and construction requires a writable directory, so the fixture uses one              | `test_discovery_composition.py`                                       | No receipt type and no receipt key, which is decision M1.3                                                                                                                    | No                                                               | `verified with a named gap` |
-| Process fan-out and memory budget                            | `optimization.concurrency`                                                                | The policy and the budget arithmetic were called                                                                          | `test_discovery_composition.py`                                       | `execute_experiments` needs a catalog and real runs, so the pool itself is not exercised here                                                                                 | No                                                               | `verified`                  |
-| Capability probes                                            | `optimization.capability`                                                                 | Five probes called, each returning a capability with a code from the closed set                                           | `test_discovery_composition.py`                                       | Three probes need the label and screen-family modules, which are constructible but not wired                                                                                  | No                                                               | `verified`                  |
-| Declared execution assumptions                               | `optimization.assumptions`                                                                | `BarAmbiguityPolicy.declared_default()` constructed with a stable digest                                                  | `test_discovery_composition.py`                                       | None                                                                                                                                                                          | No                                                               | `verified`                  |
-| One backtest per experiment with identity                    | `optimization.BacktestRunner`, `optimization.CanonicalRun`                                | Constructed, and one engine run was executed to completion over the bundled data                                          | `test_discovery_engine_composition.py`                                | `CanonicalRun` carries the experiment, the canonical digest, metric values and the canonical bytes, and no seed, build or manifest identity                                   | Decision M1.3                                                    | `verified with a named gap` |
-| Deterministic result comparison                              | `CanonicalBacktestResult`                                                                 | Two identical runs compared by `.digest()` and `first_divergence`; a changed starting balance produced a divergence       | `test_discovery_engine_composition.py`                                | No Python constructor and no equality operator, and the class cannot be deserialised from Python                                                                              | No                                                               | `verified`                  |
-| Strategy injection as a live object                          | `BacktestEngine.add_strategy`, `BacktestNode.add_strategy`                                | A locally defined `Strategy` subclass was injected with no import path and ran; a non-strategy object was refused         | `test_discovery_engine_composition.py`                                | The instance must carry `.config` for strategy id and OMS type propagation                                                                                                    | No                                                               | `verified`                  |
-| Targets, sizing and reconciliation                           | `Target.from_quantity`, `from_weight`, `from_notional`; `Strategy.enable_target_pipeline` | Constructed, and the pipeline config accepted                                                                             | `test_discovery_engine_composition.py`                                | `TargetValue` is a read-only view; `TargetPipeline`, `TargetConstruction` and `TargetReconciler` have no binding                                                              | Only if the pipeline must be driven outside a strategy           | `partial`                   |
-| Corporate-action records and adjustment arithmetic           | `model.CorporateAction`, `AdjustmentSeries`, `ParquetDataCatalog.write_corporate_actions` | Constructed, and the split factor, dividend series and adjusted price arithmetic were read                                | `test_discovery_engine_composition.py`                                | No dividend cash-flow path: a dividend adjusts prices and is published as an event, and nothing credits an account                                                            | No: the stage is this fork's own, absent from upstream `develop` | `partial`                   |
-| Realism models: fill, fee, latency, slippage, impact         | `nautilus_trader.execution`                                                               | Each family was constructed from Python                                                                                   | `test_discovery_engine_composition.py`                                | Fee, fill and latency have Python base classes and slippage and market impact do not, so the plugin path is asymmetric; one latency model exists                              | No                                                               | `verified with a named gap` |
-| Engine run manifest and entry hashes                         | `crates/event_store/` (`manifest.rs`, `entry.rs`, `hash.rs`, `verifier/`)                 | The crate has no pyo3 code, is an rlib-only target, is not a dependency of the extension, and contributes no symbol to it | `test_discovery_engine_composition.py`                                | The whole manifest, the entry hash and the verifier; the only non-Rust interface is the verify binary                                                                         | Yes                                                              | `upstream change required`  |
-| Decision-to-next-session projection                          | `decision_bridge.projection.project`                                                      | Signature read, and the in-tree decision-bridge tests exercise the projection                                             | `test_discovery_composition.py`                                       | The context and the config are supplied by the caller, including the received time and the calendar                                                                           | No                                                               | `verified`                  |
-| Sandbox venue for shadow fills                               | `adapters.sandbox` (`SandboxExecutionClientConfig`, `SandboxExecutionClientFactory`)      | Import check: the config and the factory are bound                                                                        | `test_discovery_engine_composition.py`                                | The fill-simulating client itself is Rust-only, and the package exports no data-client factory                                                                                | Yes, for a data path                                             | `partial`                   |
-| Live data path for shadow                                    | The venue adapters under `nautilus_trader.adapters`                                       | Import check of each adapter module: every venue adapter exports a data-client factory and config                         | `test_discovery_engine_composition.py`                                | The design names no adapter, and several require credentials or a running gateway                                                                                             | Platform decision                                                | `platform decision`         |
+| Capability to compose                                        | Public entry point                                                                        | How verified                                                                                                              | Fixture                                                               | Semantics still missing                                                                                                                                                                                                                    | Upstream change                                                  | State                       |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | --------------------------- |
+| Point-in-time panel, features, labels, membership, operators | `nautilus_trader.research`; `crates/research/src/{panel,feature,label,operators}.rs`      | Import check: the module exposes `Panel`, `PanelRow`, `FeatureValue`, `MembershipSeries`, `MembershipInterval` only       | `test_discovery_composition.py`                                       | The feature compiler, forward labels, cross-sectional operators and the dataset contract have no binding; availability semantics remain untested                                                                                           | Yes, for the feature registry                                    | `partial`                   |
+| Signal-quality measurement                                   | `crates/research/src/measurement.rs`                                                      | Import check: absent from the module; the file contains no pyo3 code                                                      | None; the absence is pinned in `test_discovery_engine_composition.py` | Information coefficient, bounds, parameter recovery, regime restriction and the jackknife error                                                                                                                                            | Yes                                                              | `upstream change required`  |
+| Portfolio statistics and objective registry                  | `nautilus_trader.analysis`                                                                | Import check, 115 names; 57 metric ids counted, of which 47 are registered as built-in statistics                         | `test_discovery_composition.py`                                       | `supported_metric_names` is not exposed, and per-period reports need a `PerformancePeriod` Python cannot construct                                                                                                                         | Only if per-period reporting is needed                           | `verified with a named gap` |
+| Split contracts with purge and embargo                       | `optimization` (`SplitContract`, `LeakagePolicy`, `Split`, `LabelOverlapRule`)            | Constructed, and a split produced the declared bounds                                                                     | `test_discovery_composition.py`                                       | None                                                                                                                                                                                                                                       | No                                                               | `verified`                  |
+| Walk-forward windows and stages                              | `optimization.stages` (`walk_forward_windows`, the stage classes)                         | Called; the windows were produced and the stage dataclasses constructed                                                   | `test_discovery_composition.py`                                       | A stage's `run()` executes backtests, so the executing path is row 13 rather than this row                                                                                                                                                 | No                                                               | `verified`                  |
+| Deflated Sharpe ratio and trial provenance                   | `optimization.significance`                                                               | Six functions called, including `deflated_sharpe_ratio`, `deflated_sharpe_bounds` and `trial_provenance_from_runs`        | `test_discovery_composition.py`                                       | The effective trial-count methodology is declared by the caller, which the mapping of Section 5.3 now supplies                                                                                                                             | No                                                               | `verified`                  |
+| Permutation test                                             | `optimization.permutation`                                                                | Called; a versioned result record with its unit and direction was returned                                                | `test_discovery_composition.py`                                       | None                                                                                                                                                                                                                                       | No                                                               | `verified`                  |
+| Study, trial and universe identity                           | `optimization.identity`, `optimization.space`                                             | Constructed; digests and identifiers printed and stable across two constructions                                          | `test_discovery_composition.py`                                       | `digest_of` is reachable only as `optimization.space.digest_of`, is not in the package `__all__`, and takes a flat mapping; nested-payload digests are private to each module                                                              | No                                                               | `verified with a named gap` |
+| Digest-keyed artifact store                                  | `optimization.persistence.ExperimentStore`                                                | The key layout was read from source, and construction requires a writable directory, so the fixture uses one              | `test_discovery_composition.py`                                       | No receipt type and no receipt key of its own: the receipt and the manifest are the discovery ledger's, keyed by idempotency key                                                                                                           | No                                                               | `verified with a named gap` |
+| Process fan-out and memory budget                            | `optimization.concurrency`                                                                | The policy and the budget arithmetic were called                                                                          | `test_discovery_composition.py`                                       | `execute_experiments` needs a catalog and real runs, so the pool itself is not exercised here                                                                                                                                              | No                                                               | `verified`                  |
+| Capability probes                                            | `optimization.capability`                                                                 | Five probes called, each returning a capability with a code from the closed set                                           | `test_discovery_composition.py`                                       | Three probes need the label and screen-family modules, which are constructible but not wired                                                                                                                                               | No                                                               | `verified`                  |
+| Declared execution assumptions                               | `optimization.assumptions`                                                                | `BarAmbiguityPolicy.declared_default()` constructed with a stable digest                                                  | `test_discovery_composition.py`                                       | None                                                                                                                                                                                                                                       | No                                                               | `verified`                  |
+| One backtest per experiment with identity                    | `optimization.BacktestRunner`, `optimization.CanonicalRun`                                | Constructed, and one engine run was executed to completion over the bundled data                                          | `test_discovery_engine_composition.py`                                | `CanonicalRun` carries the experiment, the canonical digest, metric values and the canonical bytes, and no seed, build or manifest identity of its own: the engine's own run manifest is reachable through `BacktestNode.get_run_manifest` | No                                                               | `verified`                  |
+| Deterministic result comparison                              | `CanonicalBacktestResult`                                                                 | Two identical runs compared by `.digest()` and `first_divergence`; a changed starting balance produced a divergence       | `test_discovery_engine_composition.py`                                | No Python constructor and no equality operator, and the class cannot be deserialised from Python                                                                                                                                           | No                                                               | `verified`                  |
+| Strategy injection as a live object                          | `BacktestEngine.add_strategy`, `BacktestNode.add_strategy`                                | A locally defined `Strategy` subclass was injected with no import path and ran; a non-strategy object was refused         | `test_discovery_engine_composition.py`                                | The instance must carry `.config` for strategy id and OMS type propagation                                                                                                                                                                 | No                                                               | `verified`                  |
+| Targets, sizing and reconciliation                           | `Target.from_quantity`, `from_weight`, `from_notional`; `Strategy.enable_target_pipeline` | Constructed, and the pipeline config accepted                                                                             | `test_discovery_engine_composition.py`                                | `TargetValue` is a read-only view; `TargetPipeline`, `TargetConstruction` and `TargetReconciler` have no binding                                                                                                                           | Only if the pipeline must be driven outside a strategy           | `partial`                   |
+| Corporate-action records and adjustment arithmetic           | `model.CorporateAction`, `AdjustmentSeries`, `ParquetDataCatalog.write_corporate_actions` | Constructed, and the split factor, dividend series and adjusted price arithmetic were read                                | `test_discovery_engine_composition.py`                                | No dividend cash-flow path: a dividend adjusts prices and is published as an event, and nothing credits an account                                                                                                                         | No: the stage is this fork's own, absent from upstream `develop` | `partial`                   |
+| Realism models: fill, fee, latency, slippage, impact         | `nautilus_trader.execution`                                                               | Each family was constructed from Python                                                                                   | `test_discovery_engine_composition.py`                                | Fee, fill and latency have Python base classes and slippage and market impact do not, so the plugin path is asymmetric; one latency model exists                                                                                           | No                                                               | `verified with a named gap` |
+| Engine run manifest and entry hashes                         | `crates/event_store/` (`manifest.rs`, `entry.rs`, `hash.rs`, `verifier/`)                 | The crate has no pyo3 code, is an rlib-only target, is not a dependency of the extension, and contributes no symbol to it | `test_discovery_engine_composition.py`                                | The whole manifest, the entry hash and the verifier; the only non-Rust interface is the verify binary                                                                                                                                      | Yes                                                              | `upstream change required`  |
+| Decision-to-next-session projection                          | `decision_bridge.projection.project`                                                      | Signature read, and the in-tree decision-bridge tests exercise the projection                                             | `test_discovery_composition.py`                                       | The context and the config are supplied by the caller, including the received time and the calendar                                                                                                                                        | No                                                               | `verified`                  |
+| Sandbox venue for shadow fills                               | `adapters.sandbox` (`SandboxExecutionClientConfig`, `SandboxExecutionClientFactory`)      | Import check: the config and the factory are bound                                                                        | `test_discovery_engine_composition.py`                                | The fill-simulating client itself is Rust-only, and the package exports no data-client factory                                                                                                                                             | Yes, for a data path                                             | `partial`                   |
+| Live data path for shadow                                    | The venue adapters under `nautilus_trader.adapters`                                       | Import check of each adapter module: every venue adapter exports a data-client factory and config                         | `test_discovery_engine_composition.py`                                | The design names no adapter, and several require credentials or a running gateway                                                                                                                                                          | Platform decision                                                | `platform decision`         |
 
-Two rows dominate the result. The feature registry and the run manifest are both unreachable from
-Python, and both are load-bearing: the first is what a candidate's features are read from, and the
-second is what the ledger's reconciliation check verifies a run against. Rows 16 and 21 are partial
-for the same reason in smaller form, and row 22 has no answer until the platform names an adapter.
+Two rows dominated the result, and one of them is closed. The feature registry is still unreachable
+from Python, and the run manifest no longer is: `BacktestNode.get_run_manifest` returns the engine's
+own record of a run, so the ledger's reconciliation check verifies a run against the engine rather
+than against a caller's declaration. Rows 16 and 21 are partial for the same reason in smaller form,
+and row 22 has no answer until the platform names an adapter.
 
 ### 14.1 The decisions M1 produced
 
@@ -892,9 +920,17 @@ receipt type; the event store, which owns `RunManifest` with its binary hash, co
 seed, has no Python binding at all; and the persistence layer's own run manifest is written
 internally and not exposed either. The ledger therefore records the canonical digest and the
 experiment identity it can, and the seed, binary and configuration join is one narrow upstream change
-at the authoritative boundary, which is the shape SD16 prefers over a general binding. Until that
-exists, criterion 10's recomputation over the whole reproducibility envelope is blocked on this row,
-and the bundle entry for criterion 10 stays blocked rather than passing on the digest alone.
+at the authoritative boundary, which is the shape SD16 prefers over a general binding.
+
+Both halves of that change now exist, and they close the row. The narrow Rust-side step is
+`CanonicalBacktestResult.digest_of_bytes`, which recomputes the engine's canonical digest from
+retained bytes, and the authoritative-boundary step is `BacktestNode.get_run_manifest`, which builds
+the manifest of a run from the run configuration the engine was given rather than reading one: it
+names the run, the build, the digest of the resolved configuration, the declared seed, and the digest
+of that declaration. The runner reads it, the registration retains it beside the receipt, and the
+recomputation reconciles the two, so criterion 10's recomputation is no longer blocked on this row.
+The event store's own `RunManifest` remains without a Python binding, which is the general binding
+SD16 does not ask for: a backtest's run identity comes from the backtest engine's own record.
 
 **M1.4, the feature-access path.** The decision is the precomputed panel, with the feature registry
 named as an upstream change. The research bindings expose the panel, its rows and its values, and the

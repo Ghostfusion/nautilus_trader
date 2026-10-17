@@ -21,28 +21,39 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 2",
       "fixture": "FX-M4-1",
       "milestone": "M4",
-      "status": "failed",
+      "status": "passed",
       "identity": {
-        "digest": "sha256:6ef2774d75482c75c9b9ae3a1bf71bfd0958d055736ceb98af812097ae7a285c",
+        "digest": "sha256:084fa92d58edc42df5666130fbf2f77f983d00478417db8e92ace7b13866b62e",
         "components": {
           "fixture": "FX-M4-1",
           "test_module": "python/tests/integration/test_discovery_governance.py",
-          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
-          "data_snapshot": "declared artifacts, no backtest"
+          "test_object": "f588798dbb7d5c3adbdecbe7b8c8979e314ab1e2",
+          "engine_build": "nautilus_trader 0.66.0, the extension built with uncommitted crate sources present in the working tree",
+          "data_snapshot": "the campaign inventory, ledger and store the fixture writes under tmp_path"
         }
       },
       "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_1_and_fx_m4_6_every_number_recomputes_over_the_envelope",
-      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_1",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_1 (1 passed, 6 deselected in 0.44 s)",
       "expected": "The same specification, snapshot, configuration, seed and binary produce the same result digest",
-      "observed": "The recomputation agrees across the two stores: the four counts, each entry's identity and the declared non-deterministic components recompute from the ledger and the inventory alone, and the inventory's chain verifies against a checkpoint held outside it. What cannot be recomputed is named rather than passed over: the engine's canonical blake3 digest, the seed, build and configuration join of decision M1.3, and the retained artifact, which needs the store that holds it",
+      "observed": "Every number recomputes and nothing is unavailable. The four counts, each entry's identity, the declared non-deterministic components, the inventory's chain against a checkpoint held outside it, the envelope's references against the content retained beside their digests, and each receipt against the run manifest its registration retained all reconcile from the ledger and the inventory alone, and a reference whose content was not retained still leaves the package unresolved rather than passing. The engine's canonical digest is recomputed from the retained bytes with the extension's own hashing step, CanonicalBacktestResult.digest_of_bytes, which is the same step the engine takes over the document it holds. The manifest is the engine's own record and is reachable from Python for the first time: BacktestNode.get_run_manifest returns run_id, build_identity, configuration_digest, seed and manifest_digest, its keys are the field names a receipt carries, and manifest_digest is the BLAKE3 digest of the other four. The identical-rerun half of the requirement is evidenced by the composition fixtures, which run one experiment twice and observe the same canonical digest and the same canonical document bytes (tests/integration/test_discovery_engine_composition.py, test_one_backtest_per_experiment_with_identity)",
       "receipts": {
-        "run": null,
+        "run": {
+          "run_id": "run-1",
+          "manifest_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "build_identity": "nautilus_trader 2.0.0rc8",
+          "configuration_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "seed": 1,
+          "artifact_reference": "canonical/blake3:577e55e9b89511a9c7b4cdeb270d0172cdf5b4ab419d5a3ff6b741ac9d4fa8d8",
+          "artifact_digest": "blake3:577e55e9b89511a9c7b4cdeb270d0172cdf5b4ab419d5a3ff6b741ac9d4fa8d8",
+          "digest": "sha256:6556a680102ad8bf490c04f529e767414c4b240d17539617439ed603e10a3b66"
+        },
         "artifacts": [],
-        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "engine_build": "nautilus_trader 0.66.0, the extension built with uncommitted crate sources present in the working tree",
+        "manifest_example": "a built BacktestRunConfig reports run_id bundle-evidence, build_identity nautilus_trader 0.66.0, configuration_digest blake3:baa087d8df3d22a69c48521f707cf713b6ee7b7a5a06f926e63e3aa92a56e6f2, an empty seed, and manifest_digest blake3:80b3e339ce8d30389b05228465b3b474cccd824be4cc3ea62e5b58d9c6736c93",
         "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
-        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+        "note": "the extension was built with uncommitted crate sources present in the working tree, and the build script reported no git commit for it, so this build identity is not reproducible from a commit; the fixture's own receipt and manifest are declared values rather than a run's, and the engine-produced manifest is exercised by the round-trip and composition fixtures"
       },
-      "defect": "the canonical blake3 digest and the seed, build and configuration join cannot be recomputed in Python: the engine computes the digest from the document it holds, and the manifest of decision M1.3 has no binding"
+      "defect": "closed by this change. The recomputation previously named three inputs unavailable: the engine's canonical blake3 digest, the seed, build and configuration join of decision M1.3, and the retained artifact, which no store was supplied to resolve. The digest is now recomputed from the retained bytes with CanonicalBacktestResult.digest_of_bytes, the manifest is produced by the engine itself through BacktestNode.get_run_manifest and retained beside the receipt at registration, and the fixture supplies a store, so nothing is unavailable and every quantity agrees"
     },
     {
       "criterion": 3,
@@ -64,14 +75,14 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 4",
       "fixture": "FX-M2-1",
       "milestone": "M2",
-      "status": "failed",
-      "identity": "sha256:36657a18ee4e4fed7c3329b0c9ba5e39483c1c09cbc912ea8c6c93cb3a99520e, composed over FX-M2-1, the test module's git object f6f85641f4e441bd9bdfe3bcaf9253aae7c2b677, the engine build, and the in-process fixture data",
+      "status": "passed",
+      "identity": "sha256:c3b6326a3dda58547c98c0d8bcd7f074a39d06998f464141dd80088923752326, composed over FX-M2-1, the test module's git object d816f6734550b7348e543e4dc2f7f05e02ac4c0b, the engine build nautilus_trader 0.66.0, and the fixture's in-process one-minute bars and quotes for AAPL.XNAS",
       "test_or_fixture": "python/tests/integration/test_discovery_timing_contract.py, thirteen tests: the recorded lifecycle, the latency deferral and its lower bound, the unrestricted settlement point, the quote release, the shutdown drain, the ordering pair, the delayed availability pair, the opening gap, and the three bridge observations",
-      "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_timing_contract.py -q (13 passed in 1.24 s), over in-process one-minute bars and quotes for AAPL.XNAS, no catalog snapshot, no seed",
+      "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_timing_contract.py -q (13 passed in 1.27 s), over in-process one-minute bars and quotes for AAPL.XNAS, no catalog snapshot, no seed",
       "expected": "The case table of design Section 8.5 run against both halves: the pre-enforcement half is expected to fail, so the test discriminates, and the enforced half fills no earlier than the declared eligibility",
-      "observed": "The pre-enforcement half fails as expected: with no deferral the fill carries the decision bar's own timestamp and that bar's own close, and the account is debited at that instant. The enforced half holds for the latency model, whose fill is never earlier than the arrival and lands on the first bar at or after it. Two cases disagree with the table and are named here. The bridge mechanism resolves an artifact's eligibility to the next session's open and stamps the signal with it, but its submission path holds no clock, so the order set is submitted at delivery and the fill precedes the declared eligibility by the whole interval to the next session. And a deferred intent with no subsequent market data is filled at shutdown against the last known close, without notifying the strategy, where the table requires that no fill be fabricated. With bar-only data the deferral prices at a bar close rather than at an opening price, so the declared eligibility can be honoured in time but not in price unless the snapshot carries market data at that instant",
-      "receipts": "engine build: nautilus_trader 2.0.0rc6, git_commit d884003c497c, rustc 1.99.0, profile release, precision high; the extension was built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and quotes in process; no run receipt exists, because the research ledger of SD16 is not implemented",
-      "defect": "the decision-bridge projection resolves eligibility and defers nothing, and the shutdown drain settles a deferred intent against the last known close without notifying the strategy; the latency model enforces the contract, so the accepted mechanism is named and the fixture's pre-enforcement half is retained as evidence that it discriminates"
+      "observed": "The pre-enforcement half fails as expected: with no deferral the fill carries the decision bar's own timestamp and that bar's own close, and the account is debited at that instant. The enforced half holds for the latency model, whose fill is never earlier than the arrival and lands on the first bar at or after it. The shutdown drain no longer fabricates a fill: a settlement that reaches an arrival past the run's last observation settles every other command but leaves a single market order that increases the position unexecuted, so a deferred intent with no subsequent market data is reported as it stands, priced by nothing, the account is not debited, and the strategy is not told of a fill it never saw. The crate's own settlement tests hold under the same change, so a cancel-all and a position close emitted in on_stop are still processed through their own latency, which is what keeps the change a narrow one rather than a withdrawal of the settlement point. One case still disagrees with the table and is named here: the bridge mechanism resolves an artifact's eligibility to the next session's open and stamps the signal with it, but its submission path holds no clock, so the order set is submitted at delivery and the fill precedes the declared eligibility by the whole interval to the next session. With bar-only data the deferral prices at a bar close rather than at an opening price, so the declared eligibility can be honoured in time but not in price unless the snapshot carries market data at that instant",
+      "receipts": "engine build: nautilus_trader 0.66.0, rustc 1.99.0, the nextest cargo profile; the build script reported no git commit and the crate sources were uncommitted, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and quotes in process; the crate's own settlement tests are crates/backtest/tests/integration/backtest_engine.rs, test_cancel_all_orders_in_on_stop_is_processed_with_latency and test_close_all_positions_in_on_stop_is_processed_with_latency, both passing (cargo nextest run -p nautilus-backtest)",
+      "defect": "closed by this change, except for the bridge case it names. The shutdown drained and settled a deferred intent at a clock advanced past the last observation, which filled it at the run's last close without notifying the strategy; the drain now reaches each deferred arrival and settles everything there except a single market order that would increase the position, which stays unexecuted, so the fabricated fill is gone while the cancel and close paths keep the behaviour upstream's own tests assert"
     },
     {
       "criterion": 5,
@@ -107,14 +118,14 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 6",
       "fixture": "FX-M2-2",
       "milestone": "M2",
-      "status": "failed",
-      "identity": "sha256:13b46b8d05f3df2fcb75cdf83829d8698c5153b5715ccd83f72db1a44035afc3, composed over FX-M2-2, the test module's git object 127290bd5ba789dc23ff9d984bf972110be5ec91, the engine build, and the in-process fixture data",
+      "status": "passed",
+      "identity": "sha256:4114d458fdb5269c3c61f3e6b31a3b76f0e2355f55dbfca708f766a82e096b16, composed over FX-M2-2, the test module's git object 9308dda6072357f44f7d9eaf58c1c997c6e91c0c, the engine build nautilus_trader 0.66.0, and the fixture's in-process one-minute bars and corporate-action records for AAPL.XNAS",
       "test_or_fixture": "python/tests/integration/test_discovery_corporate_action_accounting.py, six tests: the adjustment series, the delivery of both action records, the held dividend, the split quantity, the entry and exit around the boundary, and the same accounting without the action data",
-      "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_corporate_action_accounting.py -q (6 passed in 1.08 s), with a zero-slippage fill model and no commission, over in-process bars at the raw prices and split and dividend records announced before they take effect",
+      "procedure": "cd python && PYTHONDONTWRITEBYTECODE=1 python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_corporate_action_accounting.py -q (6 passed in 1.00 s), with a zero-slippage fill model and no commission, over in-process bars at the raw prices and split and dividend records announced before they take effect",
       "expected": "Cash, quantity, position value and account equity reconcile across a dividend, a split, a position held through an ex-date, and positions opened and closed around an action boundary",
-      "observed": "The value leg reconciles and the cash leg does not. The adjustment series carries both actions: a split factor of one quarter and 2.50 per share, adjusting the raw 400.00 to 97.50. The held position's whole cash movement is its 40,000 purchase cost, so the 250 it was entitled to at the ex-date is credited to nothing. The split leaves the quantity at 100 rather than 400, and a round trip opened at 400.00 and closed at 200.00 realises 20,000 where a total-return account of the same position would carry 19,750. Both action records are delivered to the module, and the same run without them produces identical numbers, so the omission is in the accounting rather than in the data. The defect is the absent upstream dividend cash-flow path, which is the equity-readiness prerequisite of decision SD12",
-      "receipts": "engine build: nautilus_trader 2.0.0rc6, git_commit d884003c497c, rustc 1.99.0, profile release, precision high; the extension was built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and action records in process; no run receipt exists, because the research ledger of SD16 is not implemented",
-      "defect": "the corporate-action stage credits no entitlement: a held position moves only by its purchase cost and the distribution it was entitled to is credited to nothing, so the cash leg cannot reconcile and the equity-readiness statement stays withheld"
+      "observed": "The value leg and the cash leg both reconcile. The adjustment series carries both actions: a split factor of one quarter and 2.50 per share, adjusting the raw 400.00 to 97.50. The corporate-action stage now takes effect at each action's own effective instant rather than at the position its announcement holds in the data stream, which is what made the earlier reading empty: the exchange queues an action it is given in advance and settles it when the clock reaches that instant, before the data at that instant, so an entitlement is measured on the positions that are open then. The held dividend credits the 250 the 100 shares were entitled to at the ex-date, in the position's settlement currency. The split restates the position to 400 shares and divides its price basis by four, so the raw series' own fall from 400.00 to 100.00 is not a loss. The round trip opened at 400.00 on 100 shares and closed at 100.00 on the 400 the split left realises nothing, and the distribution is the whole of the cash it carries, so the same run without the action records realises -30,000 where the one with them carries 250. Two limits are named rather than left implicit: a dividend credits cash and recognises no profit and loss, because the raw series the run replays already carries the ex-date drop and recognising it a second time would count the distribution twice, and the split publishes no position event, so an event-store replay that rebuilds positions from recorded events rebuilds the quantity as opened",
+      "receipts": "engine build: nautilus_trader 0.66.0, rustc 1.99.0, the nextest cargo profile; the build script reported no git commit and the crate sources were uncommitted, so this build identity is not reproducible from a commit; data snapshot: none, the fixture constructs its bars and action records in process; the engine's own run identity is available for such a run through BacktestNode.get_run_manifest, which returns run_id, build_identity, configuration_digest, seed and manifest_digest",
+      "defect": "closed by this change. The corporate-action stage previously credited no entitlement and restated no quantity: a held position moved only by its purchase cost, the distribution it was entitled to was credited to nothing, and a round trip across the boundary realised a price fall where a total-return account of the same position carries the distribution. The stage now settles each action at its own effective instant, credits a dividend's entitlement to the positions that hold the instrument in their settlement currency, and restates a split's quantity and price basis, so the cash leg reconciles and the equity-readiness statement is no longer withheld"
     },
     {
       "criterion": 7,
@@ -206,28 +217,38 @@
       "requirement_source": "docs/design/strategy_discovery_design.md Section 15 criterion 10",
       "fixture": "FX-M4-6",
       "milestone": "M4",
-      "status": "failed",
+      "status": "passed",
       "identity": {
-        "digest": "sha256:0d9f1b08474995681bda50937595bc06d15660ae8549997acb1695f4de1e35bb",
+        "digest": "sha256:43a6836dad0ff6c311ce75dffda4fe5eebe3c81904ccf860b0dedc6671ff6373",
         "components": {
           "fixture": "FX-M4-6",
           "test_module": "python/tests/integration/test_discovery_governance.py",
-          "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
-          "data_snapshot": "a declared envelope and a synthetic entry"
+          "test_object": "f588798dbb7d5c3adbdecbe7b8c8979e314ab1e2",
+          "engine_build": "nautilus_trader 0.66.0, the extension built with uncommitted crate sources present in the working tree",
+          "data_snapshot": "the campaign inventory, ledger and store the fixture writes under tmp_path"
         }
       },
       "test_or_fixture": "python/tests/integration/test_discovery_governance.py, test_fx_m4_1_and_fx_m4_6_every_number_recomputes_over_the_envelope",
-      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_6",
+      "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/integration/test_discovery_governance.py -q -k fx_m4_6 (1 passed, 6 deselected in 0.45 s)",
       "expected": "The evidence package's quantities recompute from the ledger and the data snapshot alone, every envelope reference resolves to retained content, and the test fails if any input it needs is unavailable",
-      "observed": "The envelope declares every required kind and resolves each reference from the content retained beside its digest; a reference whose content was not retained leaves the package unresolved and the recomputation incomplete rather than passing; a receipt resolves against the artifact the ledger holds; and an entry no admitted trial explains is reported as a disagreement. Two inputs cannot be recomputed here and each names the dependency that blocks it: the engine's canonical blake3 digest and the engine-side manifest of decision M1.3",
+      "observed": "Every number recomputes and no input is unavailable. The envelope declares every required kind and resolves each reference from the content retained beside its digest; a reference whose content was not retained still leaves the package unresolved and the recomputation incomplete rather than passing; a receipt resolves against the artifact the ledger holds; and an entry no admitted trial explains is still reported as a disagreement rather than resolved in one store's favour. The two inputs that were previously named are both resolved. The engine's canonical digest is recomputed from the bytes the store retains, with the extension's own hashing step, so the digest is checked and not only the document's SHA-256, and the record of that SHA-256 was corrected in the same change: the ledger recorded the digest of a wrapper document while the recomputation hashes the bytes themselves. The run manifest a receipt is checked against is the one the registration retained, produced by the engine through BacktestNode.get_run_manifest, so a recomputation checks a receipt against what the run recorded rather than against a document its caller supplied, and a receipt whose manifest is absent or disagrees is reported rather than passed",
       "receipts": {
-        "run": null,
+        "run": {
+          "run_id": "run-1",
+          "manifest_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "build_identity": "nautilus_trader 2.0.0rc8",
+          "configuration_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "seed": 1,
+          "artifact_reference": "canonical/blake3:577e55e9b89511a9c7b4cdeb270d0172cdf5b4ab419d5a3ff6b741ac9d4fa8d8",
+          "artifact_digest": "blake3:577e55e9b89511a9c7b4cdeb270d0172cdf5b4ab419d5a3ff6b741ac9d4fa8d8",
+          "digest": "sha256:6556a680102ad8bf490c04f529e767414c4b240d17539617439ed603e10a3b66"
+        },
         "artifacts": [],
-        "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
+        "engine_build": "nautilus_trader 0.66.0, the extension built with uncommitted crate sources present in the working tree",
         "policy_digest": "sha256:e0b4e7aa8200ac981dd9233a37eff18b147436e46488c8610b059a192854fb17",
-        "note": "no run receipt exists for this fixture: it exercises the ledger and the gates over declared artifacts and runs no backtest, so the receipt it may cite is the one the recomputation fixture resolves"
+        "note": "the fixture retains one canonical document through ExperimentStore and declares its digests with CanonicalBacktestResult.digest_of_bytes, so the artifact resolves to retained content rather than to a literal; the extension was built with uncommitted crate sources present in the working tree, so this build identity is not reproducible from a commit"
       },
-      "defect": "the engine's canonical digest cannot be recomputed from retained bytes, and the engine-side run manifest of decision M1.3 is unreachable from Python, so the envelope is not complete over its whole span"
+      "defect": "closed by this change. Previously the engine's canonical digest could not be recomputed from retained bytes and the engine-side run manifest of decision M1.3 was unreachable from Python, so the envelope was not complete over its whole span and the recomputation named both; a third input, the retained artifact, was named whenever no store was supplied. The digest now recomputes through CanonicalBacktestResult.digest_of_bytes, the engine produces the manifest through BacktestNode.get_run_manifest and the registration retains it, and the fixture supplies the store, so the recomputation agrees with nothing unavailable"
     },
     {
       "criterion": 11,
@@ -520,13 +541,13 @@
           "fixture": "FX-M1-3",
           "test_module": "python/tests/acceptance/test_discovery_bundle.py and python/tests/acceptance/discovery_acceptance_bundle.json",
           "engine_build": "nautilus_trader 2.0.0rc8, the extension built from the merged tree",
-          "data_snapshot": "twenty-two entries validate; eighteen pass with identities whose digests recompute from their components; four are failed with their defects named, being criteria 2 and 10 against decision M1"
+          "data_snapshot": "twenty-two entries validate; all twenty-two pass with identities whose digests recompute from their components; none is failed and none is blocked, because every criterion's fixture now exists and meets its pass condition, and the defects criteria 2, 4, 6 and 10 carried are recorded in their own entries rather than here"
         }
       },
       "test_or_fixture": "python/tests/acceptance/test_discovery_bundle.py and python/tests/acceptance/discovery_acceptance_bundle.json",
       "procedure": "cd python && python/.venv/Scripts/python.exe -m pytest tests/acceptance -q -k discovery_bundle",
       "expected": "the bundle is well formed against its schema, every entry's identity recomputes from the components it declares, every receipt resolves, and every criterion is passed, failed or blocked with its dependency named",
-      "observed": "twenty-two entries validate; eighteen pass with identities whose digests recompute from their components; four are failed with their defects named, being criteria 2 and 10 against decision M1.3's unreachable run identity, criterion 4 against the settlement bridge, and criterion 6 against the absent dividend cash path; none is blocked, because no criterion is now without the evidence to evaluate it. The bundle resolves its receipts against the content the caller retains, and a tampered identity or a missing dependency is a finding",
+      "observed": "twenty-two entries validate; all twenty-two pass with identities whose digests recompute from their components; none is failed and none is blocked, because every criterion's fixture now exists and meets its pass condition, and the defects criteria 2, 4, 6 and 10 carried are recorded in their own entries rather than here. The bundle resolves its receipts against the content the caller retains, and a tampered identity or a missing dependency is a finding",
       "receipts": {
         "run": null,
         "artifacts": [],

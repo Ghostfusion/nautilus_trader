@@ -1093,28 +1093,33 @@ impl BacktestEngine {
 
         // Settle commands already due at the final data timestamp while strategies
         // are still running, so callbacks and on_stop observe the final state.
-        let mut ts_now = self.kernel.clock.borrow().timestamp_ns();
+        let ts_now = self.kernel.clock.borrow().timestamp_ns();
+        self.settle_venues(ts_now, SettlementScope::All)?;
+
+        // Drain so latency-deferred commands reach venue inflight queues, then settle the ones the
+        // run's data already reached. Both happen while the strategies are still running, so a fill
+        // at the end of the data is delivered to the strategy that placed the order.
+        self.drain_command_queues()?;
         self.settle_venues(ts_now, SettlementScope::All)?;
 
         self.kernel.stop_trader();
 
-        // Settle residual on_stop commands before stopping engines. Venue modules are
-        // not re-run; process_modules is once per timestamp.
-
-        // Drain first so latency-deferred commands reach venue inflight queues
+        // Settle the residual on_stop commands, which the strategies submit as they stop, at the
+        // final data timestamp. A command the run's data never reached is not settled here, because
+        // there is no observation at or after its arrival to price it against.
         self.drain_command_queues()?;
-
-        // Advance the clock to the latest inflight arrival; otherwise commands deferred
-        // by a LatencyModel sit past ts_now and never settle.
-        if let Some(max_inflight_ts) = self.max_inflight_command_ts()
-            && max_inflight_ts > ts_now
-        {
-            ts_now = max_inflight_ts;
-            let clocks = self.collect_all_clocks();
-            Self::set_all_clocks_time(&clocks, ts_now);
-        }
-
         self.settle_venues(ts_now, SettlementScope::All)?;
+
+        // Reach the arrival of the commands the latency model deferred past the last data tick, and
+        // settle there without executing a command that would fill at a price from before its
+        // arrival: an intent that increases the position stays unexecuted rather than being priced
+        // from the run's last observation, which the run's data never confirms.
+        if let Some(max_inflight_ts) = self
+            .max_inflight_command_ts()
+            .filter(|max_ts| *max_ts > ts_now)
+        {
+            self.settle_venues(max_inflight_ts, SettlementScope::Deferred)?;
+        }
 
         for strategy_id in self.running_strategy_ids() {
             log::error!(
@@ -1721,6 +1726,10 @@ impl BacktestEngine {
             let mut exchange_ref = exchange.borrow_mut();
             let mut processed_book_data = false;
 
+            // An action announced in advance takes effect at its own effective instant rather than
+            // at the position its announcement holds in the data stream.
+            exchange_ref.settle_due_corporate_actions(data.ts_init())?;
+
             match data {
                 DataRef::BookDelta(delta) => {
                     exchange_ref.process_order_book_delta(*delta)?;
@@ -1753,7 +1762,7 @@ impl BacktestEngine {
                     exchange_ref.process_instrument_close(*close)?;
                 }
                 DataRef::CorporateAction(action) => {
-                    exchange_ref.process_corporate_action(action)?;
+                    exchange_ref.process_corporate_action(action, data.ts_init())?;
                 }
                 DataRef::Instrument(_) | DataRef::Custom(_) => {
                     unreachable!("filtered before exchange routing")
@@ -2171,10 +2180,14 @@ impl BacktestEngine {
         clocks
     }
 
+    /// Returns the latest arrival across all venues' latency-deferred inflight commands.
+    ///
+    /// Used at shutdown to reach the arrival of commands emitted on the final data tick or in
+    /// `on_stop`, which the run's own data never reaches.
     fn max_inflight_command_ts(&self) -> Option<UnixNanos> {
         self.venues
             .values()
-            .filter_map(|v| v.borrow().max_inflight_command_ts())
+            .filter_map(|exchange| exchange.borrow().max_inflight_command_ts())
             .max()
     }
 
@@ -2187,6 +2200,12 @@ impl BacktestEngine {
         // correct timestamp even when no commands are pending
         for exchange in self.venues.values() {
             exchange.borrow().set_clock_time(ts_now);
+        }
+
+        // Settle any corporate action whose effective instant the clock has now reached, before the
+        // commands below settle, so a restated position is the one an exit order sells.
+        for exchange in self.venues.values() {
+            exchange.borrow_mut().settle_due_corporate_actions(ts_now)?;
         }
 
         // Drain commands then iterate matching engines to fill newly added
