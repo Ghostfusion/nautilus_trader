@@ -124,6 +124,7 @@ pub struct BacktestEngine {
     end_ns: UnixNanos,
     run_started: Option<UnixNanos>,
     run_finished: Option<UnixNanos>,
+    shutdown_complete: bool,
     backtest_start: Option<UnixNanos>,
     backtest_end: Option<UnixNanos>,
     funding_error: Option<String>,
@@ -194,6 +195,7 @@ impl BacktestEngine {
             end_ns: UnixNanos::default(),
             run_started: None,
             run_finished: None,
+            shutdown_complete: false,
             backtest_start: None,
             backtest_end: None,
             funding_error: None,
@@ -784,6 +786,9 @@ impl BacktestEngine {
              `engine.add_data(..., sort=true)` before running"
         );
 
+        // A run that follows a completed one runs its own shutdown sequence.
+        self.shutdown_complete = false;
+
         for exchange in self.venues.values() {
             let exchange = exchange.borrow();
             let book_type_has_depth = exchange.book_type() as u8 > BookType::L1_MBP as u8;
@@ -1055,6 +1060,14 @@ impl BacktestEngine {
     }
 
     fn end_impl(&mut self) -> anyhow::Result<()> {
+        // The shutdown sequence has already run to completion: repeating it would re-save trader
+        // state, carry the run's counters onto the portfolio a second time and move the venue clocks
+        // back over the last deferred arrival. A sequence that returned an error is not marked
+        // complete, so a retry repeats it and reports the same failure.
+        if self.shutdown_complete {
+            return Ok(());
+        }
+
         if let Some(error) = actor::callback_failure() {
             return Err(error.into());
         }
@@ -1158,7 +1171,9 @@ impl BacktestEngine {
         actor::clear_callbacks()?;
         save_result?;
         diagnostics_result?;
-        streaming_result
+        streaming_result?;
+        self.shutdown_complete = true;
+        Ok(())
     }
 
     /// Returns registered strategies whose state resolves to `Running` after the end sequence.
@@ -1237,6 +1252,7 @@ impl BacktestEngine {
         self.run_id = None;
         self.run_started = None;
         self.run_finished = None;
+        self.shutdown_complete = false;
         self.backtest_start = None;
         self.backtest_end = None;
         self.funding_error = None;
