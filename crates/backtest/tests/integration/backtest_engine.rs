@@ -2810,7 +2810,7 @@ fn test_run_fails_when_betting_fill_cost_exceeds_balance(#[case] base_currency: 
 }
 
 #[rstest]
-fn test_end_fails_when_latent_fill_cost_exceeds_cash_balance() {
+fn test_end_leaves_a_latent_market_entry_unexecuted() {
     let latency_model = LatencyModelHandle::new(StaticLatencyModel::new(
         DurationNanos::default(),
         DurationNanos::new(1),
@@ -2835,16 +2835,20 @@ fn test_end_fails_when_latent_fill_cost_exceeds_cash_balance() {
     engine.add_data(data, None, true, true).unwrap();
     engine.run(None, None, None, true).unwrap();
 
-    let error = engine.end().unwrap_err();
-    let retry_error = engine.end().unwrap_err();
-
-    assert!(
-        error
-            .to_string()
-            .contains("balance would become negative: -21.50 USD"),
-        "unexpected error: {error:#}"
+    // The entry submitted on the only quote arrives one nanosecond after the run's last
+    // observation. Upstream executes it there at the stale quote and books
+    // 250 @ 100.00 + 2250 @ 100.01 = 250_022.50 against a 250_001.00 balance, so `end` failed
+    // with "balance would become negative: -21.50 USD". This fork leaves a deferred market entry
+    // that would increase exposure unexecuted, so the balance is untouched and both `end` calls
+    // succeed instead. The same rule is what accepts the trailing tick's own settlement. See
+    // design Section 15 criterion 4.
+    engine.end().unwrap();
+    engine.end().unwrap();
+    assert!(order_fills(&engine).is_empty());
+    assert_eq!(
+        account_total(&engine, "SIM", Currency::USD()),
+        Some(Money::from("250_001 USD"))
     );
-    assert_eq!(retry_error.to_string(), error.to_string());
     assert!(engine.kernel().trader.borrow().is_stopped());
 }
 
