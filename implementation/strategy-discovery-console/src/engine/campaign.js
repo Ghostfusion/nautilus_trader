@@ -645,7 +645,7 @@ export function runCampaign(options = {}) {
       verdict: planted.clean ? 'no credential found' : 'a credential was found',
       tone: planted.clean ? 'ok' : 'warn',
       detail:
-        'the layer has no broker connection installed and nothing to authenticate an order with; the allowlist that would make the worker capabilities explicit is procedural, because the layout configuration module is unbuilt',
+        'the layer holds no live execution adapter and no credential, so nothing in it can authenticate an order; a market-data adapter is a different kind of thing, which the shadow period takes as a declared feed rather than binding to one, and the allowlist that would make the worker capabilities explicit is procedural, because the layout configuration module is unbuilt',
       facts: [
         ['credential names in the canonical list', String(credentials().length)],
         ['clean environment', clean.clean ? 'clean' : 'not clean'],
