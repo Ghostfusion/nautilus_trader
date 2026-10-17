@@ -1,14 +1,14 @@
 /**
- * Tests for the acceptance dashboard. The record has eighteen passes and four failures, and the four
- * failures are 2, 4, 6 and 10; if the dashboard ever reported them differently it would be hiding a
- * failure, which is the one thing this view may not do.
+ * Tests for the acceptance dashboard. The record has twenty-two passes and no failure, and the four
+ * criteria that used to fail are 2, 4, 6 and 10; if the dashboard ever reported them as still failing
+ * it would be reading a stale record, which is the one thing this view may not do.
  */
 
 import { describe, expect, test } from 'bun:test';
 
 import { valueOf } from '../src/data/source.js';
 import { criteria } from '../src/data/layers.js';
-import { COUNTS, FAILURES } from '../src/data/acceptance.js';
+import { COUNTS, FORMER_FAILURES } from '../src/data/acceptance.js';
 import {
   byMilestone,
   describe as describeRow,
@@ -35,12 +35,12 @@ describe('the criteria the dashboard reads', () => {
 });
 
 describe('the tally', () => {
-  test('is eighteen passed, four failed and none blocked', () => {
+  test('is twenty-two passed, none failed and none blocked', () => {
     // The acceptance criterion for this slice: the console reports the record, not a hopeful reading.
     expect(summary(ROWS)).toEqual({
       total: 22,
-      passed: 18,
-      failed: 4,
+      passed: 22,
+      failed: 0,
       blocked: 0,
       holds: true,
       accounted: 22,
@@ -62,8 +62,8 @@ describe('the tally', () => {
     // The view filters, so the summary has to be over its input, not over the whole record.
     expect(summary(ROWS.slice(0, 5))).toEqual({
       total: 5,
-      passed: 3,
-      failed: 2,
+      passed: 5,
+      failed: 0,
       blocked: 0,
       holds: true,
       accounted: 5,
@@ -77,42 +77,50 @@ describe('the tally', () => {
   });
 });
 
-describe('the failures', () => {
-  test('are exactly criteria 2, 4, 6 and 10 in record order', () => {
-    // The four the design and the bundle both name; a fifth would be a different record.
-    expect(failing(ROWS).map((row) => row.id)).toEqual([2, 4, 6, 10]);
-    expect(failing(ROWS).every((row) => row.status === 'failed')).toBe(true);
-  });
-
-  test('are the four the page names, in the same order', () => {
-    // The failure table in the view is built from both, so their ids may not disagree.
-    expect(FAILURES.map((failure) => valueOf(failure.id))).toEqual(
-      failing(ROWS).map((row) => row.id),
-    );
-  });
-
-  test('each carry the bundle observed text and the missing piece behind them', () => {
-    // A failure explained by its symptom would tell the reader nothing about what is absent.
-    for (const row of explain(ROWS)) {
-      expect(row.joined).toBe(true);
-      expect(row.status).toBe('failed');
-      expect(row.observed.length).toBeGreaterThan(0);
-      expect(row.defect.length).toBeGreaterThan(0);
-      expect(row.missing.length).toBeGreaterThan(0);
+describe('the criteria that used to fail', () => {
+  test('leave the failed list empty and are the four the record names', () => {
+    // The record holds no failure now; a fifth former failure would be a different record.
+    expect(failing(ROWS)).toEqual([]);
+    expect(FORMER_FAILURES.map((failure) => valueOf(failure.id))).toEqual([2, 4, 6, 10]);
+    for (const row of ROWS.filter((item) => [2, 4, 6, 10].includes(item.id))) {
+      expect(row.status).toBe('passed');
     }
   });
 
-  test('name the missing piece rather than the symptom', () => {
-    // Each `missing` is the cause the page records: the absent join, the bridge, the dividend path.
-    const byId = new Map(explain(ROWS).map((row) => [row.id, row]));
-    expect(byId.get(2).missing).toContain('the manifest of decision M1.3 has no binding');
-    expect(byId.get(4).missing).toContain('the shutdown drain settles a deferred intent');
-    expect(byId.get(6).missing).toContain('credits no entitlement');
-    expect(byId.get(10).missing).toContain('is unreachable from Python');
+  test('join to the rows the record holds, field for field', () => {
+    // The closure table in the view is built from the transcription and the rows, so their fields
+    // may not disagree: a stale requirement or milestone would be a page about a different record.
+    const byId = new Map(ROWS.map((row) => [row.id, row]));
+    for (const failure of FORMER_FAILURES) {
+      const row = byId.get(valueOf(failure.id));
+      expect(row.status).toBe('passed');
+      expect(valueOf(failure.requirement)).toBe(row.requirement);
+      expect(valueOf(failure.milestone)).toBe(row.milestone);
+      expect(valueOf(failure.status)).toBe(row.status);
+    }
   });
 
-  test('report a failure whose criterion row is absent rather than dropping it', () => {
-    // A join that silently drops a row would make the failure table look complete when it is not.
+  test('each carry the bundle observed text and what closed them', () => {
+    // A former failure with no closure recorded would tell the reader nothing about what changed.
+    for (const row of explain(ROWS)) {
+      expect(row.joined).toBe(true);
+      expect(row.status).toBe('passed');
+      expect(row.observed.length).toBeGreaterThan(0);
+      expect(row.closed.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('name what closed each in the bundle own words', () => {
+    // Each `closed` is the bundle's own defect text, which reads as the change rather than the symptom.
+    const byId = new Map(explain(ROWS).map((row) => [row.id, row]));
+    expect(byId.get(2).closed).toContain('closed by this change');
+    expect(byId.get(4).closed).toContain('except for the bridge case it names');
+    expect(byId.get(6).closed).toContain('the cash leg reconciles');
+    expect(byId.get(10).closed).toContain('the recomputation agrees with nothing unavailable');
+  });
+
+  test('report a former failure whose criterion row is absent rather than dropping it', () => {
+    // A join that silently drops a row would make the closure table look complete when it is not.
     const partial = explain(ROWS.filter((row) => row.id === 2));
     expect(partial).toBeArrayOfSize(4);
     expect(partial.map((row) => row.joined)).toEqual([true, false, false, false]);
@@ -123,7 +131,7 @@ describe('the failures', () => {
     // `describe` reads the status from the row, so the view cannot print a status of its own.
     const two = ROWS.find((row) => row.id === 2);
     expect(describeRow(two)).toBe(
-      'Criterion 2. A rerun is identical, and what is not deterministic is named. (M4): failed',
+      'Criterion 2. A rerun is identical, and what is not deterministic is named. (M4): passed',
     );
   });
 });
@@ -138,8 +146,8 @@ describe('the milestones', () => {
       order: 4,
       ids: [2, 5, 7, 8, 9, 10, 11, 18],
       total: 8,
-      passed: 6,
-      failed: 2,
+      passed: 8,
+      failed: 0,
       blocked: 0,
     });
   });
@@ -152,16 +160,16 @@ describe('the milestones', () => {
     expect(groups.reduce((total, group) => total + group.total, 0)).toBe(22);
   });
 
-  test('place both M2 failures in their own group', () => {
-    // M2 owes criteria 4 and 6, and both fail, so the group carries no pass at all.
+  test('place both M2 criteria in their own group, both passing', () => {
+    // M2 owes criteria 4 and 6, and both used to fail; the group now carries no failure.
     const m2 = byMilestone(ROWS).find((group) => group.milestone === 'M2');
     expect(m2).toEqual({
       milestone: 'M2',
       order: 2,
       ids: [4, 6],
       total: 2,
-      passed: 0,
-      failed: 2,
+      passed: 2,
+      failed: 0,
       blocked: 0,
     });
   });

@@ -39,6 +39,18 @@ const RECEIPT = (candidateId) => ({
   receipt_digest: `sha256:receipt-${candidateId}`,
 });
 
+/**
+ * The manifest the engine produces for a run and the registration retains beside the receipt, which
+ * `_REQUIRED_FIELDS` now demands of every `registration_verified` event.
+ */
+const MANIFEST = (candidateId) => ({
+  run_id: `run-${candidateId}`,
+  build_identity: 'nautilus_trader 1.226.0',
+  configuration_digest: `sha256:config-${candidateId}`,
+  seed: 1,
+  manifest_digest: `sha256:manifest-${candidateId}`,
+});
+
 /** The campaign the tutorial works through: four compiled candidates, a refusal, and one verdict. */
 const CAMPAIGN = [
   ['search_policy_recorded', { search_policy_digest: 'sha256:sp1' }],
@@ -55,7 +67,13 @@ const CAMPAIGN = [
   ['execution_attempt_closed', { candidateId: 'alpha', key: 'k1', outcome: 'completed' }],
   [
     'registration_verified',
-    { candidateId: 'alpha', key: 'k1', receipt: RECEIPT('alpha'), receipt_digest: 'sha256:receipt-alpha' },
+    {
+      candidateId: 'alpha',
+      key: 'k1',
+      receipt: RECEIPT('alpha'),
+      receipt_digest: 'sha256:receipt-alpha',
+      manifest: MANIFEST('alpha'),
+    },
   ],
   ['trial_admitted', { candidateId: 'alpha', key: 'k1', receipt_digest: 'sha256:receipt-alpha' }],
   ['job_submitted', { candidateId: 'beta', key: 'k2' }],
@@ -70,6 +88,7 @@ const CAMPAIGN = [
       key: 'k3',
       receipt: RECEIPT('epsilon'),
       receipt_digest: 'sha256:receipt-epsilon',
+      manifest: MANIFEST('epsilon'),
     },
   ],
   [

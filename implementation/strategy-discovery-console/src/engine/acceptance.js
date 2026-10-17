@@ -5,16 +5,17 @@
  * The twenty-two criteria are a record, not an opinion: each is passed, failed or blocked with the
  * fixture that produced the entry, so the dashboard's only job is to read them without flattering
  * them. This module counts them, groups them, describes them one line at a time, and joins the four
- * failures to the missing piece each is carried by - and it derives the counts from the rows rather
- * than carrying a total, so the tally cannot drift from the table above it.
+ * criteria that used to fail to the bundle's own text recording what closed each - and it derives
+ * the counts from the rows rather than carrying a total, so the tally cannot drift from the table
+ * above it.
  *
  * A failure is never softened into a pass and a missing value is never filled with a default: the
- * four failing criteria are returned as they are, with the bundle's own `observed` and `defect` text
- * and the cause the page names.
+ * record now holds no failure, and the four that were failed are returned as they now stand, with the
+ * bundle's own `observed` line and the `defect` that records what closed each.
  */
 
 import { valueOf } from '../data/source.js';
-import { FAILURES, STATUSES as STATUS_VOCABULARY } from '../data/acceptance.js';
+import { FORMER_FAILURES, STATUSES as STATUS_VOCABULARY } from '../data/acceptance.js';
 
 /** The closed set of statuses a criterion may carry, read from the transcription of the schema. */
 const STATUSES = valueOf(STATUS_VOCABULARY);
@@ -46,7 +47,8 @@ export function summary(rows) {
 /**
  * The criteria that do not pass, in the record's own order. Statuses other than `failed` are included
  * deliberately: `blocked` is a legitimate answer whose dependency is named, so the dashboard shows
- * every row whose entry is not a pass rather than only the word `failed`.
+ * every row whose entry is not a pass rather than only the word `failed`. The record currently holds
+ * none, which is what this returns an empty list for.
  */
 export function failing(rows) {
   return rows.filter((row) => row.status !== 'passed');
@@ -92,14 +94,16 @@ export function describe(row) {
 }
 
 /**
- * The four failures with the missing piece behind each, joined to the criterion rows.
+ * The four criteria that used to fail, joined to the criterion rows and to what the bundle records as
+ * closing each.
  *
- * The row supplies what the bundle records; the failure supplies the bundle's own `observed` text,
- * its `defect`, and the cause the page names. The join is on the criterion number, so a failure whose
- * row is missing from the record is reported as unjoined rather than silently dropped.
+ * The row supplies what the bundle records; the former failure supplies the bundle's own `observed`
+ * text and its `defect`, which now reads as what closed the failure. The join is on the criterion
+ * number, so a former failure whose row is missing from the record is reported as unjoined rather
+ * than silently dropped.
  */
 export function explain(rows) {
-  return FAILURES.map((failure) => {
+  return FORMER_FAILURES.map((failure) => {
     const id = valueOf(failure.id);
     const row = rows.find((item) => item.id === id);
     return {
@@ -110,8 +114,7 @@ export function explain(rows) {
       status: row ? row.status : null,
       fixture: row ? row.fixture : null,
       observed: valueOf(failure.observed),
-      defect: valueOf(failure.defect),
-      missing: valueOf(failure.missing),
+      closed: valueOf(failure.closed),
     };
   });
 }

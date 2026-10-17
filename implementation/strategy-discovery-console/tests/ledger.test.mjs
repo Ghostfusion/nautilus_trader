@@ -259,12 +259,14 @@ describe('verification', () => {
 });
 
 describe('the documented limits', () => {
-  test('names the missing receipt join and the missing engine digest', () => {
+  test('names the receipt join and the engine digest the module and the page have since closed', () => {
     expect(LIMITS.map((limit) => limit.id)).toEqual(['receipt-join', 'engine-digest']);
     for (const limit of LIMITS) {
-      expect(limit.missing.length).toBeGreaterThan(0);
-      expect(limit.caveat).toContain('missing');
+      expect(limit.resolved.length).toBeGreaterThan(0);
+      expect(limit.page.length).toBeGreaterThan(0);
     }
+    expect(LIMITS[0].page).toContain('was missing, and now exists');
+    expect(LIMITS[1].page).toContain('could not be recomputed, and now can');
   });
 
   test('carries the append-only rule as the module states it', () => {

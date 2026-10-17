@@ -56,7 +56,7 @@ export const ASSERTIONS = [
         'module and no order-submission call, run over the resolved module set rather than over source ' +
         'text.',
       DESIGN,
-      1800,
+      1804,
       "1. A dependency assertion that the discovery subpackage's import graph contains no live adapter\n" +
         '   module and no order-submission call, run over the resolved module set rather than over source\n' +
         '   text.',
@@ -72,7 +72,7 @@ export const ASSERTIONS = [
         'an import-graph check is evidence rather than proof: dynamic imports, indirect callbacks and a ' +
           'shared execution stack can all evade a check made over module names',
         DESIGN,
-        1810,
+        1814,
         'Those four tests are necessary and not sufficient, and the review is right that an import-graph check\n' +
           'is evidence rather than proof: dynamic imports, indirect callbacks and a shared execution stack can\n' +
           'all evade a check made over module names. The stronger control is a capability boundary expressed as',
@@ -86,7 +86,7 @@ export const ASSERTIONS = [
       'A capability assertion that the only execution client reachable from the discovery entry point is ' +
         'the sandbox one.',
       DESIGN,
-      1803,
+      1807,
       '2. A capability assertion that the only execution client reachable from the discovery entry point is\n' +
         '   the sandbox one.',
     ),
@@ -101,7 +101,7 @@ export const ASSERTIONS = [
         'the stronger control is the shape of the worker environment, and nothing in the repository ' +
           'provisions the environment the declaration describes, so the shape itself is still procedural',
         PLAN,
-        798,
+        825,
         'over module names, and the stronger control is the shape of the worker environment: `config.py`\n' +
           'declares a capability allowlist per campaign and `check_worker_capabilities` measures the packages a\n' +
           'worker holds against it, so the shape is checkable where it is declared, but nothing in the\n' +
@@ -117,7 +117,7 @@ export const ASSERTIONS = [
       'An environment assertion that no adapter credential variable is set in the discovery process, and ' +
         'that the configuration loader refuses a credential in a policy file.',
       DESIGN,
-      1805,
+      1809,
       '3. An environment assertion that no adapter credential variable is set in the discovery process, and\n' +
         '   that the configuration loader refuses a credential in a policy file.',
     ),
@@ -134,7 +134,7 @@ export const ASSERTIONS = [
           "process: that no adapter credential variable is set in the environment discovery runs in is the " +
           "fixture's own assertion",
         PLAN,
-        803,
+        830,
         'credential in a policy file, which `config.py` now does: it reads the policy document the campaign\n' +
           'declares, refuses a credential anywhere in it by variable name or by the shape of a secret without\n' +
           'repeating the value, and checks the digest the declaration pins against the document it read, so\n' +
@@ -162,7 +162,7 @@ export const ASSERTIONS = [
       'A negative test that a candidate attempting to name an execution venue is refused by the validator, ' +
         'with the refusal recorded.',
       DESIGN,
-      1807,
+      1811,
       '4. A negative test that a candidate attempting to name an execution venue is refused by the\n' +
         '   validator, with the refusal recorded.',
     ),
@@ -317,7 +317,7 @@ export const CAPABILITY = {
     'Discovery workers run in an environment with an explicit capability allowlist, not in the ' +
       "operator's working environment.",
     DESIGN,
-    1815,
+    1819,
     '- Discovery workers run in an environment with an explicit capability allowlist, not in the\n' +
       "  operator's working environment.",
   ),
@@ -325,7 +325,7 @@ export const CAPABILITY = {
     'No broker or live execution adapter is installed there, so an import naming one fails for want of ' +
       'the package.',
     DESIGN,
-    1817,
+    1821,
     '- No broker or live execution adapter is installed there, so an import naming one fails for want of\n' +
       '  the package.',
   ),
@@ -333,20 +333,20 @@ export const CAPABILITY = {
     'No credential-bearing configuration file is mounted and no credential variable is set, so a ' +
       'submission path that survived has nothing to authenticate with.',
     DESIGN,
-    1819,
+    1823,
     '- No credential-bearing configuration file is mounted and no credential variable is set, so a\n' +
       '  submission path that survived has nothing to authenticate with.',
   ),
   sandboxOnly: fact(
     'Only the sandbox venue is exposed to a strategy worker.',
     DESIGN,
-    1821,
+    1825,
     '- Only the sandbox venue is exposed to a strategy worker.',
   ),
   noExecutionCapability: fact(
     'The orchestrator and the result-registration process carry no execution capability at all',
     DESIGN,
-    1822,
+    1826,
     '- The orchestrator and the result-registration process carry no execution capability at all, which is\n' +
       '  the same separation Section 8.4 states for the append protocol.',
   ),
@@ -354,7 +354,7 @@ export const CAPABILITY = {
     'a capability check that a worker environment contains only allowlisted packages and that a ' +
       'submission attempt would have nothing to authenticate with',
     DESIGN,
-    1985,
+    1989,
     '12. **The execution boundary is tested.** Adding a live adapter to the discovery import graph fails\n' +
       '    the dependency assertion, a candidate naming an execution venue is refused, and no broker\n' +
       '    credential, live adapter or order-submission path is present in the discovery environment or the\n' +
@@ -365,14 +365,14 @@ export const CAPABILITY = {
   deliverable: fact(
     '`FX-M6-1`: dependency assertion, capability allowlist, no credential, negative submission test',
     PLAN,
-    749,
+    776,
     '| M6.2       | Assert the execution boundary                            | `FX-M6-1`: dependency assertion, capability allowlist, no credential, negative submission test     |',
   ),
   declared: fact(
     '`discovery/config.py` declares a capability allowlist per campaign, refuses an entry that names a ' +
       'live adapter, and `check_worker_capabilities` measures the packages a worker holds against it',
     PLAN,
-    798,
+    825,
     'over module names, and the stronger control is the shape of the worker environment: `config.py`\n' +
       'declares a capability allowlist per campaign and `check_worker_capabilities` measures the packages a\n' +
       'worker holds against it, so the shape is checkable where it is declared, but nothing in the',
@@ -381,7 +381,7 @@ export const CAPABILITY = {
     'the shape of the worker environment, which is declared and checked in `discovery/config.py` but ' +
       'provisioned by nothing, so the shape itself is still procedural',
     PLAN,
-    801,
+    828,
     'repository provisions the environment the declaration describes, so the shape itself is still\n' +
       'procedural. The design\'s environment assertion also asks that a configuration loader refuse a',
   ),
@@ -398,7 +398,7 @@ export const AUTHORITY = [
     note: fact(
       'Only the sandbox venue is exposed to a strategy worker.',
       DESIGN,
-      1821,
+      1825,
       '- Only the sandbox venue is exposed to a strategy worker.',
     ),
   },
@@ -410,7 +410,7 @@ export const AUTHORITY = [
     note: fact(
       'The orchestrator and the result-registration process carry no execution capability at all',
       DESIGN,
-      1822,
+      1826,
       '- The orchestrator and the result-registration process carry no execution capability at all, which is\n' +
         '  the same separation Section 8.4 states for the append protocol.',
     ),
@@ -423,7 +423,7 @@ export const AUTHORITY = [
     note: fact(
       'The orchestrator and the result-registration process carry no execution capability at all',
       DESIGN,
-      1822,
+      1826,
       '- The orchestrator and the result-registration process carry no execution capability at all, which is\n' +
         '  the same separation Section 8.4 states for the append protocol.',
     ),

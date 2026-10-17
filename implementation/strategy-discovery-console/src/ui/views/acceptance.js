@@ -1,21 +1,20 @@
 /**
- * The acceptance record: twenty-two criteria, eighteen that pass and four that do not.
+ * The acceptance record: twenty-two criteria, all twenty-two passing, none failed and none blocked.
  *
  * This view models `python/tests/acceptance/discovery_acceptance_bundle.json` and design Section 15 of
  * `docs/design/strategy_discovery_design.md`. It is the one page in the console that is not about a
- * mechanism: it shows the whole record, marks the four failures, explains each by the missing piece
- * behind it rather than by the symptom it shows, and prints the canonical credential list the boundary
- * is read against.
+ * mechanism: it shows the whole record, names the four criteria that used to fail together with what
+ * closed each, and prints the canonical credential list the boundary is read against.
  *
  * Every status on screen comes from `ctx.data.criteria()` through `../engine/acceptance.js`, and every
- * failure explanation comes from `../data/acceptance.js`. Nothing here writes a status by hand: a view
+ * record of a closure comes from `../data/acceptance.js`. Nothing here writes a status by hand: a view
  * that could decide a status could also flatter one.
  */
 
 import { valueOf } from '../../data/source.js';
 import { COUNTS, RULES, SHARED_CAUSE } from '../../data/acceptance.js';
 import { CREDENTIALS, CREDENTIALS_PATH } from '../../data/boundary.js';
-import { byMilestone, describe as describeRow, explain, summary } from '../../engine/acceptance.js';
+import { byMilestone, describe as describeRow, explain, failing, summary } from '../../engine/acceptance.js';
 
 export const meta = {
   id: 'acceptance',
@@ -40,7 +39,8 @@ export function mount(root, ctx) {
   const rows = ctx.data.criteria();
   const credentials = ctx.data.credentials();
   const tally = summary(rows);
-  const failures = explain(rows);
+  const failed = failing(rows);
+  const former = explain(rows);
 
   // ---- 1. The idea ----------------------------------------------------------------------------
 
@@ -56,8 +56,9 @@ export function mount(root, ctx) {
       ui.quote(valueOf(COUNTS.sentence), 'tutorials/strategy-discovery/the-boundary/README.md'),
       ui.note(
         `The bundle validates ${tally.total} entries against its schema and records each one's ` +
-          "identity, so a criterion cannot be satisfied by the existence of a design section. The " +
-          `entry this page reads is ${meta.tutorial}, and the four failures are part of it.`,
+          'identity, so a criterion cannot be satisfied by the existence of a design section. The ' +
+          `entry this page reads is ${meta.tutorial}: all ${tally.passed} pass, and the four that ` +
+          'used to fail are recorded there as closed.',
       ),
     ),
   );
@@ -72,7 +73,7 @@ export function mount(root, ctx) {
       ui.metrics(
         ui.metric('Entries', tally.total, 'the whole list', 'accent'),
         ui.metric('Passed', tally.passed, 'with their identities', 'ok'),
-        ui.metric('Failed', tally.failed, 'with their defects named', 'bad'),
+        ui.metric('Failed', tally.failed, 'none remains', 'ok'),
         ui.metric('Blocked', tally.blocked, 'a legitimate status, used by none', 'muted'),
       ),
       ui.note(
@@ -118,21 +119,23 @@ export function mount(root, ctx) {
     ),
   );
 
-  // ---- 3. What it records as failed -----------------------------------------------------------
+  // ---- 3. The four criteria that used to fail -------------------------------------------------
 
   root.appendChild(
     ui.panel(
       {
-        title: 'The four failures, and the missing piece behind each',
-        subtitle: 'Reported, never hidden, and never presented as a pass',
-        tone: 'bad',
+        title: 'The four criteria that used to fail, and what closed each',
+        subtitle: 'The list of failed criteria is empty; these four are recorded as closed',
+        tone: 'ok',
       },
       ui.note(
-        `Each failure below carries the bundle's own observed line and defect beside the cause the ` +
-          'page names, because a failure explained by its symptom would tell a reader nothing about ' +
-          'what is absent. The console has no default value to fall back on and makes none.',
+        `The list of failed criteria is empty: ${failed.length} of ${tally.total} remain. The four ` +
+          'below are the criteria that used to fail, each with the bundle\'s own observed line and ' +
+          'the defect it records against the criterion, which now reads as what closed the failure ' +
+          'rather than as what is absent. The console has no default value to fall back on and ' +
+          'makes none.',
       ),
-      ...failures.map((failure) =>
+      ...former.map((failure) =>
         ui.group(
           failure.joined
             ? `Criterion ${failure.id}. ${failure.requirement}`
@@ -143,11 +146,10 @@ export function mount(root, ctx) {
             failure.fixture ? ui.badge(failure.fixture, 'muted') : null,
           ),
           ui.note(failure.observed),
-          ui.note(`The bundle records as the defect: ${failure.defect}`, 'warn'),
-          ui.note(`The missing piece: ${failure.missing}`, 'bad'),
+          ui.note(`The bundle records as what closed it: ${failure.closed}`, 'ok'),
         ),
       ),
-      ui.note(valueOf(SHARED_CAUSE), 'warn'),
+      ui.note(valueOf(SHARED_CAUSE), 'ok'),
     ),
   );
 
@@ -206,9 +208,9 @@ export function mount(root, ctx) {
       ]),
       ui.note(
         'The criteria themselves are transcribed in src/data/layers.js and read here through ' +
-          'data.criteria(); the four failures and their missing pieces are transcribed in ' +
-          'src/data/acceptance.js. This view computes the tally and the grouping over those rows ' +
-          'and restates neither.',
+          'data.criteria(); the four criteria that used to fail, and what closed each, are ' +
+          'transcribed in src/data/acceptance.js. This view computes the tally and the grouping ' +
+          'over those rows and restates neither.',
       ),
     ),
   );

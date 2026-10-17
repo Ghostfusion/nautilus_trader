@@ -26,19 +26,19 @@ const AUDITING = 'tutorials/strategy-discovery/auditing-a-campaign/README.md';
  * read an entry, a line of the inventory, the counts mapping, an envelope and the acceptance bundle.
  */
 export const FORMATS = [
-  fact('discovery.ledger/v2', LEDGER, 75, 'LEDGER_SCHEMA = "discovery.ledger/v2"'),
-  fact('discovery.inventory/v1', LEDGER, 78, 'INVENTORY_SCHEMA = "discovery.inventory/v1"'),
-  fact('discovery.counts/v1', LEDGER, 82, 'COUNTS_MAPPING = "discovery.counts/v1"'),
-  fact('discovery.envelope/v1', LEDGER, 85, 'ENVELOPE_SCHEMA = "discovery.envelope/v1"'),
+  fact('discovery.ledger/v2', LEDGER, 76, 'LEDGER_SCHEMA = "discovery.ledger/v2"'),
+  fact('discovery.inventory/v1', LEDGER, 79, 'INVENTORY_SCHEMA = "discovery.inventory/v1"'),
+  fact('discovery.counts/v1', LEDGER, 83, 'COUNTS_MAPPING = "discovery.counts/v1"'),
+  fact('discovery.envelope/v1', LEDGER, 86, 'ENVELOPE_SCHEMA = "discovery.envelope/v1"'),
   fact(
     'discovery.acceptance-bundle/v2',
     LEDGER,
-    88,
+    89,
     'BUNDLE_SCHEMA = "discovery.acceptance-bundle/v2"',
   ),
-  fact('entries', LEDGER, 90, '_ENTRIES_DIR = "entries"'),
-  fact('inventory.jsonl', LEDGER, 91, '_EVENTS_FILE = "inventory.jsonl"'),
-  fact('inventory.writer', LEDGER, 92, '_WRITER_FILE = "inventory.writer"'),
+  fact('entries', LEDGER, 91, '_ENTRIES_DIR = "entries"'),
+  fact('inventory.jsonl', LEDGER, 92, '_EVENTS_FILE = "inventory.jsonl"'),
+  fact('inventory.writer', LEDGER, 93, '_WRITER_FILE = "inventory.writer"'),
 ];
 
 /**
@@ -47,29 +47,29 @@ export const FORMATS = [
  * is the order the module declares, and the view offers the kinds in it.
  */
 export const ENTRY_KIND_FACTS = [
-  fact('proposal_recorded', LEDGER, 456, 'PROPOSAL_RECORDED = "proposal_recorded"'),
-  fact('specification_refused', LEDGER, 457, 'SPECIFICATION_REFUSED = "specification_refused"'),
-  fact('compilation_recorded', LEDGER, 458, 'COMPILATION_RECORDED = "compilation_recorded"'),
-  fact('equivalence_merge', LEDGER, 459, 'EQUIVALENCE_MERGE = "equivalence_merge"'),
-  fact('job_submitted', LEDGER, 460, 'JOB_SUBMITTED = "job_submitted"'),
+  fact('proposal_recorded', LEDGER, 457, 'PROPOSAL_RECORDED = "proposal_recorded"'),
+  fact('specification_refused', LEDGER, 458, 'SPECIFICATION_REFUSED = "specification_refused"'),
+  fact('compilation_recorded', LEDGER, 459, 'COMPILATION_RECORDED = "compilation_recorded"'),
+  fact('equivalence_merge', LEDGER, 460, 'EQUIVALENCE_MERGE = "equivalence_merge"'),
+  fact('job_submitted', LEDGER, 461, 'JOB_SUBMITTED = "job_submitted"'),
   fact(
     'execution_attempt_closed',
     LEDGER,
-    461,
+    462,
     'EXECUTION_ATTEMPT_CLOSED = "execution_attempt_closed"',
   ),
-  fact('registration_verified', LEDGER, 462, 'REGISTRATION_VERIFIED = "registration_verified"'),
-  fact('trial_admitted', LEDGER, 463, 'TRIAL_ADMITTED = "trial_admitted"'),
+  fact('registration_verified', LEDGER, 463, 'REGISTRATION_VERIFIED = "registration_verified"'),
+  fact('trial_admitted', LEDGER, 464, 'TRIAL_ADMITTED = "trial_admitted"'),
   fact(
     'registration_incomplete',
     LEDGER,
-    464,
+    465,
     'REGISTRATION_INCOMPLETE = "registration_incomplete"',
   ),
-  fact('duplicate_registration', LEDGER, 465, 'DUPLICATE_REGISTRATION = "duplicate_registration"'),
-  fact('gate_verdict', LEDGER, 466, 'GATE_VERDICT = "gate_verdict"'),
-  fact('custody_event', LEDGER, 467, 'CUSTODY_EVENT = "custody_event"'),
-  fact('search_policy_recorded', LEDGER, 468, 'SEARCH_POLICY_RECORDED = "search_policy_recorded"'),
+  fact('duplicate_registration', LEDGER, 466, 'DUPLICATE_REGISTRATION = "duplicate_registration"'),
+  fact('gate_verdict', LEDGER, 467, 'GATE_VERDICT = "gate_verdict"'),
+  fact('custody_event', LEDGER, 468, 'CUSTODY_EVENT = "custody_event"'),
+  fact('search_policy_recorded', LEDGER, 469, 'SEARCH_POLICY_RECORDED = "search_policy_recorded"'),
 ];
 
 /**
@@ -77,67 +77,67 @@ export const ENTRY_KIND_FACTS = [
  * missing one of these, so a caller cannot write a bare record; it checks presence only, never type.
  */
 export const REQUIRED_FIELDS = {
-  proposal_recorded: fact([], LEDGER, 1400, 'EventKind.PROPOSAL_RECORDED: (),'),
-  specification_refused: fact(['code'], LEDGER, 1401, 'EventKind.SPECIFICATION_REFUSED: ("code",),'),
+  proposal_recorded: fact([], LEDGER, 1401, 'EventKind.PROPOSAL_RECORDED: (),'),
+  specification_refused: fact(['code'], LEDGER, 1402, 'EventKind.SPECIFICATION_REFUSED: ("code",),'),
   compilation_recorded: fact(
     ['specification_digest', 'new_configuration'],
     LEDGER,
-    1402,
+    1403,
     'EventKind.COMPILATION_RECORDED: ("specification_digest", "new_configuration"),',
   ),
   equivalence_merge: fact(
     ['merged_into', 'rule'],
     LEDGER,
-    1403,
+    1404,
     'EventKind.EQUIVALENCE_MERGE: ("merged_into", "rule"),',
   ),
-  job_submitted: fact([], LEDGER, 1404, 'EventKind.JOB_SUBMITTED: (),'),
+  job_submitted: fact([], LEDGER, 1405, 'EventKind.JOB_SUBMITTED: (),'),
   execution_attempt_closed: fact(
     ['outcome'],
     LEDGER,
-    1405,
+    1406,
     'EventKind.EXECUTION_ATTEMPT_CLOSED: ("outcome",)',
   ),
   registration_verified: fact(
-    ['receipt', 'receipt_digest'],
+    ['receipt', 'receipt_digest', 'manifest'],
     LEDGER,
-    1406,
-    'EventKind.REGISTRATION_VERIFIED: ("receipt", "receipt_digest"),',
+    1407,
+    'EventKind.REGISTRATION_VERIFIED: ("receipt", "receipt_digest", "manifest"),',
   ),
   trial_admitted: fact(
     ['receipt_digest'],
     LEDGER,
-    1407,
+    1408,
     'EventKind.TRIAL_ADMITTED: ("receipt_digest",)',
   ),
   registration_incomplete: fact(
     ['reason'],
     LEDGER,
-    1408,
+    1409,
     'EventKind.REGISTRATION_INCOMPLETE: ("reason",)',
   ),
   duplicate_registration: fact(
     ['reason'],
     LEDGER,
-    1409,
+    1410,
     'EventKind.DUPLICATE_REGISTRATION: ("reason",)',
   ),
   gate_verdict: fact(
     ['gate', 'status', 'evidence_digest'],
     LEDGER,
-    1410,
+    1411,
     'EventKind.GATE_VERDICT: ("gate", "status", "evidence_digest"),',
   ),
   custody_event: fact(
     ['transition', 'detail'],
     LEDGER,
-    1411,
+    1412,
     'EventKind.CUSTODY_EVENT: ("transition", "detail"),',
   ),
   search_policy_recorded: fact(
     ['search_policy_digest'],
     LEDGER,
-    1412,
+    1413,
     'EventKind.SEARCH_POLICY_RECORDED: ("search_policy_digest",)',
   ),
 };
@@ -216,9 +216,9 @@ export const SERIALISATION = {
   ),
   enginePrefix: fact(
     'blake3:',
-    LEDGER,
-    3374,
-    '"the engine\'s canonical blake3 digest, which the extension computes from the "',
+    BUNDLE,
+    47,
+    '"artifact_digest": "blake3:577e55e9b89511a9c7b4cdeb270d0172cdf5b4ab419d5a3ff6b741ac9d4fa8d8",',
   ),
 };
 
@@ -230,19 +230,19 @@ export const CHAIN_RULES = {
   recordDigest: fact(
     'digest_of(canonical_mapping(self.to_dict()))',
     LEDGER,
-    894,
+    895,
     'return digest_of(canonical_mapping(self.to_dict()))',
   ),
   recordFields: fact(
     ['sequence', 'kind', 'key', 'candidate_id', 'payload', 'previous'],
     LEDGER,
-    835,
+    836,
     '"sequence": self.sequence,\n            "kind": self.kind.value,\n            "key": self.key,\n            "candidate_id": self.candidate_id,\n            "payload": dict(self.payload),\n            "previous": self.previous,',
   ),
   keyFile: fact(
     'digest.replace(":", "_")',
     LEDGER,
-    444,
+    445,
     'return digest.replace(":", "_")',
   ),
   appendOnly: fact(
@@ -254,22 +254,22 @@ export const CHAIN_RULES = {
   sequenceFinding: fact(
     'event {position} records sequence {event.sequence}: a record was removed or inserted',
     LEDGER,
-    2306,
+    2334,
     'f"event {position} records sequence {event.sequence}: a record was removed "\n                    f"or inserted",',
   ),
   linkFinding: fact(
     'event {position} chains to {event.previous!r} instead of {previous!r}',
     LEDGER,
-    2311,
+    2339,
     'f"event {position} chains to {event.previous!r} instead of {previous!r}",',
   ),
   checkpointFinding: fact(
     'the inventory ends at {head!r} and the checkpoint holds {checkpoint!r}',
     LEDGER,
-    2318,
+    2346,
     'f"the inventory ends at {head!r} and the checkpoint holds {checkpoint!r}",',
   ),
-  emptyHead: fact('', LEDGER, 2249, 'return "" if not events else events[-1].digest()'),
+  emptyHead: fact('', LEDGER, 2277, 'return "" if not events else events[-1].digest()'),
 };
 
 /** The messages the ledger raises when a caller asks for something the write path refuses. */
@@ -277,19 +277,19 @@ export const REFUSAL_MESSAGES = {
   REWRITE_REFUSED: fact(
     'an entry for candidate {package.candidate_id} already exists at {path}',
     LEDGER,
-    383,
+    384,
     'f"an entry for candidate {package.candidate_id} already exists at {path}",',
   ),
   MISSING_REQUIRED_FIELD: fact(
     'a {kind.value} event is missing {sorted(missing)}',
     LEDGER,
-    2416,
+    2444,
     'raise ValueError(f"a {kind.value} event is missing {sorted(missing)}")',
   ),
   KIND_NOT_IN_VOCABULARY: fact(
     'kind must be an EventKind',
     LEDGER,
-    823,
+    824,
     'raise TypeError("kind must be an EventKind")',
   ),
 };
@@ -344,7 +344,7 @@ export const OUTCOME_RULE = {
   codeLines: fact(
     ['return verdicts[-1].status', 'return "admitted" if admitted else "ran"', 'return "refused" if refusals else "proposed"'],
     LEDGER,
-    2641,
+    2669,
     'return verdicts[-1].status\n        if attempts:\n            return "admitted" if admitted else "ran"\n\n        return "refused" if refusals else "proposed"',
   ),
 };
@@ -354,11 +354,11 @@ export const OUTCOME_RULE = {
  * nor a failure; a report that printed it as `false` would be wrong.
  */
 export const POLICY_COMPARISON = {
-  nothingDeclared: fact('', LEDGER, 2778, 'if not self.policy_digest:\n            return None'),
+  nothingDeclared: fact('', LEDGER, 2806, 'if not self.policy_digest:\n            return None'),
   match: fact(
     'self.policy_digest == self.recorded_policy_digest',
     LEDGER,
-    2781,
+    2809,
     'return self.policy_digest == self.recorded_policy_digest',
   ),
   tutorial: fact(
@@ -386,7 +386,7 @@ export const AUDIT_DIGEST = {
   recipe: fact(
     'digest_of(canonical_mapping(self.to_dict()))',
     LEDGER,
-    2824,
+    2852,
     'return digest_of(canonical_mapping(self.to_dict()))',
   ),
 };
@@ -453,60 +453,108 @@ export const REFUSED_ASSERTION_FACTS = [
 ];
 
 /**
- * The defects the acceptance bundle records against the two acceptance criteria this slice cannot
- * pass. They are the missing pieces in the bundle's own words, so the console names the failure with
- * the evidence rather than describing it.
+ * What the acceptance bundle records against the two acceptance criteria this slice carries. Both now
+ * pass, and each entry's `defect` reads as what closed the failure rather than as what is absent, so
+ * the console names the change in the bundle's own words rather than describing it.
  */
 export const CRITERION_DEFECTS = {
   2: fact(
-    'the canonical blake3 digest and the seed, build and configuration join cannot be recomputed in Python: the engine computes the digest from the document it holds, and the manifest of decision M1.3 has no binding',
+    'closed by this change. The recomputation previously named three inputs unavailable: the ' +
+    'engine\'s canonical blake3 digest, the seed, build and configuration join of decision M1.3, ' +
+    'and the retained artifact, which no store was supplied to resolve. The digest is now ' +
+    'recomputed from the retained bytes with CanonicalBacktestResult.digest_of_bytes, the ' +
+    'manifest is produced by the engine itself through BacktestNode.get_run_manifest and retained ' +
+    'beside the receipt at registration, and the fixture supplies a store, so nothing is ' +
+    'unavailable and every quantity agrees',
     BUNDLE,
-    45,
-    '"defect": "the canonical blake3 digest and the seed, build and configuration join cannot be recomputed in Python: the engine computes the digest from the document it holds, and the manifest of decision M1.3 has no binding"',
+    56,
+    '"defect": "closed by this change. The recomputation previously named three inputs ' +
+    'unavailable: the engine\'s canonical blake3 digest, the seed, build and configuration join of ' +
+    'decision M1.3, and the retained artifact, which no store was supplied to resolve. The digest ' +
+    'is now recomputed from the retained bytes with CanonicalBacktestResult.digest_of_bytes, the ' +
+    'manifest is produced by the engine itself through BacktestNode.get_run_manifest and retained ' +
+    'beside the receipt at registration, and the fixture supplies a store, so nothing is ' +
+    'unavailable and every quantity agrees"',
   ),
   10: fact(
-    "the engine's canonical digest cannot be recomputed from retained bytes, and the engine-side run manifest of decision M1.3 is unreachable from Python, so the envelope is not complete over its whole span",
+    'closed by this change. Previously the engine\'s canonical digest could not be recomputed from ' +
+    'retained bytes and the engine-side run manifest of decision M1.3 was unreachable from ' +
+    'Python, so the envelope was not complete over its whole span and the recomputation named ' +
+    'both; a third input, the retained artifact, was named whenever no store was supplied. The ' +
+    'digest now recomputes through CanonicalBacktestResult.digest_of_bytes, the engine produces ' +
+    'the manifest through BacktestNode.get_run_manifest and the registration retains it, and the ' +
+    'fixture supplies the store, so the recomputation agrees with nothing unavailable',
     BUNDLE,
-    230,
-    '"defect": "the engine\'s canonical digest cannot be recomputed from retained bytes, and the engine-side run manifest of decision M1.3 is unreachable from Python, so the envelope is not complete over its whole span"',
+    251,
+    '"defect": "closed by this change. Previously the engine\'s canonical digest could not be ' +
+    'recomputed from retained bytes and the engine-side run manifest of decision M1.3 was ' +
+    'unreachable from Python, so the envelope was not complete over its whole span and the ' +
+    'recomputation named both; a third input, the retained artifact, was named whenever no store ' +
+    'was supplied. The digest now recomputes through CanonicalBacktestResult.digest_of_bytes, the ' +
+    'engine produces the manifest through BacktestNode.get_run_manifest and the registration ' +
+    'retains it, and the fixture supplies the store, so the recomputation agrees with nothing ' +
+    'unavailable"',
   ),
 };
 
 /**
- * The two limits the tutorial states. `unavailable` is the name the recomputation gives the missing
- * input and `caveat` is the tutorial's own paragraph, so the console can show what is missing
- * without computing it: the engine's canonical digest cannot be recomputed from retained bytes, and
- * the manifest a receipt is checked against has no engine-side binding.
+ * The two limits the tutorial once stated, and what closed each. `resolved` is the module's own
+ * sentence and `page` is the tutorial's own paragraph, which now records that the limit is closed
+ * rather than standing in for it, so the console shows both because the page and the code agree.
  */
 export const LIMIT_FACTS = [
   {
     id: 'receipt-join',
-    unavailable: fact(
-      'the engine-side run manifest a receipt is checked against, which has no Python binding until decision M1.3 is implemented',
+    resolved: fact(
+      'The manifest is retained rather than re-read, because the check a recomputation makes is ' +
+      'against what the run recorded, and the run is not repeated to make it.',
       LEDGER,
-      3378,
-      '"the engine-side run manifest a receipt is checked against, which has no Python "\n                "binding until decision M1.3 is implemented"',
+      1711,
+      'The manifest is retained rather than re-read, because the check a recomputation makes is\n' +
+      '        against what the run recorded, and the run is not repeated to make it.',
     ),
-    caveat: fact(
-      "The receipt join is missing. The runner cannot yet emit a receipt that joins the seed, the build and the configuration to the engine's own run record, so until decision M1.3's narrow engine-side step exists, the manifest reconciliation compares against is the one the caller declares. The check is real and its tampered-receipt fixture is discriminating; what it cannot yet claim is that the manifest is the engine's own, and the missing piece is that engine-side run manifest binding.",
+    page: fact(
+      'The receipt join was missing, and now exists. The runner emits a receipt that joins the ' +
+      'seed, the build and the configuration to the engine\'s own run record: the backtest node is ' +
+      'asked for its manifest, BacktestNode.get_run_manifest, and the registration retains it, so ' +
+      'the reconciliation compares against the engine\'s own declaration rather than the one the ' +
+      'caller declares. The check and its tampered-receipt fixture are unchanged; what the page ' +
+      'records is that the binding the fixture leaned on is now the engine\'s own.',
       WHAT_RAN,
       218,
-      "- The receipt join is missing. The runner cannot yet emit a receipt that joins the seed, the build\n  and the configuration to the engine's own run record, so until decision M1.3's narrow engine-side\n  step exists, the manifest reconciliation compares against is the one the caller declares. The check\n  is real and its tampered-receipt fixture is discriminating; what it cannot yet claim is that the\n  manifest is the engine's own, and the missing piece is that engine-side run manifest binding.",
+      '- The receipt join was missing, and now exists. The runner emits a receipt that joins the ' +
+      'seed, the\n  build and the configuration to the engine\'s own run record: the backtest node is ' +
+      'asked for its\n  manifest, `BacktestNode.get_run_manifest`, and the registration retains it, ' +
+      'so the reconciliation\n  compares against the engine\'s own declaration rather than the one ' +
+      'the caller declares. The check\n  and its tampered-receipt fixture are unchanged; what the ' +
+      'page records is that the binding the\n  fixture leaned on is now the engine\'s own.',
     ),
   },
   {
     id: 'engine-digest',
-    unavailable: fact(
-      "the engine's canonical blake3 digest, which the extension computes from the document it holds and no Python surface recomputes from retained bytes",
+    resolved: fact(
+      'The engine\'s canonical digest is recomputed from the retained bytes with the extension\'s own ' +
+      'hashing step, so a document that was retained is checked against the digest it was recorded ' +
+      'under rather than against its SHA-256 alone.',
       LEDGER,
-      3374,
-      '"the engine\'s canonical blake3 digest, which the extension computes from the "\n                "document it holds and no Python surface recomputes from retained bytes"',
+      3303,
+      'The engine\'s canonical digest is recomputed from the retained bytes with the extension\'s own\n' +
+      '    hashing step, so a document that was retained is checked against the digest it was recorded\n' +
+      '    under rather than against its SHA-256 alone.',
     ),
-    caveat: fact(
-      "The engine's own fingerprint cannot be recomputed. The extension computes its canonical digest from the document it holds and exposes no surface that recomputes it from retained bytes, so the ledger records the digest and the document's SHA-256 and the recomputation verifies only the latter. The missing piece is a narrow engine-side hashing step over the retained bytes; until it exists, criterion 10 cannot pass and a rerun cannot be shown identical from the record alone.",
+    page: fact(
+      'The engine\'s own fingerprint could not be recomputed, and now can. The extension exposes ' +
+      'CanonicalBacktestResult.digest_of_bytes, which recomputes the canonical digest from the ' +
+      'bytes a store retains, so the ledger records the digest and the document\'s SHA-256 and the ' +
+      'recomputation verifies both. A rerun is shown identical from the record alone, which is what ' +
+      'criterion 10 asks for.',
       WHAT_RAN,
-      223,
-      "- The engine's own fingerprint cannot be recomputed. The extension computes its canonical digest\n  from the document it holds and exposes no surface that recomputes it from retained bytes, so the\n  ledger records the digest and the document's SHA-256 and the recomputation verifies only the\n  latter. The missing piece is a narrow engine-side hashing step over the retained bytes; until it\n  exists, criterion 10 cannot pass and a rerun cannot be shown identical from the record alone.",
+      224,
+      '- The engine\'s own fingerprint could not be recomputed, and now can. The extension exposes\n  ' +
+      '`CanonicalBacktestResult.digest_of_bytes`, which recomputes the canonical digest from the ' +
+      'bytes a\n  store retains, so the ledger records the digest and the document\'s SHA-256 and the ' +
+      'recomputation\n  verifies both. A rerun is shown identical from the record alone, which is ' +
+      'what criterion 10 asks\n  for.',
     ),
   },
 ];

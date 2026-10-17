@@ -9,6 +9,8 @@
  * depend on a judged candidate are reported as not reached.
  */
 
+import { FORMER_FAILURES } from '../../data/acceptance.js';
+import { valueOf } from '../../data/source.js';
 import { DEFECTS, DEFAULT_OPTIONS } from '../../engine/campaign.js';
 
 export const meta = {
@@ -21,7 +23,7 @@ export const meta = {
 const TONES = { ok: 'ok', warn: 'warn', bad: 'bad', muted: 'muted' };
 
 export function mount(root, ctx) {
-  const { ui, data, store } = ctx;
+  const { ui, store } = ctx;
   const campaign = store.getCampaign();
   const options = store.getOptions();
 
@@ -256,19 +258,18 @@ export function mount(root, ctx) {
         `Read under ${campaign.digests.policy.slice(0, 19)}... over ${campaign.ledger.entries} entries, whose chain verifies against its own head.`,
       ),
       ui.note(
-        'The audit deliberately does not claim the seed, build and configuration join: two of the twenty-two acceptance criteria need that identity and it does not exist at the engine boundary yet.',
-        'warn',
+        'The audit deliberately does not claim the seed, build and configuration join on its own account: two of the twenty-two acceptance criteria rest on that identity, and the engine now produces that manifest itself through BacktestNode.get_run_manifest, with the registration retaining it beside the receipt.',
+        'ok',
       ),
     ),
   );
 
-  const failing = data.failingCriteria();
   root.appendChild(
     ui.panel(
       { title: 'What this campaign does not claim' },
       ui.list([
         'It is one path, not a distribution. Nothing here is an estimate of anything.',
-        `The development results the search reads are declared by the campaign. The four acceptance criteria that do not pass (${failing.map((row) => row.id).join(', ')}) all bear on parts this console cannot exercise: the engine-side run manifest, the settlement bridge, the corporate-action entitlement stage and the engine digest recomputation.`,
+        `The development results the search reads are declared by the campaign. The four acceptance criteria that used to fail (${FORMER_FAILURES.map((failure) => valueOf(failure.id)).join(', ')}) all bore on parts this console cannot exercise - the engine-side run manifest, the settlement bridge, the corporate-action entitlement stage and the engine digest recomputation - and the bundle records each as closed by a change in the engine.`,
         'The shadow feed is declared rather than bound to a live adapter, which the plan records as a platform decision rather than a property of the code.',
         'The digests here are SHA-256 over a canonical serialisation. The engine\u2019s canonical digest is blake3, so no digest on this page can be compared with one recorded in the repository.',
         'The policy file loader exists and refuses a credential placed in a policy file, and the command front end reports that refusal by code. What no module does is provision the worker environment the capability allowlist describes, so that shape is still procedural.',

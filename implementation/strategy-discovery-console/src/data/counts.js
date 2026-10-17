@@ -24,43 +24,43 @@ const TUTORIAL = 'tutorials/strategy-discovery/counting-the-search/README.md';
 export const COUNTS_MAPPING = fact(
   'discovery.counts/v1',
   LEDGER,
-  82,
+  83,
   'COUNTS_MAPPING = "discovery.counts/v1"',
 );
 
 /** The four exact names a report uses for the counts, in the order the enum declares them. */
 export const COUNT_NAMES = [
-  fact('proposal_attempt_count', LEDGER, 476, 'PROPOSAL_ATTEMPT = "proposal_attempt_count"'),
+  fact('proposal_attempt_count', LEDGER, 477, 'PROPOSAL_ATTEMPT = "proposal_attempt_count"'),
   fact(
     'unique_configuration_count',
     LEDGER,
-    477,
+    478,
     'UNIQUE_CONFIGURATION = "unique_configuration_count"',
   ),
-  fact('executed_experiment_count', LEDGER, 478, 'EXECUTED_EXPERIMENT = "executed_experiment_count"'),
-  fact('statistical_trial_count', LEDGER, 479, 'STATISTICAL_TRIAL = "statistical_trial_count"'),
+  fact('executed_experiment_count', LEDGER, 479, 'EXECUTED_EXPERIMENT = "executed_experiment_count"'),
+  fact('statistical_trial_count', LEDGER, 480, 'STATISTICAL_TRIAL = "statistical_trial_count"'),
 ];
 
 /** The closed vocabulary of inventory events. An event outside it cannot change a count. */
 export const EVENT_KINDS = [
-  fact('proposal_recorded', LEDGER, 456, 'PROPOSAL_RECORDED = "proposal_recorded"'),
-  fact('specification_refused', LEDGER, 457, 'SPECIFICATION_REFUSED = "specification_refused"'),
-  fact('compilation_recorded', LEDGER, 458, 'COMPILATION_RECORDED = "compilation_recorded"'),
-  fact('equivalence_merge', LEDGER, 459, 'EQUIVALENCE_MERGE = "equivalence_merge"'),
-  fact('job_submitted', LEDGER, 460, 'JOB_SUBMITTED = "job_submitted"'),
+  fact('proposal_recorded', LEDGER, 457, 'PROPOSAL_RECORDED = "proposal_recorded"'),
+  fact('specification_refused', LEDGER, 458, 'SPECIFICATION_REFUSED = "specification_refused"'),
+  fact('compilation_recorded', LEDGER, 459, 'COMPILATION_RECORDED = "compilation_recorded"'),
+  fact('equivalence_merge', LEDGER, 460, 'EQUIVALENCE_MERGE = "equivalence_merge"'),
+  fact('job_submitted', LEDGER, 461, 'JOB_SUBMITTED = "job_submitted"'),
   fact(
     'execution_attempt_closed',
     LEDGER,
-    461,
+    462,
     'EXECUTION_ATTEMPT_CLOSED = "execution_attempt_closed"',
   ),
-  fact('registration_verified', LEDGER, 462, 'REGISTRATION_VERIFIED = "registration_verified"'),
-  fact('trial_admitted', LEDGER, 463, 'TRIAL_ADMITTED = "trial_admitted"'),
-  fact('registration_incomplete', LEDGER, 464, 'REGISTRATION_INCOMPLETE = "registration_incomplete"'),
-  fact('duplicate_registration', LEDGER, 465, 'DUPLICATE_REGISTRATION = "duplicate_registration"'),
-  fact('gate_verdict', LEDGER, 466, 'GATE_VERDICT = "gate_verdict"'),
-  fact('custody_event', LEDGER, 467, 'CUSTODY_EVENT = "custody_event"'),
-  fact('search_policy_recorded', LEDGER, 468, 'SEARCH_POLICY_RECORDED = "search_policy_recorded"'),
+  fact('registration_verified', LEDGER, 463, 'REGISTRATION_VERIFIED = "registration_verified"'),
+  fact('trial_admitted', LEDGER, 464, 'TRIAL_ADMITTED = "trial_admitted"'),
+  fact('registration_incomplete', LEDGER, 465, 'REGISTRATION_INCOMPLETE = "registration_incomplete"'),
+  fact('duplicate_registration', LEDGER, 466, 'DUPLICATE_REGISTRATION = "duplicate_registration"'),
+  fact('gate_verdict', LEDGER, 467, 'GATE_VERDICT = "gate_verdict"'),
+  fact('custody_event', LEDGER, 468, 'CUSTODY_EVENT = "custody_event"'),
+  fact('search_policy_recorded', LEDGER, 469, 'SEARCH_POLICY_RECORDED = "search_policy_recorded"'),
 ];
 
 /**
@@ -72,25 +72,25 @@ export const FOLD_RULES = [
   fact(
     'proposal_recorded adds one to proposals',
     LEDGER,
-    694,
+    695,
     'if event.kind is EventKind.PROPOSAL_RECORDED: proposals += 1',
   ),
   fact(
     'compilation_recorded adds one to configurations only when the identity is new',
     LEDGER,
-    696,
+    697,
     'elif event.kind is EventKind.COMPILATION_RECORDED: configurations += 1 if event.payload.get("new_configuration") else 0',
   ),
   fact(
     'execution_attempt_closed adds one to executions whatever the outcome',
     LEDGER,
-    698,
+    699,
     'elif event.kind is EventKind.EXECUTION_ATTEMPT_CLOSED: executions += 1',
   ),
   fact(
     'trial_admitted counts once per distinct idempotency key',
     LEDGER,
-    700,
+    701,
     'elif event.kind is EventKind.TRIAL_ADMITTED: admitted.add(event.key)',
   ),
 ];
@@ -121,13 +121,13 @@ export const DEPENDENCE_REFUSALS = [
   fact(
     'a dependent campaign that declares no effective count is refused',
     LEDGER,
-    2600,
+    2628,
     'raise ValueError("a campaign with dependent trials must declare its effective trial count")',
   ),
   fact(
     'an independent campaign that declares an effective count is refused',
     LEDGER,
-    2602,
+    2630,
     'raise ValueError("a campaign with independent trials must not declare an effective count")',
   ),
 ];
@@ -144,7 +144,7 @@ export const EFFECTIVE_COUNT_RELATION = fact(
 export const RETURN_SERIES_RULE = fact(
   'an attempt produced a usable return series only when completed or economically failed',
   LEDGER,
-  525,
+  526,
   'return self in (AttemptOutcome.COMPLETED, AttemptOutcome.ECONOMICALLY_FAILED)',
 );
 
@@ -152,7 +152,7 @@ export const RETURN_SERIES_RULE = fact(
 export const VALIDATION_ROLE_RULE = fact(
   'only the locked-validation role is admissible as validation',
   LEDGER,
-  502,
+  503,
   'return self is DataRole.LOCKED_VALIDATION',
 );
 

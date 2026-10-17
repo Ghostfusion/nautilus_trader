@@ -4,10 +4,13 @@
  * Every other view answers a question about one layer. This one answers the question a reader has
  * first - what am I looking at - and it answers it with the repository's own facts: the twelve
  * layers in pipeline order with the grade each tutorial page carries, the four acceptance criteria
- * that do not pass, and the parts of the design that are recorded as unbuilt or procedural.
+ * that used to fail and what closed each, and the parts of the design that are recorded as unbuilt
+ * or procedural.
  */
 
+import { FORMER_FAILURES } from '../../data/acceptance.js';
 import { criteria, failingCriteria, layers } from '../../data/layers.js';
+import { valueOf } from '../../data/source.js';
 
 export const meta = {
   id: 'overview',
@@ -48,7 +51,7 @@ export function mount(root, ctx) {
       ),
       ui.metrics(
         ui.metric('Layers modelled', String(rows.length), 'one per tutorial page', 'accent'),
-        ui.metric('Acceptance criteria', String(all.length), `${passed} pass, ${failing.length} do not`, failing.length === 0 ? 'ok' : 'warn'),
+        ui.metric('Acceptance criteria', String(all.length), `${passed} pass, ${failing.length} failing`, failing.length === 0 ? 'ok' : 'warn'),
         ui.metric('Credentials refused', String(data.credentials().length), 'the canonical list', 'violet'),
         ui.metric('Blocked criteria', String(blocked), 'not attempted rather than failed', 'muted'),
       ),
@@ -74,26 +77,35 @@ export function mount(root, ctx) {
     ),
   );
 
-  const four = failing.map((row) => [row.id, row.requirement, ui.badge(row.status, 'bad'), ui.h('span', { class: 'note', text: row.observed })]);
+  const byId = new Map(all.map((row) => [row.id, row]));
+  const former = FORMER_FAILURES.map((failure) => {
+    const row = byId.get(valueOf(failure.id));
+    return [
+      row.id,
+      row.requirement,
+      ui.badge(row.status, 'ok'),
+      ui.h('span', { class: 'note', text: valueOf(failure.closed) }),
+    ];
+  });
   root.appendChild(
     ui.panel(
-      { title: 'The four acceptance criteria that do not pass' },
+      { title: 'The four acceptance criteria that used to fail' },
       ui.h(
         'p',
         null,
         'The repository keeps one entry per acceptance criterion in the acceptance bundle, with the ',
-        'test that exercises it and what was observed. Eighteen of the twenty-two pass. These four do ',
-        'not, and the console reports them as they are rather than as they would need to be for the ',
-        'story to be tidy.',
+        'test that exercises it and what was observed. All twenty-two pass now: none is failed and ',
+        'none is blocked. These four used to fail, and each carries the bundle\'s own text recording ',
+        'what closed it rather than what was once absent.',
       ),
       ui.table({
-        columns: ['#', 'What it requires', 'Status', 'What was observed'],
-        rows: four,
+        columns: ['#', 'What it requires', 'Status', 'What closed it'],
+        rows: former,
         dense: true,
       }),
       ui.note(
-        'Two of the four need the same missing piece: a run identity that joins the seed, the build and the configuration at the engine\'s own boundary. One needs the settlement bridge to defer rather than to settle at the last known price. One needs the corporate-action stage to credit the entitlement a held position was owed. None of them is discovery-layer work, which is why the console shows the failure rather than a fix.',
-        'warn',
+        'Two of the four shared one missing piece: a run identity that joins the seed, the build and the configuration at the engine\'s own boundary, and the engine now produces that manifest itself. One needed the settlement bridge to stop settling a deferred intent at the last known price. One needed the corporate-action stage to credit the entitlement a held position was owed. None of them was discovery-layer work, which is why the console reported the failure rather than a fix until the engine closed each.',
+        'ok',
       ),
     ),
   );

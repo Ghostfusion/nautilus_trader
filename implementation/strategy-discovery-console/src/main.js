@@ -147,8 +147,8 @@ function buildFooter() {
       'Its digests are SHA-256, labelled ',
       ui.h('code', { text: 'sha256:' }),
       ', and are not comparable with the engine\'s blake3 identities. It places no order, holds no ',
-      'credential and calls no model. Four of the twenty-two acceptance criteria do not pass, and ',
-      'the console reports them rather than hiding them.',
+      'credential and calls no model. All twenty-two acceptance criteria pass, and the four that ',
+      'used to fail are reported with the bundle\'s own record of what closed each.',
     ),
   );
 }

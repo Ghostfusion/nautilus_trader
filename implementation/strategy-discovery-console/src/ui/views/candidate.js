@@ -13,6 +13,7 @@
  * digest of the bar-ambiguity policy, and the engine version - and are reported as not modelled.
  */
 
+import { FORMER_FAILURES } from '../../data/acceptance.js';
 import { REFUSAL_CODES as REFUSAL_FACTS } from '../../data/candidate.js';
 import { cite, valueOf } from '../../data/source.js';
 import {
@@ -670,11 +671,8 @@ export function mount(root, ctx) {
         ui.quote(layer.idea, layer.tutorial),
         ui.verdict('How well it held up', layer.grade, 'ok', null),
         ui.note(
-          `the layer cites acceptance criteria ${layer.criteria.join(', ')}; four of the twenty-two do not pass overall (${data
-            .failingCriteria()
-            .map((row) => row.id)
-            .join(', ')}), and none of them is criterion 1, 3, 19, 20 or 21.`,
-          'warn',
+          `the layer cites acceptance criteria ${layer.criteria.join(', ')}; all twenty-two of the record's criteria pass, and the four that used to fail (${FORMER_FAILURES.map((failure) => valueOf(failure.id)).join(', ')}) include none of criterion 1, 3, 19, 20 or 21.`,
+          'ok',
         ),
       ),
       ui.block(

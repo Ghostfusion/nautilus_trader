@@ -40,7 +40,7 @@ shares.
 | Connect to anything over the network      | Every number is computed in the page, and nothing is downloaded                                                                    |
 | Call an artificial-intelligence model     | The page about proposing agents replays answers that were recorded earlier, and says so                                            |
 | Produce the repository's own fingerprints | The repository uses a different fingerprint method (see section 9); this app uses its own and labels it clearly                    |
-| Hide the parts that do not work           | Four of the repository's twenty-two acceptance checks do not pass, and every one of them is shown as failing, with what is missing |
+| Hide the parts that do not work           | All twenty-two of the repository's acceptance checks pass, and the four that used to fail are shown with the bundle's own record of what closed each |
 
 If you are looking for a tool that tells you what to trade, this is the wrong app. If you want to see
 how a careful research process protects itself from its own enthusiasm, this is exactly the right one.
@@ -251,26 +251,28 @@ development results the search reads are declared by the campaign rather than co
 ### The acceptance record
 
 All twenty-two acceptance checks the repository keeps, with the status of each, the test or fixture
-that exercises it, and what was observed. Eighteen pass, four do not, none is blocked. The four are
-listed separately with what is missing.
+that exercises it, and what was observed. All twenty-two pass now: none is failed and none is
+blocked. The four that used to fail are listed separately with the bundle's own record of what closed
+each.
 
 ### What this console is
 
-The front page: what is modelled, what is not, the twelve layers with their grades, the four failing
-checks, and how to read a page.
+The front page: what is modelled, what is not, the twelve layers with their grades, the four checks
+that used to fail, and how to read a page.
 
-## 8. The four checks that do not pass
+## 8. The four checks that used to fail
 
-| Check | What it should establish                                              | What is missing                                                                                        |
-| ----- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| 2     | That a run's identity joins the seed, the build and its configuration | The engine's own run record has no binding in the Python side yet                                      |
-| 4     | That an instruction waits for its stamped instant                     | The bridge resolves eligibility and defers nothing, so the engine's latency model carries the contract |
-| 6     | That a corporate action credits what a held position was owed         | The stage adjusts prices and does not credit the entitlement                                           |
-| 10    | That a rerun can be shown identical from the record alone             | The engine's own fingerprint cannot be recomputed from the retained bytes                              |
+| Check | What it should establish                                              | What closed it                                                                                          |
+| ----- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 2     | That a run's identity joins the seed, the build and its configuration | The engine produces the run manifest itself and retains it beside the receipt, and recomputes its digest from retained bytes |
+| 4     | That an instruction waits for its stamped instant                     | The shutdown drain no longer fabricates a fill for a deferred arrival it must leave unexecuted; the bridge path remains as the table names it |
+| 6     | That a corporate action credits what a held position was owed         | The stage settles each action at its own effective instant and credits the entitlement in the position's settlement currency |
+| 10    | That a rerun can be shown identical from the record alone             | The digest recomputes from the bytes the store retains, and each receipt is reconciled against the manifest its registration retained |
 
-Two of the four need the same missing piece, which is why they are usually discussed together. None of
-them is a fault in the layer this app is about; each needs a change at the engine's boundary, and the
-app reports the failure rather than a workaround.
+Two of the four shared one missing piece, which is why they are usually discussed together: the run
+identity that joins the seed, the build and the configuration, and the engine now produces it. None of
+them was a fault in the layer this app is about; each needed a change at the engine's boundary, and
+the bundle records each as closed by one.
 
 Every module the plan's layout names now exists. The command front end is `discovery/cli.py`, and it
 does four of the things these pages describe: it reads a configuration file, it names the campaign and

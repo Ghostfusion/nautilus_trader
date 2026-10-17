@@ -6,7 +6,7 @@
  * sees each entry's digest and the chain value that covers the history before it, verifies the chain
  * against a checkpoint, and then tampers with an entry it already wrote: the chain value stops
  * recomputing at that entry and at every entry after it. The two acceptance criteria this layer
- * cannot pass are shown as failing, with the missing piece named beside them.
+ * carries both pass now, and each is shown with the bundle's own record of what closed it.
  */
 
 import {
@@ -56,7 +56,7 @@ const SEED = [
   ],
 ];
 
-/** What the two limits are called on screen, keyed by the identifier the engine gives each one. */
+/** What the two limits were called on screen, keyed by the identifier the engine gives each one. */
 const LIMIT_LABELS = {
   'receipt-join': 'The receipt join',
   'engine-digest': 'The engine digest',
@@ -353,13 +353,13 @@ export function mount(root, ctx) {
 
     model.appendChild(
       ui.group(
-        'What this layer cannot yet show',
+        'What this layer used to be unable to show, and what closed it',
         ...LIMIT_FACTS.map((limit) => {
           const documented = LIMITS.find((item) => item.id === limit.id);
-          const source = sourceOf(limit.caveat);
+          const source = sourceOf(limit.resolved);
           return ui.stack(
-            ui.metric(LIMIT_LABELS[limit.id] ?? limit.id, 'missing', documented.missing, 'bad'),
-            ui.note(valueOf(limit.caveat)),
+            ui.metric(LIMIT_LABELS[limit.id] ?? limit.id, 'closed', documented.resolved, 'ok'),
+            ui.note(`the page records it: ${valueOf(limit.page)}  [${cite(limit.page)}]`),
             ui.note(`${source.path}:${source.line}`, 'muted'),
           );
         }),
@@ -436,7 +436,12 @@ export function mount(root, ctx) {
             row.status === 'passed' ? null : ui.note(row.observed),
             defect === undefined
               ? null
-              : ui.note(`the bundle's defect: ${valueOf(defect)}  [${cite(defect)}]`, 'bad'),
+              : row.status === 'passed'
+                ? ui.note(
+                    `the bundle records as what closed it: ${valueOf(defect)}  [${cite(defect)}]`,
+                    'ok',
+                  )
+                : ui.note(`the bundle's defect: ${valueOf(defect)}  [${cite(defect)}]`, 'bad'),
           );
         }),
       ),

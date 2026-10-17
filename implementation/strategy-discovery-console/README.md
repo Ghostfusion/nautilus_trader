@@ -8,7 +8,7 @@ tutorials in [the tutorial group](../../tutorials/strategy-discovery/README.md).
 It does not search for strategies and it does not claim that any strategy works. It shows, at every
 layer those documents specify, what the layer accepts, what it refuses, what it counts and what it
 records: the arithmetic the design states, the refusal codes the code raises, the identities the
-ledger keeps, and the four acceptance criteria that do not pass.
+ledger keeps, and the four acceptance criteria that used to fail, with what closed each.
 
 ## Run it
 
@@ -80,15 +80,16 @@ what you type into the page. Two consequences are worth stating plainly.
 
 ## What the console refuses to smooth over
 
-The repository's acceptance bundle has twenty-two entries: eighteen pass, four do not, none is
-blocked. The four are reported in the interface, on the layer they touch and in their own view:
+The repository's acceptance bundle has twenty-two entries: all twenty-two pass, none is failed and
+none is blocked. The four that used to fail are reported in the interface, on the layer they touch
+and in their own view, each with the bundle's own record of what closed it:
 
-| Criterion | What it needs                                           | What is missing                                                        |
-| --------- | ------------------------------------------------------- | ---------------------------------------------------------------------- |
-| 2         | A run identity that joins seed, build and configuration | The engine-side run manifest has no binding in Python                  |
-| 4         | The settlement bridge to defer rather than settle       | The bridge resolves eligibility and defers nothing                     |
-| 6         | Corporate actions to credit an entitlement              | The stage adjusts prices and does not credit what a holder was owed    |
-| 10        | A rerun shown identical from the record alone           | The engine's canonical digest cannot be recomputed from retained bytes |
+| Criterion | What it requires                                                | What closed it                                                                                                       |
+| --------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 2         | A rerun is identical, and what is not deterministic is named     | The digest recomputes from retained bytes and the engine produces the run manifest itself, retained beside the receipt |
+| 4         | A signal cannot fill before its declared eligibility time         | The shutdown drain no longer fabricates a fill; the bridge case the page names is the one it leaves as it stands      |
+| 6         | Corporate-action accounting reconciles in value and in cash      | The stage credits each entitlement at its own effective instant and restates a split's quantity and price basis       |
+| 10        | Every number recomputes                                          | The digest recomputes from what the store retains and each receipt reconciles against the manifest its registration retained |
 
 Every module the plan names in its layout exists. The command-line entry point is `discovery/cli.py`:
 it reports one configuration document as one JSON document, naming the campaign, the resolved policy
@@ -110,8 +111,8 @@ Two independent checks:
   line each value was read from.
 
 Where the console shows a number the design states, the number is asserted in a test. Where the
-design states a limit - a procedural control, an unbuilt module, a criterion that fails - the limit
-is a value in the code that the interface displays, not a comment.
+design states a limit - a procedural control, an unbuilt module, a criterion that used to fail - the
+limit is a value in the code that the interface displays, not a comment.
 
 ## Layout
 

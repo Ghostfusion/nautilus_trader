@@ -278,17 +278,17 @@ export const REFUSAL_CODES = Object.freeze({
 });
 
 /**
- * The two limits this layer carries, as documented values rather than computed ones. `missing` is the
- * input the recomputation names and `caveat` is the tutorial's own paragraph, because the console
- * cannot compute either: the engine's digest is not recomputable from retained bytes, and the
- * manifest a receipt is checked against has no engine-side binding.
+ * The two limits this layer carried, as documented values rather than computed ones. `resolved` is the
+ * module's own sentence and `page` is the tutorial's own paragraph, because the console cannot compute
+ * either: the engine's digest is recomputed from retained bytes, and the manifest a receipt is checked
+ * against is the one the registration retained - and the page now says so too.
  */
 export const LIMITS = Object.freeze(
   LIMIT_FACTS.map((limit) =>
     Object.freeze({
       id: limit.id,
-      missing: valueOf(limit.unavailable),
-      caveat: valueOf(limit.caveat),
+      resolved: valueOf(limit.resolved),
+      page: valueOf(limit.page),
     }),
   ),
 );

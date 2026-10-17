@@ -28,6 +28,18 @@ export const meta = {
 };
 
 /**
+ * The manifest the engine produces for a run and the registration retains beside the receipt, which
+ * `_REQUIRED_FIELDS` demands of every `registration_verified` event.
+ */
+const MANIFEST = (candidateId) => ({
+  run_id: `run-${candidateId}`,
+  build_identity: 'nautilus_trader 1.226.0',
+  configuration_digest: `sha256:config-${candidateId}`,
+  seed: 1,
+  manifest_digest: `sha256:manifest-${candidateId}`,
+});
+
+/**
  * The campaign the tutorial works through, as events. It carries the four compilation events the
  * lineage is folded from, which the tutorial's ten-row table does not list; without them the reading
  * would hold no lineage at all. Everything else is the tutorial's own example.
@@ -68,6 +80,7 @@ const CAMPAIGN = [
       key: 'k1',
       receipt: { build_identity: 'nautilus_trader 1.226.0' },
       receipt_digest: 'sha256:receipt-alpha',
+      manifest: MANIFEST('alpha'),
     },
   ],
   ['trial_admitted', { candidateId: 'alpha', key: 'k1', receipt_digest: 'sha256:receipt-alpha' }],
@@ -86,6 +99,7 @@ const CAMPAIGN = [
       key: 'k3',
       receipt: { build_identity: 'nautilus_trader 1.226.0' },
       receipt_digest: 'sha256:receipt-epsilon',
+      manifest: MANIFEST('epsilon'),
     },
   ],
   [

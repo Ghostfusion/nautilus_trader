@@ -14,6 +14,7 @@
  * artifact was hashed.
  */
 
+import { FORMER_FAILURES } from '../../data/acceptance.js';
 import {
   BOUNDS,
   DECLARED_SETS,
@@ -520,11 +521,8 @@ export function mount(root, ctx) {
         ui.quote(layer.idea, layer.tutorial),
         ui.verdict('How well it held up', layer.grade, 'ok', null),
         ui.note(
-          `Four of the twenty-two acceptance criteria do not pass: ${data
-            .failingCriteria()
-            .map((row) => row.id)
-            .join(', ')}. None of them is about this layer, and this view does not present them as passing.`,
-          'warn',
+          `All twenty-two acceptance criteria pass: the four that used to fail were ${FORMER_FAILURES.map((failure) => valueOf(failure.id)).join(', ')}, none of them about this layer, and this view presents none of them as still failing.`,
+          'ok',
         ),
       ),
       ui.block('The model', model),

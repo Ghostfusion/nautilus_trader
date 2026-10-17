@@ -26,6 +26,8 @@ import {
   replaceMechanism,
   rngFor,
 } from '../../engine/genome.js';
+import { FORMER_FAILURES } from '../../data/acceptance.js';
+import { valueOf } from '../../data/source.js';
 import { shortDigest } from '../../engine/digest.js';
 import {
   complexityLimits,
@@ -67,6 +69,9 @@ export function mount(root, ctx) {
   const catalogue = objectiveRows();
   const exercise = paperExercise();
   const codes = refusalCodes();
+  const formerlyFailed = FORMER_FAILURES.map((failure) => valueOf(failure.id)).filter((id) =>
+    layer.criteria.includes(id),
+  );
 
   const state = {
     seed: 7,
@@ -601,8 +606,7 @@ export function mount(root, ctx) {
                 row.fixture,
               ]),
             dense: true,
-            caption:
-              'Criteria 4, 6 and 10 fall in this layer and do not pass; the console reports them rather than presenting them as passing.',
+            caption: `Criteria ${layer.criteria.join(', ')} fall in this layer and all pass now; ${formerlyFailed.join(', ')} used to fail, and the bundle records each as closed by a change in the engine.`,
           }),
         ),
         ui.sources(layer.sources),

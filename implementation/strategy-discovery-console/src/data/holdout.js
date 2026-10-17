@@ -27,7 +27,7 @@ export const ROLES = [
       admissibleAsValidation: false,
       readBy: fact('The search, the agents, and the gate service', DESIGN, 1154, '| Development        | The search, the agents, and the gate service'),
     },
-    LEDGER, 493, 'DEVELOPMENT = "development"',
+    LEDGER, 494, 'DEVELOPMENT = "development"',
   ),
   fact(
     {
@@ -36,7 +36,7 @@ export const ROLES = [
       admissibleAsValidation: true,
       readBy: fact('The validation service, after the candidate or candidate set is frozen', DESIGN, 1155, '| Locked validation  | The validation service, after the candidate or candidate set is frozen'),
     },
-    LEDGER, 494, 'LOCKED_VALIDATION = "locked_validation"',
+    LEDGER, 495, 'LOCKED_VALIDATION = "locked_validation"',
   ),
   fact(
     {
@@ -45,7 +45,7 @@ export const ROLES = [
       admissibleAsValidation: false,
       readBy: fact('The validator entry point, once per campaign, for one frozen candidate', DESIGN, 1156, '| Final confirmation | The validator entry point, once per campaign, for one frozen candidate'),
     },
-    LEDGER, 495, 'FINAL_CONFIRMATION = "final_confirmation"',
+    LEDGER, 496, 'FINAL_CONFIRMATION = "final_confirmation"',
   ),
 ];
 
@@ -55,7 +55,7 @@ export const ROLE_ORDER = ['development', 'locked_validation', 'final_confirmati
 /** Which role may be read as validation evidence. */
 export const ADMISSIBLE_AS_VALIDATION = fact(
   { development: false, locked_validation: true, final_confirmation: false },
-  LEDGER, 502,
+  LEDGER, 503,
   'return self is DataRole.LOCKED_VALIDATION',
 );
 
